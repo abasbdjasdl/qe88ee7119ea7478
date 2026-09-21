@@ -11,6 +11,8 @@
 #include "KernelPacketMemory.hpp"
 #include "FirmwareBank.hpp"
 #include "FirmwareBoot.hpp"
+#include "PciFirmwareTransport.hpp"
+#include <libkern/OSAtomic.h>
 #include "EmbeddedFirmware.hpp"
 #include "PowerSequence.hpp"
 
@@ -19,6 +21,7 @@ class PciMmioAccess {
     IOPCIDevice *pci;
     IODeviceMemory *memory;
     IOMemoryMap *mapping{};
+    uint16_t uploadOriginalCommand{};bool uploadCommandSaved{};
 public:
     explicit PciMmioAccess(IOPCIDevice *p) : pci(p), memory(p->getDeviceMemoryWithRegister(kIOPCIConfigBaseAddress2)) {}
     uint16_t command() { return pci->configRead16(kIOPCIConfigCommand); }
@@ -78,6 +81,44 @@ public:
         OSWriteLittleInt16(reinterpret_cast<volatile void *>(mapping->getVirtualAddress()),offset,value);
         return true;
     }
+    bool interruptsSafe(){
+        if(!(pci->configRead16(kIOPCIConfigStatus)&0x10))return true;
+        uint8_t at=pci->configRead8(0x34);uint64_t seen=0;
+        for(unsigned n=0;at&&n<48;++n){
+            if(at<0x40||at>0xfc||(at&3)||(seen&(uint64_t(1)<<(at/4))))return false;
+            seen|=uint64_t(1)<<(at/4);const auto id=pci->configRead8(at);
+            if(id==5&&(pci->configRead16(at+2)&1))return false;
+            if(id==0x11&&(pci->configRead16(at+2)&0x8000))return false;
+            at=pci->configRead8(at+1);
+        }return !at;
+    }
+    bool uploadBusMaster(bool enable){
+        const auto current=command();if(current==0xffff||!(current&2))return false;
+        if(enable){
+            if((current&6)!=2||!interruptsSafe())return false;
+            uploadOriginalCommand=current;uploadCommandSaved=true;
+            writeCommand(current|0x404);
+            return command()==static_cast<uint16_t>(current|0x404);
+        }
+        // Keep INTx masked until WCPU and supply are stopped by the outer owner.
+        const auto wanted=static_cast<uint16_t>(current&~4u);
+        writeCommand(wanted);return command()==wanted;
+    }
+    bool restoreUploadCommandAfterPowerOff(){
+        if(!uploadCommandSaved)return true;
+        const auto current=command();if(current==0xffff||(current&6)!=2)return false;
+        const auto wanted=static_cast<uint16_t>((current&~0x400u)|(uploadOriginalCommand&0x400));
+        writeCommand(wanted);return command()==wanted;
+    }
+    void uploadBarrier(){__atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();}
+    bool uploadWrite32(uint32_t offset,uint32_t value){
+        if(!mapping||!rtl8852be::transport::uploadAddress32(offset)||!(command()&2))return false;
+        OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping->getVirtualAddress()),offset,value);OSSynchronizeIO();return true;
+    }
+    bool uploadWrite16(uint32_t offset,uint16_t value){
+        if(!mapping||!rtl8852be::transport::uploadAddress16(offset)||!(command()&2))return false;
+        OSWriteLittleInt16(reinterpret_cast<volatile void *>(mapping->getVirtualAddress()),offset,value);OSSynchronizeIO();return true;
+    }
     void unmap() { if (mapping) { mapping->release(); mapping = nullptr; } }
     ~PciMmioAccess() { unmap(); }
 };
@@ -115,6 +156,9 @@ bool RTL8852BEProbe::start(IOService *provider) {
     rtl8852be::power::Result supply;
     rtl8852be::boot::Result rom;
     rtl8852be::boot::RepeatedResult repeated;
+    rtl8852be::transport::TransferResult transfer;
+    rtl8852be::transport::PciDownloadResult pciTransfer;
+    bool uploadAttempted=false,releaseProven=false,interruptRestored=true;
     rtl8852be::transport::Packets packets;
     rtl8852be::transport::BankResult bank;
     const auto packetStatus=packets.initialize(rtl8852be::image::bytes,rtl8852be::image::length,1);
@@ -129,19 +173,30 @@ bool RTL8852BEProbe::start(IOService *provider) {
             r=rtl8852be::sampleMmio(access,s,[&](PciMmioAccess &d,const rtl8852be::MmioResult &base){
                 x=rtl8852be::sampleXtal(d,base);
                 supply=rtl8852be::power::cycle(d,base,x,[&](PciMmioAccess &active){
-                    repeated=rtl8852be::boot::probeRepeated(active);rom=repeated.first;
+                    repeated.first=rtl8852be::boot::probe(active);
+                    if(repeated.first.status==rtl8852be::boot::Status::ready&&repeated.first.cleanupOK){
+                        repeated.secondAttempted=true;
+                        repeated.second=rtl8852be::boot::probeWithAction(active,[&](PciMmioAccess &ready){
+                            uploadAttempted=true;buffers.markHardwareAttempt();
+                            auto release=[](void *owner){auto *memory=static_cast<KernelPacketMemory *>(owner);return memory->confirmStopped(true)&&memory->releaseUnsubmitted();};
+                            rtl8852be::transport::PciDownload<PciMmioAccess> backend(ready,buffers.mapping(0),packets.count(),true,release,&buffers);
+                            transfer=rtl8852be::transport::transfer(backend,packets);pciTransfer=backend.result;
+                        });
+                    }
+                    rom=repeated.first;
                 });
+                if(uploadAttempted)interruptRestored=supply.returnedOff&&d.restoreUploadCommandAfterPowerOff();
             });
         }
-        // No bank address is published to the device in this experiment.
+        if(uploadAttempted)releaseProven=buffers.confirmStopped(transfer.quiesced||supply.returnedOff);
         bankCleanup=buffers.releaseUnsubmitted();bankCleanupError=buffers.lastError();
     }
     const auto memoryCount = pci->getDeviceMemoryCount();
     pci->close(this);
     bool ok = setProperty("DiagnosticOnly", true);
     ok &= setProperty("WiFiOperational", false);
-    ok &= setProperty("DriverVersion", "0.0.11");
-    ok &= setProperty("Experiment", "FIRMWARE-BANK-ROM-04");
+    ok &= setProperty("DriverVersion", "0.0.12");
+    ok &= setProperty("Experiment", "FIRMWARE-UPLOAD-01");
     ok &= setProperty("Stage", rtl8852be::statusName(r.status));
     ok &= setProperty("VendorID", s.vendorID, 16);
     ok &= setProperty("DeviceID", s.deviceID, 16);
@@ -194,7 +249,7 @@ bool RTL8852BEProbe::start(IOService *provider) {
         ok &= setProperty("FirmwareControl", x.firmware, 32);
     }
     if (x.powerAfterSampled) ok &= setProperty("SysPowerAfter", x.powerAfter, 32);
-    ok &= setProperty("FirmwareUploaded", false);
+    ok &= setProperty("FirmwareUploaded",transfer.operationStatus==rtl8852be::transport::TransferStatus::complete);
     ok &= setProperty("PacketPlanStatus",static_cast<unsigned>(packetStatus),32);
     ok &= setProperty("BankStatus",rtl8852be::transport::bankStatusName(bank.status));
     ok &= setProperty("BankPackets",bank.packets,32);
@@ -208,7 +263,8 @@ bool RTL8852BEProbe::start(IOService *provider) {
     ok &= setProperty("BankOSReturn",static_cast<uint64_t>(bankError),64);
     ok &= setProperty("BankCleanupReturn",static_cast<uint64_t>(bankCleanupError),64);
     ok &= setProperty("BankCleanupOK",bankCleanup);
-    ok &= setProperty("DmaSubmittedToHardware",false);
+    ok &= setProperty("DmaSubmittedToHardware",pciTransfer.published>0);
+    ok &= setProperty("DmaDoorbellAttempted",pciTransfer.doorbellAttempted);
     ok &= setProperty("RomStatus",rtl8852be::boot::statusName(rom.status));
     ok &= setProperty("RomOperationStatus",rtl8852be::boot::statusName(rom.operationStatus));
     ok &= setProperty("RomPhase",rom.phase,32);
@@ -257,6 +313,31 @@ bool RTL8852BEProbe::start(IOService *provider) {
     ok &= setProperty("RomRepeatFailureMask",static_cast<uint64_t>(repeated.second.failureMask),64);
     ok &= setProperty("RomRepeatFailureExpected",static_cast<uint64_t>(repeated.second.failureExpected),64);
     ok &= setProperty("RomRepeatFailureActual",static_cast<uint64_t>(repeated.second.failureActual),64);
+    ok &= setProperty("UploadAttempted",uploadAttempted);
+    ok &= setProperty("UploadStatus",static_cast<unsigned>(transfer.status),32);
+    ok &= setProperty("UploadOperationStatus",static_cast<unsigned>(transfer.operationStatus),32);
+    ok &= setProperty("UploadFailedPhase",static_cast<unsigned>(transfer.failedPhase),32);
+    ok &= setProperty("UploadSubmitted",transfer.submitted,32);
+    ok &= setProperty("UploadPolls",transfer.polls,32);
+    ok &= setProperty("UploadLastControl",transfer.lastControl,32);
+    ok &= setProperty("UploadLastIndex",transfer.lastIndex,32);
+    ok &= setProperty("UploadQuiesced",transfer.quiesced);
+    ok &= setProperty("UploadReleaseProven",releaseProven);
+    ok &= setProperty("UploadInterruptRestored",interruptRestored);
+    ok &= setProperty("UploadPciStage",pciTransfer.stage,32);
+    ok &= setProperty("UploadPciGate",pciTransfer.gate,32);
+    ok &= setProperty("UploadPciBusy",static_cast<uint64_t>(pciTransfer.busy),64);
+    ok &= setProperty("UploadPciIndex",static_cast<uint64_t>(pciTransfer.index),64);
+    ok &= setProperty("UploadPciInit",static_cast<uint64_t>(pciTransfer.init),64);
+    ok &= setProperty("UploadPciStop",static_cast<uint64_t>(pciTransfer.stop),64);
+    ok &= setProperty("UploadPciHci",static_cast<uint64_t>(pciTransfer.hci),64);
+    ok &= setProperty("UploadPciWrites",pciTransfer.writes,32);
+    ok &= setProperty("UploadPciIdle",pciTransfer.idle);
+    ok &= setProperty("UploadPciMasterOff",pciTransfer.busMasterOff);
+    ok &= setProperty("UploadPciRestored",pciTransfer.restored);
+    ok &= setProperty("UploadPciFailureAddress",pciTransfer.failureAddress,32);
+    ok &= setProperty("UploadPciFailureExpected",static_cast<uint64_t>(pciTransfer.failureExpected),64);
+    ok &= setProperty("UploadPciFailureActual",static_cast<uint64_t>(pciTransfer.failureActual),64);
     ok &= setProperty("RomCleanupClock",static_cast<uint64_t>(rom.cleanupClock),64);
     ok &= setProperty("RomCleanupDmac",static_cast<uint64_t>(rom.cleanupDmac),64);
     ok &= setProperty("RomFailureRecorded",rom.failureRecorded);
@@ -278,7 +359,7 @@ bool RTL8852BEProbe::start(IOService *provider) {
         ok &= setProperty(key, s.bars[i], 32);
     }
     if (!ok) { IOService::stop(provider); return false; }
-    IOLog("RTL8852BEProbe 0.0.11: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
+    IOLog("RTL8852BEProbe 0.0.12: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
           rtl8852be::statusName(r.status), r.reads, r.cfgFirst, r.cfgSecond,
           r.commandBefore, r.commandDuring, r.commandAfter);
     IOLog("RTL8852BEProbe XTAL: %s writes=%u polls=%u raw=%02x power=%08x/%08x\n",

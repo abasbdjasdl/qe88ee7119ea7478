@@ -28,7 +28,7 @@ struct Result {Status status{Status::notRun},operationStatus{Status::notRun};uns
     bool accessAttempted{},accessReady{},hciCaptured{};
     uint32_t failureAddress{},failureMask{},failureExpected{},failureActual{};
     bool failureRecorded{},attempted{},cleanupOK{},cpuStopped{};};
-template<class D> Result probe(D &d){
+template<class D,class Action> Result probeWithAction(D &d,Action action){
     Result r;if((d.command()&6)!=2){r.status=Status::unsafeCommand;return r;}
     uint32_t hci=0,stop=0;const auto sec=d.read32(0xc00);
     const auto reason=d.read16(0x1e6);
@@ -97,6 +97,7 @@ template<class D> Result probe(D &d){
         if(!matches(0x8400,r.dmac,0xffffffff,0x64c40000)||!matches(0x8404,r.clock,0xffffffff,0x04840000)){r.status=Status::invalidRead;break;}
         r.status=Status::ready;
     }while(false);
+    if(r.status==Status::ready)action(d);
     r.operationStatus=r.status;
     // Every cleanup operation executes, even after an earlier one failed.
     bool ok=true;
@@ -146,6 +147,8 @@ template<class D> Result probe(D &d){
     r.cleanupOK=r.cleanupFailures==0;
     r.status=r.cleanupOK?r.operationStatus:Status::cleanupFailed;return r;
 }
+struct NoAction {template<class D> void operator()(D &)const{}};
+template<class D> Result probe(D &d){return probeWithAction(d,NoAction{});}
 struct RepeatedResult {Result first{},second{};bool secondAttempted{};};
 template<class D> RepeatedResult probeRepeated(D &d){
     RepeatedResult r;r.first=probe(d);

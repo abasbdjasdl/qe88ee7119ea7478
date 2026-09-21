@@ -10,7 +10,7 @@
 class KernelPacketMemory {
     struct Slot {IOBufferMemoryDescriptor *memory;IODMACommand *dma;bool prepared;uint64_t address,length,offset;unsigned segments;};
     Slot *slots{};unsigned count{};IOPCIDevice *pci;IOMapper *mapper{};IOReturn error{kIOReturnSuccess};
-    bool released{},cleanupOK{};
+    bool released{},cleanupOK{},hardwareAttempted{},stoppedProven{};
 public:
     KernelPacketMemory(IOPCIDevice *p,unsigned n):pci(p){
         if(n<2||n>256){error=kIOReturnBadArgument;return;}
@@ -46,12 +46,14 @@ public:
         if(!slots||i>=count||!slots[i].dma){error=kIOReturnNotReady;return false;}
         error=slots[i].dma->synchronize(kIODirectionOut);return error==kIOReturnSuccess;
     }
+    void markHardwareAttempt(){hardwareAttempted=true;}
+    bool confirmStopped(bool idleOrPowerOff){stoppedProven=idleOrPowerOff&&!(command()&4);return stoppedProven;}
     // This stage never publishes addresses/enables DMA. Future DMA users must
     // additionally prove idle and keep this object alive until that proof.
     bool releaseUnsubmitted(){
         if(released)return cleanupOK;
         released=true;cleanupOK=false;
-        if(command()&4){error=kIOReturnBusy;return false;}
+        if((command()&4)||(hardwareAttempted&&!stoppedProven)){error=kIOReturnBusy;return false;}
         bool ok=true;
         if(slots)for(unsigned n=count;n>0;--n){auto &s=slots[n-1];bool slotOK=true;
             if(s.dma&&s.dma->getMemoryDescriptor()){

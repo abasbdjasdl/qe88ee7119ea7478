@@ -96,6 +96,11 @@ int main(){
     d=Device{};d.regs[0x1000]=0xffffffff;r=b::probe(d);assert(r.status==b::Status::invalidRead&&r.cleanupOK&&!r.hciCaptured&&!d.gatedHciWrites);
     d=Device{};d.regs[0x8400]=0xffffffff;r=b::probe(d);assert(r.status==b::Status::invalidRead&&!r.attempted&&!d.writes);
     assert(!b::allowed32(0x1080)&&!b::allowed32(0xc000)&&!b::allowed32(0x30)&&!b::allowed32(0x38));
+    unsigned callbacks=0;d=Device{};
+    r=b::probeWithAction(d,[&](Device &ready){assert(ready.regs[0x1e0]&2);++callbacks;});
+    assert(callbacks==1&&r.status==b::Status::ready&&r.cleanupOK);
+    d=Device{};d.noH2c=true;r=b::probeWithAction(d,[&](Device &){++callbacks;});
+    assert(callbacks==1&&r.cleanupOK);
     d=Device{};auto twice=b::probeRepeated(d);
     assert(twice.secondAttempted&&twice.first.status==b::Status::ready&&twice.second.status==b::Status::ready);
     assert(twice.second.initialDmac==0&&twice.second.cleanupOK&&d.writes==2*writes&&!d.gatedHciWrites);

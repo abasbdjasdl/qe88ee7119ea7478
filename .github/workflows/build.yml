@@ -63,6 +63,8 @@ jobs:
           ./build/firmware_bank_test firmware/rtw8852b_fw-1.bin | tee -a build/host-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/firmware_boot_test.cpp -o build/firmware_boot_test
           ./build/firmware_boot_test | tee -a build/host-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/pci_firmware_transport_test.cpp -o build/pci_firmware_transport_test
+          ./build/pci_firmware_transport_test firmware/rtw8852b_fw-1.bin | tee -a build/host-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tools/firmware_inspect.cpp -o build/firmware_inspect
           ./build/firmware_inspect firmware/rtw8852b_fw-1.bin 1 > build/firmware-layout-cut1.json
           ./build/firmware_inspect firmware/rtw8852b_fw-1.bin 2 > build/firmware-layout-cut2.json

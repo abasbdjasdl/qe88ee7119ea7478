@@ -33,9 +33,12 @@ if [ "$done_ok" != true ]; then
   exit 1
 fi
 sudo grep -q '^COMPLETE$' /private/tmp/r16-autolog-v2---test-success/reboot-requested-test.txt
-sudo /bin/sh -c 'grep -q "^COMPLETE " /Volumes/R16Capture-*/r16-autolog/logs-*/status.txt'
-sudo /bin/sh -c 'test -s /Volumes/R16Capture-*/r16-autolog/logs-*/disk-list-final.txt'
-sudo /bin/sh -c 'test -s /Volumes/R16Capture-*/r16-autolog/logs-*/loaded-kexts.txt'
+test "$(mount | grep -c "^$device on " || true)" = 0
+diskutil mount "$device"
+sudo /bin/sh -c 'grep -q "^COMPLETE " /Volumes/R16TEST/r16-autolog/logs-*/status.txt'
+sudo /bin/sh -c 'test -s /Volumes/R16TEST/r16-autolog/logs-*/disk-list-final.txt'
+sudo /bin/sh -c 'test -s /Volumes/R16TEST/r16-autolog/logs-*/loaded-kexts.txt'
+test "$(find /Volumes/R16TEST/r16-autolog -type d -name 'logs-*' | wc -l | tr -d ' ')" = 1
 hdiutil detach "$device"
 sudo /bin/sh /usr/local/libexec/r16-autolog.sh --test-error || test "$?" = 7
 sudo grep -q '^ERROR$' /private/tmp/r16-autolog-v2---test-error/reboot-requested-test.txt

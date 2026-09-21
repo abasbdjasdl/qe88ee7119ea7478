@@ -15,6 +15,7 @@ exec > "$ram/collector.log" 2>&1
 echo "$token"
 date
 out=
+owned=
 outcome=ERROR
 parent=$$
 deadline=360
@@ -33,6 +34,10 @@ finish() {
     fi
     echo "R16 diagnostics: $outcome; restarting." > /dev/console 2>/dev/null
     sync
+    if [ -n "$owned" ]; then
+        /sbin/umount "$owned" > "$ram/unmount.txt" 2>&1
+        sync
+    fi
     if [ "$mode" = production ]; then
         sleep 10
         /sbin/reboot
@@ -51,6 +56,8 @@ trap 'exit 143' HUP INT TERM
     kill -TERM "$parent" 2>/dev/null
     # If a blocked command prevents the shell trap, still try to reboot.
     sleep 15
+    sync
+    [ ! -f "$ram/owned-point" ] || /sbin/umount "$(cat "$ram/owned-point")"
     [ "$mode" != production ] || /sbin/reboot
 ) &
 deadline_pid=$!
@@ -75,6 +82,11 @@ run() {
 
 target=
 find_target() {
+    [ -z "$out" ] || return 0
+    # Refuse ambiguous duplicate FAT mounts, rather than allocating through
+    # independent caches for the same device.
+    duplicates=$(mount | grep '(msdos' | awk '{print $1}' | sort | uniq -d)
+    [ -z "$duplicates" ] || return 1
     for marker in /Volumes/*/r16-autolog/capture-target.txt /Volumes/*/EFI/OC/r16-autolog/capture-target.txt; do
         [ -f "$marker" ] || continue
         [ "$(cat "$marker")" = "$token" ] || continue
@@ -104,11 +116,13 @@ while [ "$attempt" -lt 6 ]; do
             D228C57E-717B-4433-945D-BE8BE9852C75|56966F71-F263-4C6F-BCA7-912ED89ECDCA) ;;
             *) [ "$mode" = --test-success ] && [ -n "$test_uuid" ] && [ "$uuid" = "$test_uuid" ] || continue ;;
         esac
-        [ "$mode" = --test-success ] || run 10 "mount-$dev.txt" diskutil mount "$dev"
-        find_target && break
+        # diskutil can leave a daemon-side mount pending after its client times
+        # out. Never combine it with a second direct mount of the same device.
+        if mount | grep -q "^/dev/$dev on "; then find_target && break; continue; fi
         point=/Volumes/R16Capture-$dev
         mkdir -p "$point" || continue
         run 10 "fat-$dev.txt" /sbin/mount -t msdos "/dev/$dev" "$point"
+        if mount | grep -q "^/dev/$dev on $point "; then owned=$point; echo "$point" > "$ram/owned-point"; fi
         find_target && break
     done < "$ram/candidates.txt"
     find_target && break

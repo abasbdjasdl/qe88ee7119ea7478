@@ -3,7 +3,12 @@
 This is an experimental diagnostic service, not a working Wi-Fi driver.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Current candidate: 0.0.11 (establish MAC access before HCI writes)
+## Current candidate: 0.0.12 (bounded real firmware upload)
+
+0.0.11 passed two physical ROM and cleanup cycles. 0.0.12 adds a CH12-only PCI
+backend for the real immutable firmware batch: queue setup, header acceptance,
+full upload, firmware-ready/drain checks and verified DMA shutdown in one boot.
+Physical upload results are pending. See [pci-firmware-upload.md](docs/pci-firmware-upload.md).
 
 The stopped command-ring experiment passed on hardware in 0.0.7. Version 0.0.11
 prepares the complete real firmware batch in 165 native IOKit pages, initializes
@@ -41,8 +46,9 @@ RF and Wi-Fi remain unimplemented. See [firmware-bank-rom.md](docs/firmware-bank
   change was not reached. Initial MAC function state was not captured.
 - 0.0.11: establishes/verifies minimal MAC access before HCI snapshot/stop and
   restores HCI before disabling that access. A successful, cleaned-up first pass
-  is followed by one confirmation pass; failure is never retried. Hardware pending.
-- Not implemented: firmware upload, RF initialization, DMA queues, TX/RX, scan,
+  is followed by one confirmation pass; both passed on physical hardware.
+- 0.0.12: native upload backend implemented and under test; no hardware success claim.
+- Not implemented: RF initialization, network DMA queues, network TX/RX, scan,
   association, WPA authentication, or an IO80211 network interface.
 
 The CI workflow builds with the pinned MacKernelSDK and Apple toolchain, tests
