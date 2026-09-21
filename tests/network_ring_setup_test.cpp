@@ -7,7 +7,7 @@ namespace n=rtl8852be::network;
 struct Device {
     std::map<uint32_t,uint32_t> registers;
     uint16_t pciCommand=2;unsigned writes{},failAt{},barrierViolation{},clockReads{};uint64_t clock{};
-    bool stuckReset{},backwards{},freezeClock{};
+    bool stuckReset{},backwards{},freezeClock{},ignoreResetClear{};
     Device(){registers[0x1000]=0xd700;registers[0x1010]=0x1f0f00;registers[0x8380]=3;}
     uint16_t command(){return pciCommand;}
     uint32_t read32(uint32_t a){return registers[a];}
@@ -15,6 +15,7 @@ struct Device {
     bool write32(uint32_t a,uint32_t value){
         if((pciCommand&6)!=2||(registers[0x1000]&0x2800)||(registers[0x1010]&0x1f0f00)!=0x1f0f00)++barrierViolation;
         if(++writes==failAt)return false;
+        if(a==0x1000&&ignoreResetClear&&(registers[a]&8)&&!(value&8))return true;
         registers[a]=value;
         if(a==0x1000&&(value&8)&&!stuckReset)registers[a]&=~8u;
         return true;
@@ -64,5 +65,7 @@ int main(){
     }
     Device live;live.registers[0x1110]=0x12340000;n::PciRingSetup<Device> occupied(live);
     assert(!occupied.configure(memories)&&!live.writes);
+    Device ignored;ignored.stuckReset=true;ignored.ignoreResetClear=true;n::PciRingSetup<Device> stuck(ignored);
+    assert(!stuck.configure(memories)&&!stuck.restore()&&!stuck.result.restored);
     puts("PASS: 9 stopped 8852BE PCI rings, all 37 setup-write failures, rollback failure, DMA/IRQ gates, bounded reset timeout and frozen clock");
 }

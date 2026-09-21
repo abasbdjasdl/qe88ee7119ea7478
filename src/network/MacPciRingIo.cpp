@@ -30,7 +30,7 @@ bool MacPciRingIo::write16(uint32_t offset,uint16_t value){
     bool allowed=false;for(const auto &r:ringRegisters)if(offset==r.count)allowed=true;
     if(!allowed)return false;
     OSWriteLittleInt16(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),offset,value);
-    OSMemoryBarrier();return true;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
 }
 bool MacPciRingIo::write32(uint32_t offset,uint32_t value){
     if(!range(offset,4)||(command()&6)!=2)return false;
@@ -40,7 +40,7 @@ bool MacPciRingIo::write32(uint32_t offset,uint32_t value){
     for(const auto &r:ringRegisters)if(offset==r.low||offset==r.high||(r.bdram&&offset==r.bdram))allowed=true;
     if(!allowed)return false;
     OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),offset,value);
-    OSMemoryBarrier();return true;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
 }
 uint64_t MacPciRingIo::nowUs(){uint64_t ticks=0,ns=0;clock_get_uptime(&ticks);absolutetime_to_nanoseconds(ticks,&ns);return ns/1000;}
 void MacPciRingIo::pauseUs(unsigned microseconds){if(microseconds<=1000)IODelay(microseconds);}

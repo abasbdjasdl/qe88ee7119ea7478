@@ -95,16 +95,16 @@ public:
         }
         // Only the seven implemented TX channels and the two RX channels.
         if(!write32(0x1014,0x70f)||!write32(0x1018,3)||!write32(0x1000,init_|8))return false;
-        const uint64_t begin=device_.nowUs();bool reset=false;
+        const uint64_t begin=device_.nowUs();uint64_t previous=begin;bool reset=false;
         for(unsigned i=0;i<201;++i){
-            const auto now=device_.nowUs();if(now<begin||now-begin>=10000)break;
+            const auto now=device_.nowUs();if(now<previous||now-begin>=10000)break;previous=now;
             const auto value=device_.read32(0x1000);++result.polls;
             if(value==0xffffffff||value==0xdeadbeef)return mismatch(0x1000,init_,value);
             if(!(value&8)){reset=true;break;}device_.pauseUs(50);
         }
         if(!reset)return mismatch(0x1000,init_,device_.read32(0x1000));
         for(const auto &r:ringRegisters)if(!equal32(r.index,0))return false;
-        if(!safe())return false;result.programmed=true;return true;
+        if(!equal32(0x1000,init_)||!safe())return false;result.programmed=true;return true;
     }
     bool restore(){
         if(!snapshot_)return false;if(!safe())return false;
@@ -120,7 +120,7 @@ public:
             ok=equal32(r.high,s.high)&&equal32(r.low,s.low)&&equal16(r.count,s.count)&&ok;
             if(r.bdram)ok=equal32(r.bdram,s.bdram)&&ok;
         }
-        result.restored=ok&&safe();return result.restored;
+        result.restored=equal32(0x1000,init_)&&ok&&safe();return result.restored;
     }
 };
 } }
