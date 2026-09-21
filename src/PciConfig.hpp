@@ -8,7 +8,7 @@ constexpr uint16_t vendor = 0x10ec;
 constexpr uint16_t device = 0xb852;
 constexpr size_t configSize = 256;
 inline uint16_t read16(const uint8_t *p) {
-    return uint16_t(p[0]) | (uint16_t(p[1]) << 8);
+    return static_cast<uint16_t>(uint16_t(p[0]) | (uint16_t(p[1]) << 8));
 }
 inline uint32_t read32(const uint8_t *p) {
     return uint32_t(read16(p)) | (uint32_t(read16(p + 2)) << 16);

@@ -53,8 +53,8 @@ the installed diagnostic kext. Host tests do not establish hardware compatibilit
 5. EFUSE/MAC address, RF calibration, scan/association, security and integration
    with the macOS network stack still follow successful firmware startup.
 
-The immediate next hardware-facing component is a bounded XTAL read helper and
-power-state preflight, with explicit timeouts and no analog write commands.
+Version 0.0.4 implements a bounded XTAL read helper and power-state preflight,
+with explicit timeouts and no analog write commands. Its hardware test is pending.
 Power-on, DMA and firmware upload must remain disabled until their respective
 failure/cleanup paths exist. Group useful observations in a single future boot;
 do not request a reboot to recheck an already validated offline parser.

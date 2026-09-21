@@ -3,27 +3,27 @@
 This is an experimental diagnostic service, not a working Wi-Fi driver.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Current version: 0.0.3
+## Current version: 0.0.4 (hardware test pending)
 
-The device is opened, its PCI configuration is captured, and a bounded BAR2
-read experiment is attempted only when the capability chain is valid, PMCSR
-reports D0, bus mastering is disabled, and the assigned 1 MiB memory aperture
-matches the PCI BAR. The mapping is uncached and read-only. The driver temporarily
-sets only the PCI command memory-enable bit if needed, reads SYS_CFG1 twice and
-SYS_STATUS1 once, releases the mapping, restores the changed bit, and reports the
-before/during/after command values in IORegistry. It never writes MMIO, changes
-device power state, enables DMA, installs interrupts, or loads firmware.
+The PCI/resource/D0/no-bus-master gates and three SYS_CFG1/SYS_STATUS1 reads from
+0.0.3 remain. Inside that same transaction, the new preflight captures system
+isolation, power, clock and firmware-control registers. Only a stable digital
+cut 1, valid system power-ready state with the analog crystal not off, and an
+idle XTAL interface permit one indirect READ command for analog revision 0x41.
+The exact MMIO write is 0x81000041 to BAR2 offset 0x270; the adapter exposes no
+arbitrary write API. The mapping is now uncached read/write for this command.
 
-Zero, all-ones, 0xDEADBEEF, or inconsistent SYS_CFG1 results are not accepted as a
-stable register value. A stable sample yields a candidate chip-cut field, not
-proof that firmware or wireless operation works. Every skip and failure has a
-separate diagnostic status. PCI reads themselves cannot guarantee freedom from
-hardware or kernel faults; host tests cannot establish real MMIO compatibility.
+Polling has a 50 ms monotonic deadline and a 1001-read cap. Invalid register
+values, a busy interface or power not ready cause a diagnostic exit. There is
+no retry, analog-register write, power-on/reset, DMA, interrupt setup or firmware
+upload. The transaction unmaps BAR2 and restores the PCI memory-enable bit after
+every normal return, including timeout. It does not replay the old XTAL command.
+A kernel fault or stalled bus access cannot be recovered by this software timer.
 
-The 0.0.2 timer/NVRAM code has been removed. No firmware variable logging remains.
-The separate recovery-autolog collector has successfully saved a 0.0.1 report
-on the physical machine through a direct FAT mount and automatically returned to
-Windows. Keep that collector and runtime NVRAM write protection for this test.
+IORegistry contains XtalStatus, polls/writes/elapsed time, analog revision validity,
+raw power/control samples and PCI before/during/after values. The recovery collector
+already captures that whole service automatically and reboots after collection.
+The driver itself does not trigger a reboot or change NVRAM.
 
 ## Evidence and remaining work
 
@@ -32,6 +32,7 @@ Windows. Keep that collector and runtime NVRAM write protection for this test.
 - 0.0.3: Apple build, ASan/UBSan tests and physical register reads passed on
   macOS 15.4.1. SYS_CFG1 was 0x0C491D39 twice, SYS_STATUS1 was 0x1401F278;
   PCI Command was 0 -> 2 -> 0, and automatic collection/reboot completed.
+- 0.0.4: bounded XTAL/power preflight implemented; physical validation pending.
 - Not implemented: firmware upload, RF initialization, DMA queues, TX/RX, scan,
   association, WPA authentication, or an IO80211 network interface.
 

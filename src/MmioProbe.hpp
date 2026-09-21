@@ -36,10 +36,10 @@ struct MmioResult {
                cfgFirst != 0xffffffff && cfgFirst != 0xdeadbeef;
     }
 };
-// Device supplies config access and a read-only uncached BAR2 mapping.
-// No MMIO writes, DMA, power transitions, interrupts, polling or delays.
-template<class Device>
-MmioResult sampleMmio(Device &d, const Snapshot &s) {
+// The extension runs inside the validated transaction. Cleanup remains owned
+// here so every extension outcome restores the memory-enable bit.
+template<class Device, class Extension>
+MmioResult sampleMmio(Device &d, const Snapshot &s, Extension extension) {
     MmioResult r;
     if (!s.isTarget() || s.subsystemVendor != 0x1a3b || s.subsystemDevice != 0x5470) return r;
     r.status = MmioStatus::unsafeConfig;
@@ -71,6 +71,7 @@ MmioResult sampleMmio(Device &d, const Snapshot &s) {
         r.sysStatus = d.read32(sysStatus1); ++r.reads;
         r.cfgSecond = d.read32(sysCfg1); ++r.reads;
         r.status = MmioStatus::sampled;
+        extension(d, r);
     }
     d.unmap();
     if (r.memoryBitChanged) {
@@ -84,5 +85,12 @@ MmioResult sampleMmio(Device &d, const Snapshot &s) {
     r.commandRestored = r.commandAfter == r.commandBefore;
     if (!r.commandRestored) r.status = MmioStatus::restoreFailed;
     return r;
+}
+struct NoMmioExtension {
+    template<class Device> void operator()(Device &, const MmioResult &) const {}
+};
+template<class Device>
+MmioResult sampleMmio(Device &d, const Snapshot &s) {
+    return sampleMmio(d,s,NoMmioExtension{});
 }
 }
