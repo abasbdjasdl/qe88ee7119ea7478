@@ -56,5 +56,14 @@ int main(){
     b=Backend{};b.corrupt=true;r=probe(b);assert(r.status==Status::verifyFailed);clean(b);
     b=Backend{};b.cmd=4;r=probe(b);assert(r.status==Status::skipped&&b.closed.empty()&&!r.allocations);
     assert(validMapping({0xfffff000,4096,4096,1}));
+    b=Backend{};unsigned callbacks=0;
+    r=probe(b,[&](Backend &live,const Result &ready){
+        ++callbacks;assert(live.ready[0]&&live.ready[1]&&live.closed.empty());
+        assert(ready.status==Status::validated&&ready.cpuVerified&&ready.synchronized==2);
+    });
+    assert(callbacks==1&&r.cleanupOk);clean(b);
+    b=Backend{};b.failSync=1;
+    r=probe(b,[&](Backend &,const Result &){++callbacks;});
+    assert(callbacks==1);clean(b);
     puts("PASS: DMA address boundaries, BD bytes, partial allocation/prepare, synchronization and cleanup failures");
 }

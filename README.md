@@ -3,21 +3,18 @@
 This is an experimental diagnostic service, not a working Wi-Fi driver.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Current version: 0.0.6 (DMA memory hardware test pending)
+## Current version: 0.0.7 (stopped command-ring hardware test pending)
 
-The PCI/MMIO/XTAL checks remain, but the already validated supply cycle is not
-repeated. After BAR unmapping and PCI command restoration, this version allocates
-two page-aligned 4096-byte kernel buffers, requests 32-bit I/O virtual mappings
-through IODMACommand, encodes one unsubmitted 8-byte TXBD, synchronizes outbound
-memory and checks its CPU contents. Both mappings and buffers are then released.
-A device mapper is used when available, otherwise the documented system mapper
-fallback is used. Each buffer must have one contiguous 32-bit I/O segment; zero,
-overlapping, misaligned, partial or out-of-range mappings are rejected.
+DMA memory preparation passed on the physical R16 with 0.0.6. Version 0.0.7
+keeps these buffers alive while the tested supply-on/off wrapper configures and
+reads back the stopped firmware-command ring. PCI bus mastering stays disabled;
+no index/doorbell or transfer is triggered. Queue configuration is restored before
+supply-off and buffer release, including failure paths.
 
-No address is written into the hardware, PCI bus mastering stays disabled, and
-no queue or transfer is started. The buffer contains a synthetic test pattern,
-not firmware or a valid WLAN command. This experiment tests memory preparation
-and cleanup, not hardware DMA or Wi-Fi. See [dma-memory.md](docs/dma-memory.md).
+This is a bounded hardware register experiment, not firmware upload or working
+Wi-Fi. See [ring-config.md](docs/ring-config.md) for registers, gates, failure
+handling and remaining dependencies, and [dma-memory.md](docs/dma-memory.md) for
+the preceding memory-only test.
 
 ## Evidence and remaining work
 
@@ -30,7 +27,9 @@ and cleanup, not hardware DMA or Wi-Fi. See [dma-memory.md](docs/dma-memory.md).
   two polls in 75 us, power register unchanged, PCI Command restored to 0.
 - 0.0.5: physical supply cycle passed, MAC state 0 -> 1 -> 0; on/off errors 0,
   cleanup and PCI command restoration confirmed.
-- 0.0.6: DMA memory preparation implemented; physical mapping validation pending.
+- 0.0.6: physical DMA memory preparation passed: two single-segment 4096-byte
+  mappings, CPU verification and cleanup OK, OS return 0; no transfer submitted.
+- 0.0.7: stopped FWCMD ring readback/restoration implemented; hardware test pending.
 - Not implemented: firmware upload, RF initialization, DMA queues, TX/RX, scan,
   association, WPA authentication, or an IO80211 network interface.
 
@@ -57,7 +56,7 @@ retains its separate Realtek license. Test data corruption uses synthetic data.
 `tools/firmware_inspect.cpp` produces a JSON layout without writing to hardware.
 CI runs ASan/UBSan tests, a bounded libFuzzer campaign, both real cut-1/cut-2
 images, and a compile-only check under the kernel SDK. This module is not linked
-into the live 0.0.3 driver. See `docs/firmware-bringup.md` for remaining dependencies.
+into the diagnostic driver. See `docs/firmware-bringup.md` for remaining dependencies.
 
 Project source uses BSD-3-Clause. The firmware binary is **not** BSD-licensed;
 see `firmware/LICENCE.rtlwifi_firmware.txt` and `firmware/provenance.json`.

@@ -8,7 +8,7 @@ in https://github.com/lwfinger/rtw89 . References below are to that revision.
 On the R16, PCI 10ec:b852 / 1a3b:5470, the 0.0.3 diagnostic read
 SYS_CFG1=0x0C491D39 and SYS_STATUS1=0x1401F278. The digital cut field is 1.
 `core.c:rtw89_read_chip_ver` separately reads XTAL_SI_CV for the analog revision;
-that operation is not implemented or tested here. PMCSR reported PCI D0, which
+that operation passed on the physical card in 0.0.4 (raw revision 0x11). PMCSR reported PCI D0, which
 does not establish that the wireless MAC, firmware CPU or analog blocks are on.
 
 ## Implemented offline component
@@ -53,11 +53,12 @@ the installed diagnostic kext. Host tests do not establish hardware compatibilit
 5. EFUSE/MAC address, RF calibration, scan/association, security and integration
    with the macOS network stack still follow successful firmware startup.
 
-Version 0.0.4 implements a bounded XTAL read helper and power-state preflight,
-with explicit timeouts and no analog write commands. Its hardware test is pending.
-Power-on, DMA and firmware upload must remain disabled until their respective
-failure/cleanup paths exist. Group useful observations in a single future boot;
-do not request a reboot to recheck an already validated offline parser.
+Versions 0.0.4, 0.0.5 and 0.0.6 have now passed physical XTAL read,
+supply-on/off, and DMA memory preparation tests respectively. Version 0.0.7
+adds a stopped command-ring configuration/readback experiment with restoration;
+see `ring-config.md`. It still never enables PCI bus mastering or uploads firmware.
+Group useful observations in one boot; do not request a reboot to recheck an
+already validated offline parser.
 
 ## Source and distribution
 

@@ -126,8 +126,8 @@ struct Result {
     uint32_t initialState{}, activeState{}, finalState{}, initialPower{}, finalPower{};
     bool attempted{}, cleanupAttempted{}, returnedOff{}, activeObserved{};
 };
-template<class Device>
-Result cycle(Device &d,const MmioResult &mmio,const XtalResult &xtalResult) {
+template<class Device,class Extension>
+Result cycle(Device &d,const MmioResult &mmio,const XtalResult &xtalResult,Extension extension) {
     Result r;
     if(!mmio.stableValue() || ((mmio.cfgFirst>>12)&15)!=1 ||
        xtalResult.status!=XtalStatus::complete || !xtalResult.revisionValid ||
@@ -146,6 +146,7 @@ Result cycle(Device &d,const MmioResult &mmio,const XtalResult &xtalResult) {
         r.activeState=d.read32(stateRegister);
         r.activeObserved=!invalidRegister(r.activeState)&&((r.activeState>>8)&3)==1;
     }
+    if(r.activeObserved)extension(d);
     // Any possible partial power-on is followed by the reference shutdown path.
     r.cleanupAttempted=true;r.off=run(d,off);
     // The isolation sequence temporarily opens a write mask; always close our
@@ -162,5 +163,10 @@ Result cycle(Device &d,const MmioResult &mmio,const XtalResult &xtalResult) {
     else if(!r.activeObserved)r.status=Status::activeNotObserved;
     else r.status=Status::completed;
     return r;
+}
+struct NoExtension {template<class Device> void operator()(Device &) const {}};
+template<class Device>
+Result cycle(Device &d,const MmioResult &mmio,const XtalResult &x) {
+    return cycle(d,mmio,x,NoExtension{});
 }
 } }

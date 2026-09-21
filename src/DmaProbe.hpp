@@ -46,8 +46,8 @@ struct Result {
     uint32_t osError{};
     bool cleanupOk{},cpuVerified{},busMasterBefore{},busMasterAfter{};
 };
-template<class Backend>
-Result probe(Backend &b) {
+template<class Backend, class Extension>
+Result probe(Backend &b, Extension extension) {
     Result r;r.busMasterBefore=(b.command()&4)!=0;
     if(r.busMasterBefore){r.status=Status::skipped;return r;}
     // Always close both slots, including one partially initialized by a failed
@@ -87,6 +87,7 @@ Result probe(Backend &b) {
         }
         r.status=r.cpuVerified?Status::validated:Status::verifyFailed;
     } while(false);
+    if(r.status==Status::validated)extension(b,static_cast<const Result &>(r));
     r.osError=b.lastError();r.operationStatus=r.status;
     // Reverse acquisition order. Both close calls execute even if one fails.
     const bool packetClosed=b.close(1),ringClosed=b.close(0);
@@ -96,4 +97,8 @@ Result probe(Backend &b) {
     if(r.busMasterAfter)r.status=Status::busMasterChanged;
     return r;
 }
+struct NoExtension {
+    template<class Backend> void operator()(Backend &,const Result &) const {}
+};
+template<class Backend> Result probe(Backend &b){return probe(b,NoExtension{});}
 } }

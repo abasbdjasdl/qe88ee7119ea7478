@@ -9,6 +9,8 @@
 #include "MmioProbe.hpp"
 #include "XtalProbe.hpp"
 #include "KernelDma.hpp"
+#include "PowerSequence.hpp"
+#include "RingProbe.hpp"
 
 class PciMmioAccess {
     IOPCIDevice *pci;
@@ -46,6 +48,33 @@ public:
         return ns/1000;
     }
     void pause50Us() { IODelay(50); }
+    void pauseUs(unsigned us) { if(us<=1000) IODelay(us); }
+    uint8_t read8(uint32_t offset) {
+        return *reinterpret_cast<const volatile uint8_t *>(mapping->getVirtualAddress()+offset);
+    }
+    uint16_t read16(uint32_t offset) {
+        return OSReadLittleInt16(reinterpret_cast<const volatile void *>(mapping->getVirtualAddress()),offset);
+    }
+    bool powerWrite32(uint32_t offset,uint32_t value) {
+        if(!mapping || !rtl8852be::power::allowed32(offset) || (command()&6)!=2)return false;
+        OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping->getVirtualAddress()),offset,value);
+        return true;
+    }
+    bool powerWrite8(uint32_t offset,uint8_t value) {
+        if(!mapping || !rtl8852be::power::allowed8(offset) || (command()&6)!=2)return false;
+        *reinterpret_cast<volatile uint8_t *>(mapping->getVirtualAddress()+offset)=value;
+        return true;
+    }
+    bool ringWrite32(uint32_t offset,uint32_t value) {
+        if(!mapping || !rtl8852be::ring::allowed32(offset) || (command()&6)!=2)return false;
+        OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping->getVirtualAddress()),offset,value);
+        return true;
+    }
+    bool ringWrite16(uint32_t offset,uint16_t value) {
+        if(!mapping || !rtl8852be::ring::allowed16(offset) || (command()&6)!=2)return false;
+        OSWriteLittleInt16(reinterpret_cast<volatile void *>(mapping->getVirtualAddress()),offset,value);
+        return true;
+    }
     void unmap() { if (mapping) { mapping->release(); mapping = nullptr; } }
     ~PciMmioAccess() { unmap(); }
 };
@@ -79,23 +108,31 @@ bool RTL8852BEProbe::start(IOService *provider) {
     PciMmioAccess access(pci);
     rtl8852be::XtalResult x;
 
-    const auto r = rtl8852be::sampleMmio(access, s,
-        [&x](PciMmioAccess &d, const rtl8852be::MmioResult &base) {
-            x=rtl8852be::sampleXtal(d,base);
-        });
+    rtl8852be::MmioResult r;
+    rtl8852be::power::Result supply;
+    rtl8852be::ring::Result queue;
     rtl8852be::dma::Result dmaResult;
     bool deviceMapper=false;
-    if(r.status==rtl8852be::MmioStatus::sampled && r.stableValue() && r.commandRestored) {
+    {
         KernelDma buffers(pci);
         deviceMapper=buffers.deviceMapper();
-        dmaResult=rtl8852be::dma::probe(buffers);
+        dmaResult=rtl8852be::dma::probe(buffers,[&](KernelDma &,const rtl8852be::dma::Result &prepared){
+            // Buffers remain owned until ring restoration, supply shutdown and
+            // MMIO unmapping have all returned. PCI bus mastering stays off.
+            r=rtl8852be::sampleMmio(access,s,[&](PciMmioAccess &d,const rtl8852be::MmioResult &base){
+                x=rtl8852be::sampleXtal(d,base);
+                supply=rtl8852be::power::cycle(d,base,x,[&](PciMmioAccess &active){
+                    queue=rtl8852be::ring::probe(active,prepared.ring);
+                });
+            });
+        });
     }
     const auto memoryCount = pci->getDeviceMemoryCount();
     pci->close(this);
     bool ok = setProperty("DiagnosticOnly", true);
     ok &= setProperty("WiFiOperational", false);
-    ok &= setProperty("DriverVersion", "0.0.6");
-    ok &= setProperty("Experiment", "DMA-MEMORY-01");
+    ok &= setProperty("DriverVersion", "0.0.7");
+    ok &= setProperty("Experiment", "FWCMD-RING-CONFIG-01");
     ok &= setProperty("Stage", rtl8852be::statusName(r.status));
     ok &= setProperty("VendorID", s.vendorID, 16);
     ok &= setProperty("DeviceID", s.deviceID, 16);
@@ -168,18 +205,49 @@ bool RTL8852BEProbe::start(IOService *provider) {
     ok &= setProperty("DmaPacketLength", dmaResult.packet.length,64);
     ok &= setProperty("DmaPacketSegments", dmaResult.packet.segments,32);
     ok &= setProperty("DmaSubmittedToHardware", false);
+    ok &= setProperty("SupplyStatus",rtl8852be::power::statusName(supply.status));
+    ok &= setProperty("SupplyOnError",static_cast<unsigned>(supply.on.error),32);
+    ok &= setProperty("SupplyOffError",static_cast<unsigned>(supply.off.error),32);
+    ok &= setProperty("SupplyReturnedOff",supply.returnedOff);
+    ok &= setProperty("SupplyActiveObserved",supply.activeObserved);
+    ok &= setProperty("SupplyCleanupAttempted",supply.cleanupAttempted);
+    ok &= setProperty("SupplyInitialState",supply.initialState,32);
+    ok &= setProperty("SupplyActiveState",supply.activeState,32);
+    ok &= setProperty("SupplyFinalState",supply.finalState,32);
+    ok &= setProperty("RingStatus",rtl8852be::ring::statusName(queue.status));
+    ok &= setProperty("RingOperationStatus",rtl8852be::ring::statusName(queue.operationStatus));
+    ok &= setProperty("RingAttempted",queue.attempted);
+    ok &= setProperty("RingReadbackOK",queue.readbackOK);
+    ok &= setProperty("RingRestored",queue.restored);
+    ok &= setProperty("RingWriteAttempts",queue.writeAttempts,32);
+    ok &= setProperty("RingRestoreAttempts",queue.restoreAttempts,32);
+    ok &= setProperty("RingBusMasterAfter",queue.busMasterAfter);
+    ok &= setProperty("RingDoorbellWritten",false);
+    const rtl8852be::ring::Snapshot snapshots[]={queue.before,queue.configured,queue.after};
+    const char *phases[]={"Before","Configured","After"};
+    for(unsigned i=0;i<3;++i){
+        const auto &snap=snapshots[i];
+        const uint32_t values[]={snap.init,snap.stop,snap.busy,snap.index,snap.low,snap.high,snap.ram,snap.num};
+        const char *names[]={"Init","Stop","Busy","Index","Low","High","Ram","Count"};
+        for(unsigned j=0;j<8;++j){
+            char key[48];snprintf(key,sizeof(key),"Ring%s%s",phases[i],names[j]);
+            ok &= setProperty(key,static_cast<uint64_t>(values[j]),64);
+        }
+    }
     for (unsigned i = 0; i < 6; ++i) {
         char key[16]; snprintf(key, sizeof(key), "BAR%uRaw", i);
         ok &= setProperty(key, s.bars[i], 32);
     }
     if (!ok) { IOService::stop(provider); return false; }
-    IOLog("RTL8852BEProbe 0.0.6: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
+    IOLog("RTL8852BEProbe 0.0.7: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
           rtl8852be::statusName(r.status), r.reads, r.cfgFirst, r.cfgSecond,
           r.commandBefore, r.commandDuring, r.commandAfter);
     IOLog("RTL8852BEProbe XTAL: %s writes=%u polls=%u raw=%02x power=%08x/%08x\n",
           rtl8852be::xtalStatusName(x.status),x.writes,x.polls,x.rawRevision,x.powerBefore,x.powerAfter);
     IOLog("RTL8852BEProbe DMA memory: %s allocations=%u prepared=%u cleanup=%d; nothing submitted\n",
           rtl8852be::dma::statusName(dmaResult.status),dmaResult.allocations,dmaResult.prepared,dmaResult.cleanupOk);
+    IOLog("RTL8852BEProbe ring: %s restored=%d supply=%s; no doorbell or DMA\n",
+          rtl8852be::ring::statusName(queue.status),queue.restored,rtl8852be::power::statusName(supply.status));
     registerService();
     return true;
 }

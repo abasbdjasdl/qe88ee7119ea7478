@@ -101,5 +101,16 @@ int main(){
     d=Device{};d.cmd=0x402;r=cycle(d);assert(r.returnedOff&&d.cmd==0x402);
     // No low-level writes to unlisted address widths.
     assert(!p::allowed32(0x88)&&!p::allowed8(0x4)&&!p::allowed32(0x8400));
+    unsigned callbacks=0;
+    for(bool fail:{false,true}){
+        d=Device{};d.noOnAck=fail;
+        const auto m=sampleMmio(d,target(),[&](Device &dev,const MmioResult &base){
+            r=p::cycle(dev,base,preflight(),[&](Device &active){
+                ++callbacks;assert(active.regs[p::stateRegister]==0x100&&active.mapped&&active.cmd==2);
+            });
+        });
+        assert(m.commandRestored&&r.cleanupAttempted&&r.returnedOff);
+        assert(callbacks==1); // failed power-on must not call the active stage
+    }
     printf("PASS: supply on/off, %u injected write failures, timeout/deadline, no DMA and PCI restoration\n",writes);
 }
