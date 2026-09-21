@@ -83,6 +83,26 @@ explicit IOKit model; they are not a claim of running timer tests inside macOS.
 
 ## Remaining real integration
 
+`MacDmaBuffer` now provides native wired allocation, per-device IOMMU mapping,
+32-bit single-segment validation, directional synchronization and staged cleanup.
+Allocation/prepare is rejected inside the supplied workloop gate. A possibly
+device-visible buffer cannot be ordinarily freed; confirmed hardware shutdown is
+required. Failed unmapping keeps the allocation for cleanup retry. The destructor
+retains resources and logs if shutdown/unmapping was not confirmed, avoiding DMA
+use-after-free. That is an error containment measure, not a substitute for a
+controller stop implementation. `DataMapping.physical` is an IOVM bus address.
+
+`RxDmaQueue<MacDmaBuffer>` allocates a 64-entry RX ring and 64 buffers, writes the
+original 8-byte RTL8852B RX BDs, processes a bounded batch using the hardware
+producer index, synchronizes each received/recycled buffer and returns a host
+consumer to publish. RXQ and RPQ require separate instances. The callback is
+synchronous and cannot retain a DMA pointer. Malformed sizes are dropped; any
+sync failure latches a fault until DMA has stopped, preventing callback replay.
+Native adapters compile against the pinned kernel SDK. Tests compile the actual
+DMA implementation against an explicit IOKit model and inject allocation,
+prepare, mapping, sync and cleanup errors; RX tests cover all 65 allocation
+failures and 100,000 wrap/recycle operations. These are not live DMA tests.
+
 The radio port now contains the pinned RTL8852B BB, RF A/B, NCTL and gain tables,
 original packed eFuse layout, bounded DDV/DAV decoder, board/PHY calibration
 parsing, AX RF v1 direct/SWSI access, RF firmware pages, NCTL handshake and
@@ -126,7 +146,7 @@ physical OTP in macOS. The DAV/XTAL bank read path is still missing.
    DAV eFuse reads, applying gain state to channel registers, full BB reset/TX power
    and RFK remain.
 2. Connect the new RXQ/RPQ/data/management/firmware queue components to native
-   allocation, cache synchronization, hardware start/stop, interrupts and recovery.
+   allocation and cache synchronization adapters, hardware start/stop, interrupts and recovery.
    The one-shot diagnostic CH12 bank remains separate from this runtime path.
 3. Adapt rtw89 firmware commands, event dispatch, channel/power/regulatory data,
    station/address CAM and association transitions to the net80211 callbacks.

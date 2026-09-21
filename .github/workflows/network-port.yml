@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', '.github/workflows/network-port.yml']
+    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', '.github/workflows/network-port.yml']
 permissions:
   contents: read
 jobs:
@@ -38,6 +38,10 @@ jobs:
           ./build/network_radio_test | tee build/network-stack/radio-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_efuse_reader_test.cpp -o build/network_efuse_reader_test
           ./build/network_efuse_reader_test | tee build/network-stack/efuse-reader-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_dma_fakes tests/network_dma_test.cpp -o build/network_dma_test
+          ./build/network_dma_test | tee build/network-stack/dma-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_rx_dma_test.cpp -o build/network_rx_dma_test
+          ./build/network_rx_dma_test | tee build/network-stack/rx-dma-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_descriptors_test.cpp -o build/network_descriptors_test
           ./build/network_descriptors_test | tee build/network-stack/descriptor-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_pci_test.cpp -o build/network_pci_test

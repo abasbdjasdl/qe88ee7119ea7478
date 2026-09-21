@@ -5,10 +5,10 @@
 #include "PciRxAssembly.hpp"
 #include "FirmwareProtocol.hpp"
 #include "FirmwareDmaQueue.hpp"
+#include "DmaMapping.hpp"
 namespace rtl8852be { namespace network {
 // These mappings must be wired, contiguous, prepared for DMA and retained by
 // the controller until DMA stop is proven. No physical addresses are invented.
-struct DataMapping {uint8_t *bytes{};uint64_t physical{};size_t capacity{};};
 struct TxPageMapping {DataMapping descriptor{},frame{};};
 struct TxCounters {uint64_t completed{},acked{},retryLimit{},expired{},dropped{},polluted{},rejectedReports{};};
 class Net80211PciQueue {
