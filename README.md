@@ -3,18 +3,14 @@
 This is an experimental diagnostic service, not a working Wi-Fi driver.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Installed diagnostic: 0.0.7 (physical stopped command-ring test passed)
+## Current candidate: 0.0.8 (native firmware bank and ROM test pending)
 
-DMA memory preparation passed on the physical R16 with 0.0.6. Version 0.0.7
-keeps these buffers alive while the tested supply-on/off wrapper configures and
-reads back the stopped firmware-command ring. PCI bus mastering stays disabled;
-no index/doorbell or transfer is triggered. Queue configuration is restored before
-supply-off and buffer release, including failure paths.
-
-This is a bounded hardware register experiment, not firmware upload or working
-Wi-Fi. See [ring-config.md](docs/ring-config.md) for registers, gates, failure
-handling and remaining dependencies, and [dma-memory.md](docs/dma-memory.md) for
-the preceding memory-only test.
+The stopped command-ring experiment passed on hardware in 0.0.7. Version 0.0.8
+prepares the complete real firmware batch in 165 native IOKit pages, initializes
+the DLFW DMAC/DLE/HFC blocks, resets the firmware CPU and polls the ROM H2C-ready
+bit. It then stops the CPU/internal blocks, powers down and releases the bank.
+No address is submitted and PCI bus mastering stays disabled; firmware upload,
+RF and Wi-Fi remain unimplemented. See [firmware-bank-rom.md](docs/firmware-bank-rom.md).
 
 ## Evidence and remaining work
 
@@ -33,6 +29,7 @@ the preceding memory-only test.
   six setup/six restore writes, supply-off and memory cleanup. No DMA submitted.
 - Offline additions: 8852B firmware packet encoder and bounded transfer protocol
   with simulated-backend fault tests; no live transport backend yet.
+- 0.0.8: native firmware bank and ROM preparation implemented; hardware test pending.
 - Not implemented: firmware upload, RF initialization, DMA queues, TX/RX, scan,
   association, WPA authentication, or an IO80211 network interface.
 
@@ -45,7 +42,7 @@ References:
 - https://github.com/lwfinger/rtw89/tree/d1fced1b8a741dc9f92b47c69489c24385945f6e
   (pci.c BAR2 mapping; reg.h offsets 0xF0/0xF4; core.c chip-cut extraction)
 
-## Firmware preparation (offline; not installed)
+## Firmware preparation
 
 `src/FirmwarePlan.hpp` selects a normal CE/normal image for the exact chip-cut
 field, validates the multi-image container and v0 sections, and enumerates bounded
@@ -58,8 +55,7 @@ The unchanged fixture in `firmware/` is pinned by source commit and SHA-256 and
 retains its separate Realtek license. Test data corruption uses synthetic data.
 `tools/firmware_inspect.cpp` produces a JSON layout without writing to hardware.
 CI runs ASan/UBSan tests, a bounded libFuzzer campaign, both real cut-1/cut-2
-images, and a compile-only check under the kernel SDK. This module is not linked
-into the diagnostic driver. See `docs/firmware-bringup.md` for remaining dependencies.
+images, and a compile-only check under the kernel SDK. The packet parser/encoder is linked into 0.0.8 for in-memory preparation only. See `docs/firmware-bringup.md` for remaining dependencies.
 
 Project source uses BSD-3-Clause. The firmware binary is **not** BSD-licensed;
 see `firmware/LICENCE.rtlwifi_firmware.txt` and `firmware/provenance.json`.
@@ -73,6 +69,6 @@ and section packets. `FirmwareTransfer.hpp` implements bounded handshake,
 publish/drain and ownership/cleanup orchestration against a backend contract.
 The pinned firmware produces a 164-packet batch for each supported cut. Buffers
 remain owned until DMA quiescence is proven; a consumer index alone never frees
-one. These additions are tested offline and kernel-compiled, not linked into the
-installed kext. See [firmware-transport.md](docs/firmware-transport.md). There is no
+one. The packet encoder is used by the 0.0.8 candidate; the transfer protocol
+remains offline without an active DMA backend. See [firmware-transport.md](docs/firmware-transport.md). There is no
 working firmware upload, scan, connection or packet TX/RX implementation yet.

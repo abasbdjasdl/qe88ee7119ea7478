@@ -8,9 +8,12 @@
 #include "PciConfig.hpp"
 #include "MmioProbe.hpp"
 #include "XtalProbe.hpp"
-#include "KernelDma.hpp"
+#include "KernelPacketMemory.hpp"
+#include "FirmwareBank.hpp"
+#include "FirmwareBoot.hpp"
+#include "EmbeddedFirmware.hpp"
 #include "PowerSequence.hpp"
-#include "RingProbe.hpp"
+
 
 class PciMmioAccess {
     IOPCIDevice *pci;
@@ -65,13 +68,13 @@ public:
         *reinterpret_cast<volatile uint8_t *>(mapping->getVirtualAddress()+offset)=value;
         return true;
     }
-    bool ringWrite32(uint32_t offset,uint32_t value) {
-        if(!mapping || !rtl8852be::ring::allowed32(offset) || (command()&6)!=2)return false;
+    bool bootWrite32(uint32_t offset,uint32_t value) {
+        if(!mapping || !rtl8852be::boot::allowed32(offset) || (command()&6)!=2)return false;
         OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping->getVirtualAddress()),offset,value);
         return true;
     }
-    bool ringWrite16(uint32_t offset,uint16_t value) {
-        if(!mapping || !rtl8852be::ring::allowed16(offset) || (command()&6)!=2)return false;
+    bool bootWrite16(uint32_t offset,uint16_t value) {
+        if(!mapping || offset!=0x1e6 || (command()&6)!=2)return false;
         OSWriteLittleInt16(reinterpret_cast<volatile void *>(mapping->getVirtualAddress()),offset,value);
         return true;
     }
@@ -110,29 +113,34 @@ bool RTL8852BEProbe::start(IOService *provider) {
 
     rtl8852be::MmioResult r;
     rtl8852be::power::Result supply;
-    rtl8852be::ring::Result queue;
-    rtl8852be::dma::Result dmaResult;
-    bool deviceMapper=false;
-    {
-        KernelDma buffers(pci);
+    rtl8852be::boot::Result rom;
+    rtl8852be::transport::Packets packets;
+    rtl8852be::transport::BankResult bank;
+    const auto packetStatus=packets.initialize(rtl8852be::image::bytes,rtl8852be::image::length,1);
+    bool deviceMapper=false,bankCleanup=false;
+    uint32_t bankError=0,bankCleanupError=0;
+    if(packetStatus==rtl8852be::transport::PacketStatus::ok){
+        KernelPacketMemory buffers(pci,packets.count()+1);
         deviceMapper=buffers.deviceMapper();
-        dmaResult=rtl8852be::dma::probe(buffers,[&](KernelDma &,const rtl8852be::dma::Result &prepared){
-            // Buffers remain owned until ring restoration, supply shutdown and
-            // MMIO unmapping have all returned. PCI bus mastering stays off.
+        bank=rtl8852be::transport::prepareBank(buffers,packets);
+        bankError=buffers.lastError();
+        if(bank.status==rtl8852be::transport::BankStatus::ready){
             r=rtl8852be::sampleMmio(access,s,[&](PciMmioAccess &d,const rtl8852be::MmioResult &base){
                 x=rtl8852be::sampleXtal(d,base);
                 supply=rtl8852be::power::cycle(d,base,x,[&](PciMmioAccess &active){
-                    queue=rtl8852be::ring::probe(active,prepared.ring);
+                    rom=rtl8852be::boot::probe(active);
                 });
             });
-        });
+        }
+        // No bank address is published to the device in this experiment.
+        bankCleanup=buffers.releaseUnsubmitted();bankCleanupError=buffers.lastError();
     }
     const auto memoryCount = pci->getDeviceMemoryCount();
     pci->close(this);
     bool ok = setProperty("DiagnosticOnly", true);
     ok &= setProperty("WiFiOperational", false);
-    ok &= setProperty("DriverVersion", "0.0.7");
-    ok &= setProperty("Experiment", "FWCMD-RING-CONFIG-01");
+    ok &= setProperty("DriverVersion", "0.0.8");
+    ok &= setProperty("Experiment", "FIRMWARE-BANK-ROM-01");
     ok &= setProperty("Stage", rtl8852be::statusName(r.status));
     ok &= setProperty("VendorID", s.vendorID, 16);
     ok &= setProperty("DeviceID", s.deviceID, 16);
@@ -186,25 +194,37 @@ bool RTL8852BEProbe::start(IOService *provider) {
     }
     if (x.powerAfterSampled) ok &= setProperty("SysPowerAfter", x.powerAfter, 32);
     ok &= setProperty("FirmwareUploaded", false);
-    ok &= setProperty("DmaStatus", rtl8852be::dma::statusName(dmaResult.status));
-    ok &= setProperty("DmaOperationStatus", rtl8852be::dma::statusName(dmaResult.operationStatus));
-    ok &= setProperty("DmaDeviceMapper", deviceMapper);
-    ok &= setProperty("DmaAllocations", dmaResult.allocations,32);
-    ok &= setProperty("DmaPrepared", dmaResult.prepared,32);
-    ok &= setProperty("DmaSynchronized", dmaResult.synchronized,32);
-    ok &= setProperty("DmaFailedBuffer", dmaResult.failedBuffer,32);
-    ok &= setProperty("DmaOSReturn", static_cast<uint64_t>(dmaResult.osError),64);
-    ok &= setProperty("DmaCleanupOK", dmaResult.cleanupOk);
-    ok &= setProperty("DmaCPUVerified", dmaResult.cpuVerified);
-    ok &= setProperty("DmaBusMasterBefore", dmaResult.busMasterBefore);
-    ok &= setProperty("DmaBusMasterAfter", dmaResult.busMasterAfter);
-    ok &= setProperty("DmaRingAddress", dmaResult.ring.address,64);
-    ok &= setProperty("DmaRingLength", dmaResult.ring.length,64);
-    ok &= setProperty("DmaRingSegments", dmaResult.ring.segments,32);
-    ok &= setProperty("DmaPacketAddress", dmaResult.packet.address,64);
-    ok &= setProperty("DmaPacketLength", dmaResult.packet.length,64);
-    ok &= setProperty("DmaPacketSegments", dmaResult.packet.segments,32);
-    ok &= setProperty("DmaSubmittedToHardware", false);
+    ok &= setProperty("PacketPlanStatus",static_cast<unsigned>(packetStatus),32);
+    ok &= setProperty("BankStatus",rtl8852be::transport::bankStatusName(bank.status));
+    ok &= setProperty("BankPackets",bank.packets,32);
+    ok &= setProperty("BankAllocated",bank.allocated,32);
+    ok &= setProperty("BankPrepared",bank.prepared,32);
+    ok &= setProperty("BankSynchronized",bank.synced,32);
+    ok &= setProperty("BankFailedSlot",bank.failedSlot,32);
+    ok &= setProperty("BankRingAddress",bank.ringAddress,64);
+    ok &= setProperty("BankPayloadBytes",bank.payloadBytes,64);
+    ok &= setProperty("BankDeviceMapper",deviceMapper);
+    ok &= setProperty("BankOSReturn",static_cast<uint64_t>(bankError),64);
+    ok &= setProperty("BankCleanupReturn",static_cast<uint64_t>(bankCleanupError),64);
+    ok &= setProperty("BankCleanupOK",bankCleanup);
+    ok &= setProperty("DmaSubmittedToHardware",false);
+    ok &= setProperty("RomStatus",rtl8852be::boot::statusName(rom.status));
+    ok &= setProperty("RomOperationStatus",rtl8852be::boot::statusName(rom.operationStatus));
+    ok &= setProperty("RomPhase",rom.phase,32);
+    ok &= setProperty("RomWrites",rom.writes,32);
+    ok &= setProperty("RomPolls",rom.polls,32);
+    ok &= setProperty("RomWdeStatus",rom.wde,32);
+    ok &= setProperty("RomPleStatus",rom.ple,32);
+    ok &= setProperty("RomControl",rom.control,32);
+    ok &= setProperty("RomDmac",rom.dmac,32);
+    ok &= setProperty("RomClock",rom.clock,32);
+    ok &= setProperty("RomWdeConfig",static_cast<uint64_t>(rom.wdeConfig),64);
+    ok &= setProperty("RomPleConfig",static_cast<uint64_t>(rom.pleConfig),64);
+    ok &= setProperty("RomHfcControl",static_cast<uint64_t>(rom.hfcControl),64);
+    ok &= setProperty("RomHfcPages",rom.hfcPages,32);
+    ok &= setProperty("RomAttempted",rom.attempted);
+    ok &= setProperty("RomCleanupOK",rom.cleanupOK);
+    ok &= setProperty("RomCPUStopped",rom.cpuStopped);
     ok &= setProperty("SupplyStatus",rtl8852be::power::statusName(supply.status));
     ok &= setProperty("SupplyOnError",static_cast<unsigned>(supply.on.error),32);
     ok &= setProperty("SupplyOffError",static_cast<unsigned>(supply.off.error),32);
@@ -214,40 +234,20 @@ bool RTL8852BEProbe::start(IOService *provider) {
     ok &= setProperty("SupplyInitialState",supply.initialState,32);
     ok &= setProperty("SupplyActiveState",supply.activeState,32);
     ok &= setProperty("SupplyFinalState",supply.finalState,32);
-    ok &= setProperty("RingStatus",rtl8852be::ring::statusName(queue.status));
-    ok &= setProperty("RingOperationStatus",rtl8852be::ring::statusName(queue.operationStatus));
-    ok &= setProperty("RingAttempted",queue.attempted);
-    ok &= setProperty("RingReadbackOK",queue.readbackOK);
-    ok &= setProperty("RingRestored",queue.restored);
-    ok &= setProperty("RingWriteAttempts",queue.writeAttempts,32);
-    ok &= setProperty("RingRestoreAttempts",queue.restoreAttempts,32);
-    ok &= setProperty("RingBusMasterAfter",queue.busMasterAfter);
-    ok &= setProperty("RingDoorbellWritten",false);
-    const rtl8852be::ring::Snapshot snapshots[]={queue.before,queue.configured,queue.after};
-    const char *phases[]={"Before","Configured","After"};
-    for(unsigned i=0;i<3;++i){
-        const auto &snap=snapshots[i];
-        const uint32_t values[]={snap.init,snap.stop,snap.busy,snap.index,snap.low,snap.high,snap.ram,snap.num};
-        const char *names[]={"Init","Stop","Busy","Index","Low","High","Ram","Count"};
-        for(unsigned j=0;j<8;++j){
-            char key[48];snprintf(key,sizeof(key),"Ring%s%s",phases[i],names[j]);
-            ok &= setProperty(key,static_cast<uint64_t>(values[j]),64);
-        }
-    }
     for (unsigned i = 0; i < 6; ++i) {
         char key[16]; snprintf(key, sizeof(key), "BAR%uRaw", i);
         ok &= setProperty(key, s.bars[i], 32);
     }
     if (!ok) { IOService::stop(provider); return false; }
-    IOLog("RTL8852BEProbe 0.0.7: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
+    IOLog("RTL8852BEProbe 0.0.8: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
           rtl8852be::statusName(r.status), r.reads, r.cfgFirst, r.cfgSecond,
           r.commandBefore, r.commandDuring, r.commandAfter);
     IOLog("RTL8852BEProbe XTAL: %s writes=%u polls=%u raw=%02x power=%08x/%08x\n",
           rtl8852be::xtalStatusName(x.status),x.writes,x.polls,x.rawRevision,x.powerBefore,x.powerAfter);
-    IOLog("RTL8852BEProbe DMA memory: %s allocations=%u prepared=%u cleanup=%d; nothing submitted\n",
-          rtl8852be::dma::statusName(dmaResult.status),dmaResult.allocations,dmaResult.prepared,dmaResult.cleanupOk);
-    IOLog("RTL8852BEProbe ring: %s restored=%d supply=%s; no doorbell or DMA\n",
-          rtl8852be::ring::statusName(queue.status),queue.restored,rtl8852be::power::statusName(supply.status));
+    IOLog("RTL8852BEProbe firmware bank: %s packets=%u pages=%u cleanup=%d; no DMA submitted\n",
+          rtl8852be::transport::bankStatusName(bank.status),bank.packets,bank.prepared,bankCleanup);
+    IOLog("RTL8852BEProbe ROM: %s phase=%u control=%08x cleanup=%d supply=%s\n",
+          rtl8852be::boot::statusName(rom.status),rom.phase,rom.control,rom.cleanupOK,rtl8852be::power::statusName(supply.status));
     registerService();
     return true;
 }

@@ -10,7 +10,7 @@ bundle = pathlib.Path(sys.argv[1])
 info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
 assert info['CFBundlePackageType'] == 'KEXT'
 assert info['CFBundleIdentifier'] == 'local.rtl8852be.probe'
-assert info['CFBundleVersion'] == '0.0.7'
+assert info['CFBundleVersion'] == '0.0.8'
 assert info['CFBundleExecutable'] == 'RTL8852BEProbe'
 personality = info['IOKitPersonalities']['RTL8852BE-R16-Diagnostic']
 assert personality['IOPCIMatch'] == '0xb85210ec'
@@ -18,6 +18,13 @@ assert personality['IOPCISecondaryMatch'] == '0x54701a3b'
 assert personality['IOClass'] == 'RTL8852BEProbe'
 binary = bundle / 'Contents/MacOS' / info['CFBundleExecutable']
 data = binary.read_bytes()
+firmware_path = pathlib.Path(__file__).resolve().parent / 'firmware/rtw8852b_fw-1.bin'
+firmware_blob = firmware_path.read_bytes()
+assert data.count(firmware_blob) == 1, 'Embedded firmware mismatch'
+assert info['FirmwareSHA256'] == hashlib.sha256(firmware_blob).hexdigest()
+assert info['FirmwareBytes'] == len(firmware_blob)
+assert info['FirmwareLicense'] == firmware_path.with_name('LICENCE.rtlwifi_firmware.txt').read_text()
+
 magic, cpu, subtype, kind, ncmds, sizeofcmds, flags, reserved = struct.unpack_from('<8I', data)
 assert magic == 0xfeedfacf, 'Not a 64-bit Mach-O'
 assert cpu == 0x01000007, 'Not x86_64'
