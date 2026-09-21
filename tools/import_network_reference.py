@@ -53,7 +53,7 @@ rendered=shim+'\n'.join(defines)+'\n'+'\n\n'.join(structs)+'\n\n'+'\n\n'.join(f.
 rendered+='\n#if defined(__clang__)\n#pragma clang diagnostic pop\n#endif\n'
 rendered+='\n'.join('#undef '+n for n in sorted(used|{'BIT','GENMASK','FIELD_PREP','__packed','RTW89_MGMT_HW_SSN_SEL','RTW89_MGMT_HW_SEQ_MODE'}))+'\n} }\n'
 dest=root/'src/network/Rtw89DescriptorCore.hpp';dest.parent.mkdir(parents=True,exist_ok=True)
-dest.write_text(rendered)
+dest.write_bytes(rendered.encode())
 fields=re.findall(r'FIELD_PREP\((RTW89_TXWD_\w+),\s*desc_info->(\w+)\)', '\n'.join(functions))
 # Materialize representability checks from the pinned masks, independently of
 # descriptor construction. No silently truncated user-supplied parameters.
@@ -69,7 +69,7 @@ for mask,field in fields:
     fieldtype=re.search(r'\b(u8|u16|u32)\s+'+field+r';',structs[-1])
     natural=(1<<int(fieldtype[1][1:]))-1 if fieldtype else 1
     if 1<maxval<natural:checks.append(f'    if (p.{field} > {maxval}u) return false;')
-(root/'src/network/DescriptorLimits.inc').write_text('// Generated from pinned rtw89 TXWD masks.\n'+'\n'.join(dict.fromkeys(checks))+'\n')
-manifest={'repository':'https://github.com/lwfinger/rtw89','commit':commit,'license':'BSD-3-Clause option of GPL-2.0 OR BSD-3-Clause','functions':names,'files':{n:hashlib.sha256((source/n).read_bytes()).hexdigest() for n in texts},'generated_sha256':hashlib.sha256(dest.read_bytes()).hexdigest()}
-(root/'src/network/reference-provenance.json').write_text(json.dumps(manifest,indent=2)+'\n')
+(root/'src/network/DescriptorLimits.inc').write_bytes(('// Generated from pinned rtw89 TXWD masks.\n'+'\n'.join(dict.fromkeys(checks))+'\n').encode())
+manifest={'repository':'https://github.com/lwfinger/rtw89','commit':commit,'license':'BSD-3-Clause option of GPL-2.0 OR BSD-3-Clause','functions':names,'files':{n:hashlib.sha256(subprocess.check_output(['git','-C',str(source),'show','HEAD:'+n])).hexdigest() for n in texts},'generated_sha256':hashlib.sha256(dest.read_bytes()).hexdigest()}
+(root/'src/network/reference-provenance.json').write_bytes((json.dumps(manifest,indent=2)+'\n').encode())
 print('Imported',len(names),'unchanged descriptor functions; not a complete hardware driver.')

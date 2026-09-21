@@ -13,17 +13,7 @@ void releaseTx(ieee80211com *ic,TxLease &lease){
     if(lease.node&&ic)ieee80211_release_node(ic,lease.node);
     lease={};
 }
-int prepareEthernetTx(ieee80211com *ic,mbuf_t ethernet,TxLease &out){
-    // Do not overwrite a pending frame's ownership.
-    if(out.frame||out.node){if(ethernet)mbuf_freem(ethernet);return EBUSY;}
-    out={};
-    if(!ethernet)return EINVAL;
-    if(!ic||ic->ic_state!=IEEE80211_S_RUN){mbuf_freem(ethernet);return ENETDOWN;}
-    if(mbuf_pkthdr_len(ethernet)<14){mbuf_freem(ethernet);return EINVAL;}
-    if(mbuf_len(ethernet)<14&&mbuf_pullup(&ethernet,14)!=0)return ENOBUFS;
-    auto *ifp=&ic->ic_ac.ac_if;
-    out.frame=ieee80211_encap(ifp,ethernet,&out.node);
-    if(!out.frame){out={};return ENOBUFS;}
+static int protectFrame(ieee80211com *ic,TxLease &out){
     struct ieee80211_frame header{};
     if(mbuf_pkthdr_len(out.frame)<sizeof(header)||mbuf_copydata(out.frame,0,sizeof(header),&header)!=0){releaseTx(ic,out);return EINVAL;}
     if(header.i_fc[1]&IEEE80211_FC1_PROTECTED){
@@ -35,6 +25,35 @@ int prepareEthernetTx(ieee80211com *ic,mbuf_t ethernet,TxLease &out){
     out.bytes=mbuf_pkthdr_len(out.frame);
     if(!out.bytes||out.bytes>16383){releaseTx(ic,out);return EMSGSIZE;}
     return 0;
+}
+int prepareEthernetTx(ieee80211com *ic,mbuf_t ethernet,TxLease &out){
+    // Do not overwrite a pending frame's ownership.
+    if(out.frame||out.node){if(ethernet)mbuf_freem(ethernet);return EBUSY;}
+    out={};
+    if(!ethernet)return EINVAL;
+    if(!ic||ic->ic_state!=IEEE80211_S_RUN){mbuf_freem(ethernet);return ENETDOWN;}
+    if(mbuf_pkthdr_len(ethernet)<14){mbuf_freem(ethernet);return EINVAL;}
+    if(mbuf_len(ethernet)<14&&mbuf_pullup(&ethernet,14)!=0)return ENOBUFS;
+    auto *ifp=&ic->ic_ac.ac_if;
+    out.frame=ieee80211_encap(ifp,ethernet,&out.node);
+    if(!out.frame){out={};return ENOBUFS;}
+    return protectFrame(ic,out);
+}
+int prepareNextTx(ieee80211com *ic,TxLease &out){
+    if(out.frame||out.node)return EBUSY;
+    out={};
+    if(!ic||!(ic->ic_ac.ac_if.if_flags&IFF_RUNNING))return ENETDOWN;
+    auto frame=mq_dequeue(&ic->ic_mgtq);
+    if(frame){
+        out.frame=frame;
+        out.node=reinterpret_cast<ieee80211_node *>(mbuf_pkthdr_rcvif(frame));
+        if(!out.node){releaseTx(ic,out);return EINVAL;}
+        return protectFrame(ic,out);
+    }
+    if(ic->ic_state!=IEEE80211_S_RUN||(ic->ic_xflags&IEEE80211_F_TX_MGMT_ONLY))return EAGAIN;
+    frame=ifq_dequeue(&ic->ic_ac.ac_if.if_snd);
+    if(!frame)return EAGAIN;
+    return prepareEthernetTx(ic,frame,out);
 }
 int deliverRealtekRx(ieee80211com *ic,const uint8_t *dma,size_t bytes,size_t descriptorOffset,uint8_t channel,int rssi){
     if(!ic||!ic->ic_ac.ac_if.iface||!ic->ic_ac.ac_if.netStat)return ENETDOWN;

@@ -29,12 +29,16 @@ bridge=root/'src/network/Net80211PacketBridge.cpp'
 bridge_obj=dest/'Net80211PacketBridge.o'
 subprocess.run(['xcrun','clang++',*flags,'-c',str(bridge),'-o',str(bridge_obj)],check=True)
 objects.append(bridge_obj)
+subprocess.run(['xcrun','ld','-r','-arch','x86_64','-o',str(dest/'NetworkStack-reloc.o'),*map(str,objects)],check=True)
+undefined=subprocess.check_output(['xcrun','nm','-uj',str(dest/'NetworkStack-reloc.o')],text=True).splitlines()
+unresolved_protocol=[s for s in undefined if any(x in s for x in ('ieee80211_','HMAC_','pbkdf2_','rijndael','SHA1','SHA256'))]
+assert not unresolved_protocol, 'Protocol dependency still unresolved: '+repr(unresolved_protocol)
 archive=dest/'libR16Net80211.a'
 subprocess.run(['xcrun','libtool','-static','-o',str(archive),*map(str,objects)],check=True)
 subprocess.run(['xcrun','nm','-u',str(archive)],stdout=(dest/'undefined-symbols.txt').open('w'),check=True)
 # License and exact imported source remain alongside the binary artifact.
 import shutil
 shutil.copyfile(source/'LICENSE',dest/'ITLWM-LICENSE')
-report={'repository':'https://github.com/OpenIntelWireless/itlwm','commit':commit,'sources':manifest,'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'compiled':True,'linked_into_driver':False,'hardware_tested':False,'wifi_operational':False}
+report={'repository':'https://github.com/OpenIntelWireless/itlwm','commit':commit,'sources':manifest,'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'compiled':True,'relocatable_link_passed':True,'unresolved_protocol_symbols':unresolved_protocol,'external_kernel_and_host_symbols':undefined,'linked_into_driver':False,'hardware_tested':False,'wifi_operational':False}
 (dest/'provenance.json').write_text(json.dumps(report,indent=2)+'\n')
 print('Compiled protocol archive:',len(files),'sources. Hardware adapter/link validation remains required.')
