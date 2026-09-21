@@ -1,0 +1,21 @@
+name: Test recovery collector without rebuilding OS
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-15-intel
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Test GPT identification, direct FAT mount, persistence and reboot paths
+        run: |
+          mkdir -p build/recovery
+          bash recovery-autolog/test-collector.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: collector-test-result
+          path: build/recovery/collector-integration-test.txt

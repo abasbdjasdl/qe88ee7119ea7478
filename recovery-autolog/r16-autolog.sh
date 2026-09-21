@@ -5,6 +5,7 @@ export PATH
 umask 077
 token=R16-FILE-CAPTURE-20260921-01
 mode=${1:-production}
+test_uuid=${2:-}
 case "$mode" in production|--test-success|--test-error|--test-timeout) ;; *) exit 64 ;; esac
 ram=/private/tmp/r16-autolog-v2
 [ "$mode" = production ] || ram="$ram-$mode"
@@ -89,22 +90,26 @@ run 10 system-version.txt sw_vers
 run 10 kernel.txt uname -a
 run 10 probe-initial.txt ioreg -r -c RTL8852BEProbe -l -w 0
 
-# Only mount the small, known-size FAT recovery/EFI volumes. A unique marker
-# placed by the Windows installer is additionally required before writing.
+# Match GPT partition UUIDs, then require the private marker before writing.
 attempt=0
 while [ "$attempt" -lt 6 ]; do
     find_target && break
     attempt=$((attempt + 1))
     run 12 disk-list.txt diskutil list
-    awk '/MACRECOVERY|EFI/ {print $NF}' "$ram/disk-list.txt" | grep -E '^disk[0-9]+(s[0-9]+)?$' > "$ram/candidates.txt"
+    printf '%s\n' /dev/disk*s* | sed 's|/dev/||' | grep -E '^disk[0-9]+s[0-9]+$' > "$ram/candidates.txt"
     while read dev; do
-        run 8 volume-info.plist diskutil info -plist "$dev"
-        size=$(PlistBuddy -c 'Print :TotalSize' "$ram/volume-info.plist" 2>/dev/null)
-        [ -n "$size" ] || size=$(PlistBuddy -c 'Print :DiskSize' "$ram/volume-info.plist" 2>/dev/null)
-        name=$(PlistBuddy -c 'Print :VolumeName' "$ram/volume-info.plist" 2>/dev/null)
-        content=$(PlistBuddy -c 'Print :Content' "$ram/volume-info.plist" 2>/dev/null)
-        if [ "$name:$size" != MACRECOVERY:2147483648 ] && [ "$content:$size" != EFI:272629760 ]; then continue; fi
-        run 10 "mount-$dev.txt" diskutil mount "$dev"
+        run 8 "$dev.plist" diskutil info -plist "$dev"
+        uuid=$(PlistBuddy -c 'Print :DiskUUID' "$ram/$dev.plist" 2>/dev/null | tr '[:lower:]' '[:upper:]')
+        case "$uuid" in
+            D228C57E-717B-4433-945D-BE8BE9852C75|56966F71-F263-4C6F-BCA7-912ED89ECDCA) ;;
+            *) [ "$mode" = --test-success ] && [ -n "$test_uuid" ] && [ "$uuid" = "$test_uuid" ] || continue ;;
+        esac
+        [ "$mode" = --test-success ] || run 10 "mount-$dev.txt" diskutil mount "$dev"
+        find_target && break
+        point=/Volumes/R16Capture-$dev
+        mkdir -p "$point" || continue
+        run 10 "fat-$dev.txt" /sbin/mount -t msdos "/dev/$dev" "$point"
+        find_target && break
     done < "$ram/candidates.txt"
     find_target && break
     sleep 5
