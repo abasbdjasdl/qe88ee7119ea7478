@@ -4,19 +4,65 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/libexec
 export PATH
 umask 077
 token=R16-FILE-CAPTURE-20260921-01
-ram=/private/tmp/r16-autolog
+mode=${1:-production}
+case "$mode" in production|--test-success|--test-error|--test-timeout) ;; *) exit 64 ;; esac
+ram=/private/tmp/r16-autolog-v2
+[ "$mode" = production ] || ram="$ram-$mode"
 [ -d "$ram" ] && exit 0
 mkdir "$ram" 2>/dev/null || exit 75
 exec > "$ram/collector.log" 2>&1
 echo "$token"
 date
+out=
+outcome=ERROR
+parent=$$
+deadline=360
+[ "$mode" != --test-timeout ] || deadline=2
+
+finish() {
+    code=$1
+    trap - EXIT HUP INT TERM
+    [ ! -f "$ram/timed-out" ] || outcome=TIMEOUT
+    [ "$code" -eq 0 ] || { [ "$outcome" = TIMEOUT ] || outcome=ERROR; }
+    echo "$outcome exit=$code" > "$ram/reboot-reason.txt"
+    if [ -n "$out" ]; then
+        cp "$ram"/* "$out/" 2>/dev/null || outcome=ERROR_SAVING_LOGS
+        echo "$outcome $token" > "$out/status.txt"
+        echo 'Automatic restart requested; Windows remains the firmware default.' > "$out/reboot.txt"
+    fi
+    echo "R16 diagnostics: $outcome; restarting." > /dev/console 2>/dev/null
+    sync
+    if [ "$mode" = production ]; then
+        sleep 10
+        /sbin/reboot
+        # Keep the independent deadline alive if the normal reboot fails.
+        echo 'Normal reboot returned; deadline fallback remains active.'
+    else
+        echo "$outcome" > "$ram/reboot-requested-test.txt"
+        kill "$deadline_pid" 2>/dev/null
+    fi
+}
+trap 'finish "$?"' EXIT
+trap 'exit 143' HUP INT TERM
+(
+    sleep "$deadline"
+    echo TIMEOUT > "$ram/timed-out"
+    kill -TERM "$parent" 2>/dev/null
+    # If a blocked command prevents the shell trap, still try to reboot.
+    sleep 15
+    [ "$mode" != production ] || /sbin/reboot
+) &
+deadline_pid=$!
+
+[ "$mode" != --test-error ] || exit 7
+if [ "$mode" = --test-timeout ]; then sleep 5; exit 124; fi
 
 # Bound commands so a hung storage query cannot block every other diagnostic.
 run() {
     seconds=$1; file=$2; shift 2
     "$@" > "$ram/$file" 2>&1 &
     job=$!
-    ( sleep "$seconds"; kill -TERM "$job" 2>/dev/null ) &
+    ( sleep "$seconds"; kill -TERM "$job" 2>/dev/null; sleep 2; kill -KILL "$job" 2>/dev/null ) &
     watch=$!
     wait "$job"
     code=$?
@@ -27,7 +73,6 @@ run() {
 }
 
 target=
-out=
 find_target() {
     for marker in /Volumes/*/r16-autolog/capture-target.txt /Volumes/*/EFI/OC/r16-autolog/capture-target.txt; do
         [ -f "$marker" ] || continue
@@ -79,6 +124,7 @@ run 10 keyboard-ioreg.txt ioreg -r -c ApplePS2Keyboard -l -w 0
 run 20 loaded-kexts.txt kextstat -l
 run 15 disk-list-final.txt diskutil list
 run 10 mounts.txt mount
+run 10 launchd-self.txt launchctl print system/local.r16.autolog
 run 15 kernel-messages.txt dmesg
 if command -v log >/dev/null 2>&1; then
     run 20 relevant-log.txt log show --last 5m --style compact --predicate 'eventMessage CONTAINS "RTL8852BE" OR eventMessage CONTAINS "NVMe" OR eventMessage CONTAINS "msdos"'
@@ -89,11 +135,9 @@ else
     echo 'PROBE_NOT_CONFIRMED; inspect kext and PCI records.' > "$ram/result.txt"
 fi
 if [ -n "$out" ]; then
-    cp "$ram"/* "$out/" 2>/dev/null
-    echo "COMPLETE $token" > "$out/status.txt"
-    sync
-    echo "Saved to $out"
+    outcome=COMPLETE
 else
+    outcome=NO_WRITABLE_LOG_TARGET
     echo 'NO_WRITABLE_LOG_TARGET; logs remain in RAM.'
 fi
 exit 0
