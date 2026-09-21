@@ -10,7 +10,7 @@ assert subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=
 assert not subprocess.check_output(['git','-C',str(source),'diff','--','itl80211','include','itlwm/PrivateSPI.pch'],text=True)
 dest=root/'build/network-stack';dest.mkdir(parents=True,exist_ok=True)
 flags=['-target','x86_64-apple-macos11.0','-mkernel','-DKERNEL','-DKERNEL_EXTENSION','-DIEEE80211_STA_ONLY','-D__PRIVATE_SPI__','-fno-stack-protector','-mno-red-zone','-fno-exceptions','-fno-rtti','-std=gnu++14','-Wno-deprecated-register','-Wno-unknown-warning-option','-include',str(source/'itlwm/PrivateSPI.pch')]
-for include in ('itl80211/openbsd','itl80211','include'):
+for include in ('itl80211/openbsd','itl80211','itl80211/linux','include'):
     flags+=['-I',str(source/include)]
 flags+=['-I',str(sdk/'Headers')]
 files=sorted(p for p in (source/'itl80211').rglob('*') if p.suffix in ('.c','.cpp'))
@@ -18,9 +18,17 @@ objects=[];manifest=[]
 for i,p in enumerate(files):
     output=dest/f'{i:03d}-{p.stem}.o'
     print('compile',p.relative_to(source),flush=True)
-    subprocess.run(['xcrun','clang++',*flags,'-x','c++','-c',str(p),'-o',str(output)],check=True)
+    log=dest/(output.stem+'.diagnostics')
+    result=subprocess.run(['xcrun','clang++',*flags,'-x','c++','-c',str(p),'-o',str(output)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+    log.write_text(result.stdout)
+    if result.returncode:
+        print(result.stdout[-12000:]);result.check_returncode()
     objects.append(output)
     manifest.append({'path':p.relative_to(source).as_posix(),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+bridge=root/'src/network/Net80211PacketBridge.cpp'
+bridge_obj=dest/'Net80211PacketBridge.o'
+subprocess.run(['xcrun','clang++',*flags,'-c',str(bridge),'-o',str(bridge_obj)],check=True)
+objects.append(bridge_obj)
 archive=dest/'libR16Net80211.a'
 subprocess.run(['xcrun','libtool','-static','-o',str(archive),*map(str,objects)],check=True)
 subprocess.run(['xcrun','nm','-u',str(archive)],stdout=(dest/'undefined-symbols.txt').open('w'),check=True)
