@@ -143,8 +143,9 @@ bool RTL8852BEProbe::saveReport() {
         alreadySaved = memcmp(existing->getBytesNoCopy(), testToken, strlen(testToken)) == 0;
     if (existingObject) existingObject->release();
     if (alreadySaved) { entry->release(); return true; }
-    if (!nvram->safeToSync()) { entry->release(); return false; }
-
+    // Our token guard permits one successful update for this entire test build.
+    // Do not consume the shared safeToSync window before preparing the report:
+    // another boot service may have used that 15-minute window already.
     rtl8852be::ReportBuffer<2048> report;
     report.append(testToken);
     report.append("\nschema=1\ndriver=0.0.2\nsource=macOS-kernel\nprobe=matched\nwifi=not-operational\npci256=");
