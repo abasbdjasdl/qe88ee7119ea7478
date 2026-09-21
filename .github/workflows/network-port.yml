@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['src/network/**', 'tests/network_*', 'tools/build_network_stack.py', '.github/workflows/network-port.yml']
+    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', '.github/workflows/network-port.yml']
 permissions:
   contents: read
 jobs:
@@ -23,14 +23,23 @@ jobs:
           git -C MacKernelSDK remote add origin https://github.com/acidanthera/MacKernelSDK.git
           git -C MacKernelSDK fetch --depth 1 origin 05094e5e88cec7caedbfb35e8449ed0db94bf95b
           git -C MacKernelSDK checkout --detach FETCH_HEAD
+          git init build-rtw89
+          git -C build-rtw89 remote add origin https://github.com/lwfinger/rtw89.git
+          git -C build-rtw89 fetch --depth 1 origin d1fced1b8a741dc9f92b47c69489c24385945f6e
+          git -C build-rtw89 checkout --detach FETCH_HEAD
       - name: Test Realtek descriptors, PCI queues and firmware packets
         shell: bash
         run: |
           mkdir -p build/network-stack
+          python3 tools/check_network_reference.py build-rtw89 | tee build/network-stack/wire-reference-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_descriptors_test.cpp -o build/network_descriptors_test
           ./build/network_descriptors_test | tee build/network-stack/descriptor-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_pci_test.cpp -o build/network_pci_test
           ./build/network_pci_test | tee build/network-stack/pci-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_timer_fakes tests/network_timers_test.cpp -o build/network_timers_test
+          ./build/network_timers_test | tee build/network-stack/timer-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_ring_setup_test.cpp -o build/network_ring_setup_test
+          ./build/network_ring_setup_test | tee build/network-stack/ring-setup-tests.txt
       - name: Compile existing macOS 802.11 and WPA stack
         shell: bash
         env:
@@ -39,6 +48,7 @@ jobs:
           set -o pipefail
           python3 tools/build_network_stack.py build-itlwm 2>&1 | tee build/network-stack/build.log
           tar -czf build/network-stack/itlwm-stack-source.tar.gz -C build-itlwm itl80211 include itlwm/PrivateSPI.pch LICENSE
+          tar -czf build/network-stack/port-source.tar.gz src/network tools/build_network_stack.py tools/check_network_reference.py tools/import_network_reference.py tests/network_* LICENSE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

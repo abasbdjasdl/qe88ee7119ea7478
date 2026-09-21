@@ -2,6 +2,7 @@
 #include "../src/network/PciDataPath.hpp"
 #include "../src/network/PciRxAssembly.hpp"
 #include "../src/network/FirmwareProtocol.hpp"
+#include "../src/network/FirmwareDmaQueue.hpp"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -110,4 +111,23 @@ static void testFirmware(){
     for(size_t cap=0;cap<12;++cap)assert(!n::decodeC2h(c2h,cap,event));
     n::store32(c2h+4,7);assert(!n::decodeC2h(c2h,12,event));
 }
-int main(){testWire();testOwnership();testRx();testFirmware();puts("PASS: PCI TX wire format; 100000 ownership cycles; RX segment assembly/truncation/fuzz; AX H2C/C2H golden packets");}
+static void testFirmwareDma(){
+    uint8_t command[12],dma[36],bd[8];size_t size;
+    assert(n::encodeRole({7,2,1,1},0,command,sizeof(command),size));
+    assert(n::encodeCommandDma(command,12,0x12340000,dma,sizeof(dma),bd,size)&&size==36);
+    assert(n::little32(dma)==0x000c0000&&n::little32(dma+8)==12&&n::little32(dma+12)==0);
+    assert(!std::memcmp(dma+24,command,12)&&n::little32(bd)==0x40000024&&n::little32(bd+4)==0x12340000);
+    assert(!n::encodeCommandDma(dma,12,0x12340000,dma,sizeof(dma),bd,size));
+    n::FirmwareDmaOwnership<16> q;int cookies[16];unsigned released=0;
+    auto release=[&](void *p){assert(p>=static_cast<void *>(cookies)&&p<static_cast<void *>(cookies+16));++released;};
+    for(unsigned i=0;i<8;++i){assert(q.commit(uint16_t(q.producer()),&cookies[i]));assert(q.consumeTo(q.producer(),release));assert(!released);}
+    assert(q.retained()==8&&!q.pending());
+    for(unsigned i=8;i<100008;++i){auto slot=q.producer();assert(q.commit(uint16_t(slot),&cookies[slot]));
+        assert(q.consumeTo(q.producer(),release)&&q.retained()==8&&released==i-7);}
+    q.reclaimAfterDmaStopped(release);assert(released==100008&&!q.retained()&&!q.pending());
+    for(unsigned i=0;i<15;++i)assert(q.commit(uint16_t(i),&cookies[i]));
+    assert(q.full()&&!q.commit(15,&cookies[15])&&!q.consumeTo(16,release));
+    assert(q.consumeTo(15,release)&&q.retained()==8);
+    q.reclaimAfterDmaStopped(release);
+}
+int main(){testWire();testOwnership();testRx();testFirmware();testFirmwareDma();puts("PASS: PCI TX wire format; 100000 ownership cycles; RX segment assembly/truncation/fuzz; AX H2C/C2H; 100008 CH12 multi-tag retention cycles");}

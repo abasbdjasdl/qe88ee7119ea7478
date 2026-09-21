@@ -40,6 +40,9 @@ subprocess.run(['xcrun','nm','-u',str(archive)],stdout=(dest/'undefined-symbols.
 # License and exact imported source remain alongside the binary artifact.
 import shutil
 shutil.copyfile(source/'LICENSE',dest/'ITLWM-LICENSE')
-report={'repository':'https://github.com/OpenIntelWireless/itlwm','commit':commit,'sources':manifest,'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'compiled':True,'relocatable_link_passed':True,'unresolved_protocol_symbols':unresolved_protocol,'external_kernel_and_host_symbols':undefined,'linked_into_driver':False,'hardware_tested':False,'wifi_operational':False}
+report={'repository':'https://github.com/OpenIntelWireless/itlwm','commit':commit,'sources':manifest,
+        'upstream_overrides':{'itl80211/openbsd/net80211/CTimeout.cpp':'src/network/Net80211Timers.cpp'},
+        'local_headers':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((root/'src/network').glob('*.hpp'))},
+        'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'compiled':True,'relocatable_link_passed':True,'unresolved_protocol_symbols':unresolved_protocol,'external_kernel_and_host_symbols':undefined,'linked_into_driver':False,'hardware_tested':False,'wifi_operational':False}
 (dest/'provenance.json').write_text(json.dumps(report,indent=2)+'\n')
 print('Compiled protocol archive:',len(files),'sources. Hardware adapter/link validation remains required.')

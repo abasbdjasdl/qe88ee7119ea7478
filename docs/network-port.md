@@ -10,8 +10,10 @@ driver simply because the archive compiles.
 - `OpenIntelWireless/itlwm` at `53c51c2cdd6e4b69beb91f310d74c53422b0f8bd`:
   the existing macOS/OpenBSD net80211 state machine, packet encapsulation,
   decapsulation, station authentication, RSN/EAPOL and software ciphers. The
-  upstream files are fetched unchanged and built separately with their GPL and
-  embedded BSD/ISC notices. Intel device backends and Intel firmware are excluded.
+  upstream files are fetched at this commit and built with their GPL and
+  embedded BSD/ISC notices. 47 protocol sources are unchanged; the original
+  CTimeout.cpp is replaced by the API-compatible Net80211Timers.cpp with explicit
+  allocation/event-source error handling. Intel hardware and firmware are excluded.
 - `lwfinger/rtw89` at `d1fced1b8a741dc9f92b47c69489c24385945f6e`:
   the actual 8852B 24-byte TXWD + 24-byte TXWI construction functions and AX RXWD
   parser. `import_network_reference.py` preserves their function bodies and
@@ -32,26 +34,63 @@ Hardware-decrypted RX is rejected until CAM/key and replay metadata support
 exists. The bridge must run under a controller command gate after net80211
 attachment, using real channel/RSSI metadata; it does not initialize that host.
 
+## PCI and host integration components
+
+`Net80211PciQueue` now holds the real mbuf/node leases through both TXBD consumer
+advance and the TX release report, in either order. It builds the 8852BE's
+TXWD/TXWI + TXWP + 32-bit address entry, copies the frame into supplied prepared
+DMA mappings, then stages the BD. It rejects overlapping mappings, unsupported
+queues and mismatched completion MACID/qsel. The caller still must provide real
+IOKit DMA allocations, cache sync/barriers, MMIO doorbells and interrupt dispatch.
+Reusing a page ID across a hardware reset requires draining old RPQ reports;
+the wire report contains no software generation number.
+
+`PciRxAssembly` handles FS/LS segmentation with bounded packet lengths and
+metadata. Separate RXQ/RPQ dispatch feeds Wi-Fi to net80211, firmware C2H to the
+firmware callback, PHY reports to the PHY callback and release reports to the
+appropriate TX queue. Channel/RSSI must come from the hardware PHY layer.
+
+`FirmwareProtocol` encodes AX role/join H2C commands and validates C2H receive and
+done acknowledgements. `Net80211FirmwareQueue` stages command DMA and retains
+the eight most recently consumed buffers, matching upstream PCI multi-tag
+requirements. A command ACK does not free those buffers or establish a link.
+
+`PciRingSetup` programs all nine implemented queues while bus mastering,
+TXHCI/RXHCI and IRQs remain disabled, verifies readback, performs bounded BDRAM
+reset and provides explicit restoration. `MacPciRingIo` binds this logic to a
+validated RTL8852BE BAR2 map and restricts register writes. It cannot enable DMA.
+The register/BDRAM tables are checked against the pinned original driver.
+
+`Net80211Runtime` supplies the protocol workloop/gate symbols and enforces one
+owner. Teardown must run after protocol timers/tasks/nodes are drained. The timer
+adapter handles allocation/add/arm failures, cancellation and stale callbacks.
+There is still no IOEthernetController start/stop implementation or radio backend
+calling these components. None is wired into the installed diagnostic kext.
+
 ## Build and verification
 
-`network-port.yml` builds the pinned protocol source and bridge with Apple kernel
+`network-port.yml` builds the pinned protocol source and native adapters with Apple kernel
 headers. It produces a static archive and a relocatable-link check, verifies
-that protocol/crypto references are resolved, and reports remaining kernel/host
+that protocol/crypto/timer/host references are resolved, and reports remaining kernel
 imports. It is not a loadable kext. Source and licenses accompany the archive.
 `network_descriptors_test.cpp` checks golden TX words, unaligned RX, every buffer
 truncation, invalid lengths/fields, corruption flags, C2H separation and 100000
 malformed-buffer cases under ASan/UBSan. These are software evidence only.
+Additional tests exercise 100000 data ownership cycles, 100008 command-retention
+cycles, fragmented/truncated RX, H2C/C2H golden packets, every one of the 37 ring
+setup write failures, failed rollback and DMA/IRQ gates. Timer error paths use an
+explicit IOKit model; they are not a claim of running timer tests inside macOS.
 
 ## Remaining real integration
 
 1. Complete and preserve the RTL8852B power/MAC/PHY/RF/efuse/calibration sequence;
    the diagnostic subset currently shuts the chip down after probing.
-2. Implement normal RXQ/RPQ and data/management TX rings, interrupts, TX release
-   reports, reusable DMA ownership and error recovery. The one-shot CH12 bank
-   is not the normal networking data path.
+2. Connect the new RXQ/RPQ/data/management/firmware queue components to native
+   allocation, cache synchronization, hardware start/stop, interrupts and recovery.
+   The one-shot diagnostic CH12 bank remains separate from this runtime path.
 3. Adapt rtw89 firmware commands, event dispatch, channel/power/regulatory data,
    station/address CAM and association transitions to the net80211 callbacks.
-4. Add IOEthernetController/workloop/timer lifecycle, interface statistics,
+4. Add IOEthernetController lifecycle using the new workloop/timer binding, statistics,
    control client for scan/join, key handling, disconnect and suspend/resume.
 5. Verify on this hardware: firmware execution, scan results, real AP
    authentication, EAPOL exchange, DHCP, packet TX/RX and connection stability.

@@ -4,6 +4,7 @@
 #include "PciDataPath.hpp"
 #include "PciRxAssembly.hpp"
 #include "FirmwareProtocol.hpp"
+#include "FirmwareDmaQueue.hpp"
 namespace rtl8852be { namespace network {
 // These mappings must be wired, contiguous, prepared for DMA and retained by
 // the controller until DMA stop is proven. No physical addresses are invented.
@@ -42,6 +43,21 @@ public:
     // Only after interrupts are masked, workloop callbacks drained, bus master
     // disabled and DMA idle confirmed. Also drain stale RPQ before reinitializing.
     void reclaimAfterDmaStopped();
+};
+class Net80211FirmwareQueue {
+public:
+    static constexpr size_t count=64;
+private:
+    DataMapping ring_{},packets_[count]{};
+    FirmwareDmaOwnership<count> ownership_{};
+    uint64_t retired_{};
+public:
+    // Same stopped-DMA and mapping-lifetime contract as the data queue.
+    int initialize(DataMapping ring,const DataMapping (&packets)[count]);
+    int stage(const uint8_t *command,size_t bytes,uint16_t &nextProducer);
+    int consumeTo(uint16_t hardwareConsumer);
+    void reclaimAfterDmaStopped();
+    uint64_t retired()const{return retired_;}
 };
 // RXQ and RPQ are separate channels; fragmented state must not be shared.
 // Callbacks run synchronously under the controller gate and must not retain

@@ -8,7 +8,9 @@ Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 The existing itlwm/OpenBSD protocol and software-crypto stack is now built as a
 separate reusable archive. A packet bridge handles management-first TX,
 encapsulation/encryption and bounded Realtek RX delivery. Actual rtw89 descriptor
-routines are imported with pinned provenance. These components do not yet have
+routines are imported with pinned provenance. New components stage data and
+firmware DMA, track TX release ownership, reassemble RX segments, configure
+stopped PCI rings and bind protocol timers/workloops. These components do not yet have
 a complete Realtek radio/DMA backend or controller lifecycle, and do not provide
 network connectivity. See [network-port.md](docs/network-port.md).
 
@@ -61,8 +63,9 @@ RF and Wi-Fi remain unimplemented. See [firmware-bank-rom.md](docs/firmware-bank
   restore passed. BDRAM poll failure inferred from control flow/write count.
 - 0.0.13: corrects internal HCI gate order before BDRAM reset and adds poll
   failure/register evidence; hardware validation pending.
-- Not implemented: RF initialization, network DMA queues, network TX/RX, scan,
-  association, WPA authentication, or an IO80211 network interface.
+- Not operational: RF initialization, live network DMA/interrupt handling, scan,
+  association, WPA authentication, or a network controller interface. Offline
+  queue/protocol components are described above; they are not in the live kext.
 
 The CI workflow builds with the pinned MacKernelSDK and Apple toolchain, tests
 PCI parsing and the MMIO transaction with ASan/UBSan mocks, and validates the

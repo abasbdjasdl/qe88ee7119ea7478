@@ -5,10 +5,18 @@ namespace rtl8852be { namespace network {
 static bool validMapping(const DataMapping &m,size_t required){
     return m.bytes&&m.capacity>=required&&dma32Range(m.physical,m.capacity);
 }
+static bool overlaps(const DataMapping &a,const DataMapping &b){
+    return a.physical<b.physical+b.capacity&&b.physical<a.physical+a.capacity;
+}
 int Net80211PciQueue::initialize(ieee80211com *ic,uint8_t channel,DataMapping ring,const TxPageMapping (&pages)[count]){
     if(ownership_.outstanding())return EBUSY;
     if(!ic||(channel>3&&channel!=8&&channel!=9)||!validMapping(ring,count*8)||(ring.physical&7))return EINVAL;
     for(const auto &p:pages)if(!validMapping(p.descriptor,64)||!validMapping(p.frame,16383)||(p.descriptor.physical&7))return EINVAL;
+    for(size_t i=0;i<count;++i){const auto &p=pages[i];
+        if(overlaps(ring,p.descriptor)||overlaps(ring,p.frame)||overlaps(p.descriptor,p.frame))return EINVAL;
+        for(size_t j=0;j<i;++j)if(overlaps(p.descriptor,pages[j].descriptor)||overlaps(p.descriptor,pages[j].frame)||
+            overlaps(p.frame,pages[j].descriptor)||overlaps(p.frame,pages[j].frame))return EINVAL;
+    }
     ic_=ic;channel_=channel;ring_=ring;counters_={};
     // Ledger reset is legal only under the caller's stopped-DMA contract.
     ownership_.reclaimAfterDmaStopped([](void *){});
@@ -60,6 +68,30 @@ int Net80211PciQueue::releaseReport(const ReleaseReport &report){
 void Net80211PciQueue::reclaimAfterDmaStopped(){
     ownership_.reclaimAfterDmaStopped([this](void *cookie){releaseTx(ic_,*static_cast<TxLease *>(cookie));++counters_.dropped;});
     ic_=nullptr;ring_={};for(auto &p:pages_)p={};
+}
+int Net80211FirmwareQueue::initialize(DataMapping ring,const DataMapping (&packets)[count]){
+    if(ownership_.pending()||ownership_.retained())return EBUSY;
+    if(!validMapping(ring,count*8)||(ring.physical&7))return EINVAL;
+    for(const auto &p:packets)if(!validMapping(p,24+16383)||overlaps(ring,p))return EINVAL;
+    for(size_t i=0;i<count;++i)for(size_t j=0;j<i;++j)if(overlaps(packets[i],packets[j]))return EINVAL;
+    ring_=ring;retired_=0;ownership_.reclaimAfterDmaStopped([](void *){});
+    for(size_t i=0;i<count;++i)packets_[i]=packets[i];
+    for(size_t i=0;i<count*8;++i)ring_.bytes[i]=0;return 0;
+}
+int Net80211FirmwareQueue::stage(const uint8_t *command,size_t bytes,uint16_t &nextProducer){
+    nextProducer=0;if(!ring_.bytes)return ENETDOWN;if(ownership_.full())return ENOBUFS;
+    const size_t slot=ownership_.producer();auto &packet=packets_[slot];uint8_t bd[8];size_t written;
+    if(!encodeCommandDma(command,bytes,packet.physical,packet.bytes,packet.capacity,bd,written))return EINVAL;
+    if(!ownership_.commit(uint16_t(slot),&packet))return EBUSY;
+    for(size_t i=0;i<8;++i)ring_.bytes[slot*8+i]=bd[i];
+    nextProducer=uint16_t(ownership_.producer());return 0;
+}
+int Net80211FirmwareQueue::consumeTo(uint16_t hardwareConsumer){
+    if(!ring_.bytes)return ENETDOWN;
+    return ownership_.consumeTo(hardwareConsumer,[this](void *){++retired_;})?0:EINVAL;
+}
+void Net80211FirmwareQueue::reclaimAfterDmaStopped(){
+    ownership_.reclaimAfterDmaStopped([this](void *){++retired_;});ring_={};for(auto &p:packets_)p={};
 }
 int receiveRxq(ieee80211com *ic,PciRxAssembly &assembly,const uint8_t *dma,size_t bytes,
                uint8_t channel,int rssi,const ReceiveCallbacks &callbacks){
