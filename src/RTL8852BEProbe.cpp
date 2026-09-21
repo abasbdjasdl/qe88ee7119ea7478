@@ -114,6 +114,7 @@ bool RTL8852BEProbe::start(IOService *provider) {
     rtl8852be::MmioResult r;
     rtl8852be::power::Result supply;
     rtl8852be::boot::Result rom;
+    rtl8852be::boot::RepeatedResult repeated;
     rtl8852be::transport::Packets packets;
     rtl8852be::transport::BankResult bank;
     const auto packetStatus=packets.initialize(rtl8852be::image::bytes,rtl8852be::image::length,1);
@@ -128,7 +129,7 @@ bool RTL8852BEProbe::start(IOService *provider) {
             r=rtl8852be::sampleMmio(access,s,[&](PciMmioAccess &d,const rtl8852be::MmioResult &base){
                 x=rtl8852be::sampleXtal(d,base);
                 supply=rtl8852be::power::cycle(d,base,x,[&](PciMmioAccess &active){
-                    rom=rtl8852be::boot::probe(active);
+                    repeated=rtl8852be::boot::probeRepeated(active);rom=repeated.first;
                 });
             });
         }
@@ -139,8 +140,8 @@ bool RTL8852BEProbe::start(IOService *provider) {
     pci->close(this);
     bool ok = setProperty("DiagnosticOnly", true);
     ok &= setProperty("WiFiOperational", false);
-    ok &= setProperty("DriverVersion", "0.0.10");
-    ok &= setProperty("Experiment", "FIRMWARE-BANK-ROM-03");
+    ok &= setProperty("DriverVersion", "0.0.11");
+    ok &= setProperty("Experiment", "FIRMWARE-BANK-ROM-04");
     ok &= setProperty("Stage", rtl8852be::statusName(r.status));
     ok &= setProperty("VendorID", s.vendorID, 16);
     ok &= setProperty("DeviceID", s.deviceID, 16);
@@ -233,6 +234,29 @@ bool RTL8852BEProbe::start(IOService *provider) {
     ok &= setProperty("RomStopAfter",rom.stopAfter,32);
     ok &= setProperty("RomCleanupFailures",rom.cleanupFailures,32);
     ok &= setProperty("RomCleanupClockChecked",rom.cleanupClockChecked);
+    ok &= setProperty("RomInitialDmac",static_cast<uint64_t>(rom.initialDmac),64);
+    ok &= setProperty("RomInitialHci",static_cast<uint64_t>(rom.initialHci),64);
+    ok &= setProperty("RomAccessDmac",static_cast<uint64_t>(rom.accessDmac),64);
+    ok &= setProperty("RomAccessClock",static_cast<uint64_t>(rom.accessClock),64);
+    ok &= setProperty("RomAccessReady",rom.accessReady);
+    ok &= setProperty("RomHciCaptured",rom.hciCaptured);
+    ok &= setProperty("RomRepeatAttempted",repeated.secondAttempted);
+    ok &= setProperty("RomRepeatStatus",rtl8852be::boot::statusName(repeated.second.status));
+    ok &= setProperty("RomRepeatOperationStatus",rtl8852be::boot::statusName(repeated.second.operationStatus));
+    ok &= setProperty("RomRepeatPhase",repeated.second.phase,32);
+    ok &= setProperty("RomRepeatInitialDmac",static_cast<uint64_t>(repeated.second.initialDmac),64);
+    ok &= setProperty("RomRepeatInitialHci",static_cast<uint64_t>(repeated.second.initialHci),64);
+    ok &= setProperty("RomRepeatAccessReady",repeated.second.accessReady);
+    ok &= setProperty("RomRepeatControl",repeated.second.control,32);
+    ok &= setProperty("RomRepeatCleanupOK",repeated.second.cleanupOK);
+    ok &= setProperty("RomRepeatCleanupFailures",repeated.second.cleanupFailures,32);
+    ok &= setProperty("RomRepeatCleanupClockChecked",repeated.second.cleanupClockChecked);
+    ok &= setProperty("RomRepeatCleanupClock",static_cast<uint64_t>(repeated.second.cleanupClock),64);
+    ok &= setProperty("RomRepeatCleanupDmac",static_cast<uint64_t>(repeated.second.cleanupDmac),64);
+    ok &= setProperty("RomRepeatFailureAddress",static_cast<uint64_t>(repeated.second.failureAddress),64);
+    ok &= setProperty("RomRepeatFailureMask",static_cast<uint64_t>(repeated.second.failureMask),64);
+    ok &= setProperty("RomRepeatFailureExpected",static_cast<uint64_t>(repeated.second.failureExpected),64);
+    ok &= setProperty("RomRepeatFailureActual",static_cast<uint64_t>(repeated.second.failureActual),64);
     ok &= setProperty("RomCleanupClock",static_cast<uint64_t>(rom.cleanupClock),64);
     ok &= setProperty("RomCleanupDmac",static_cast<uint64_t>(rom.cleanupDmac),64);
     ok &= setProperty("RomFailureRecorded",rom.failureRecorded);
@@ -254,7 +278,7 @@ bool RTL8852BEProbe::start(IOService *provider) {
         ok &= setProperty(key, s.bars[i], 32);
     }
     if (!ok) { IOService::stop(provider); return false; }
-    IOLog("RTL8852BEProbe 0.0.10: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
+    IOLog("RTL8852BEProbe 0.0.11: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
           rtl8852be::statusName(r.status), r.reads, r.cfgFirst, r.cfgSecond,
           r.commandBefore, r.commandDuring, r.commandAfter);
     IOLog("RTL8852BEProbe XTAL: %s writes=%u polls=%u raw=%02x power=%08x/%08x\n",

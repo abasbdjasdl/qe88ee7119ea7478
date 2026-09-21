@@ -1,4 +1,23 @@
-# 0.0.10: native packet bank and download-ROM preparation
+# 0.0.11: native packet bank and download-ROM preparation
+
+0.0.10 hardware stopped at phase 1: HCI 0x1000 stayed 0x15f00 after clearing
+mask 0x2800. Early cleanup, supply-off, PCI restore and the bank passed; no ROM
+start or clock-cleanup test occurred. Initial MAC function state was not recorded.
+The supply diagnostic omits the reference power-on func_en tail, and HCI writes
+were incorrectly placed before the minimal MAC enable. Reference mac.c runs
+mac_dmac_pre_init before PCI mac_pre_init. 0.0.11 first writes/verifies minimal
+0x8400=0x60440000 and dispatcher clock 0x8404=0x40000, with PCI bus mastering off.
+It then captures the accessible HCI/stop baseline, pauses HCI, and continues DLE/
+HFC/ROM initialization. HCI restoration is checked before shutting the MAC window.
+No CMAC/RF or PCI bus-master enable is introduced. Initial and enabled access
+values are logged. This is a source-supported correction; physical verification
+is pending, not a confirmed diagnosis of an unrecorded initial gate bit.
+
+One successful first pass with verified cleanup triggers one confirmation pass
+from disabled MAC access in the same supply cycle. There is no retry on failure.
+Both outcomes are published; the analyzer requires both to pass. Tests cover
+initial MAC access disabled/enabled, plausible gated HCI shadow reads, silently
+ignored gated writes, restore timing, and every first/second-pass write failure.
 
 0.0.9 reached ROM_H2C_READY on hardware (control 0x23), with the complete bank,
 WDE/PLE/HFC, DMAC and clock checks passing. Cleanup alone failed at 0x8404:
@@ -96,7 +115,7 @@ Host tests inject every packet allocation/prepare/sync failure (165 slots),
 overlapping/misaligned mappings and corruption. ROM tests inject all 60 writes
 failing, stuck timers, missing WDE/PLE/H2C readiness and ROM errors, and verify
 the configured layout/shutdown. CI adds ASan/UBSan and Apple kernel compilation.
-Physical 0.0.10 results are pending.
+Physical 0.0.11 results are pending.
 
 Reference source: rtw89 mac.c/mac.h/reg.h and rtw8852b.c at
 d1fced1b8a741dc9f92b47c69489c24385945f6e, BSD license option.

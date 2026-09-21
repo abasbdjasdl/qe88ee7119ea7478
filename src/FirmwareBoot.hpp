@@ -24,14 +24,16 @@ constexpr uint32_t busyChannels=txChannels|0x00780003;
 struct Result {Status status{Status::notRun},operationStatus{Status::notRun};unsigned phase{},writes{},polls{};uint32_t wde{},ple{},control{},dmac{},clock{},wdeConfig{},pleConfig{},hfcControl{},hfcPages{};
     uint32_t hciBefore{},stopBefore{},hciPaused{},stopPaused{},hciAfter{},stopAfter{},cleanupFailures{};
     uint32_t cleanupClock{},cleanupDmac{};bool cleanupClockChecked{};
+    uint32_t initialDmac{},initialHci{},accessDmac{},accessClock{};
+    bool accessAttempted{},accessReady{},hciCaptured{};
     uint32_t failureAddress{},failureMask{},failureExpected{},failureActual{};
     bool failureRecorded{},attempted{},cleanupOK{},cpuStopped{};};
 template<class D> Result probe(D &d){
     Result r;if((d.command()&6)!=2){r.status=Status::unsafeCommand;return r;}
-    const auto hci=d.read32(0x1000),stop=d.read32(0x1010),sec=d.read32(0xc00);
+    uint32_t hci=0,stop=0;const auto sec=d.read32(0xc00);
     const auto reason=d.read16(0x1e6);
-    if(invalid(hci)||invalid(stop)||invalid(sec)||reason==0xffff){r.status=Status::invalidRead;return r;}
-    r.hciBefore=hci;r.stopBefore=stop;
+    r.initialDmac=d.read32(0x8400);r.initialHci=d.read32(0x1000);
+    if(invalid(r.initialDmac)||invalid(sec)||reason==0xffff){r.status=Status::invalidRead;return r;}
     auto matches=[&](uint32_t address,uint32_t value,uint32_t mask,uint32_t expected){
         if(!invalid(value)&&(value&mask)==expected)return true;
         if(!r.failureRecorded){r.failureRecorded=true;r.failureAddress=address;r.failureMask=mask;r.failureExpected=expected;r.failureActual=value;}
@@ -49,6 +51,20 @@ template<class D> Result probe(D &d){
     };
     r.attempted=true;
     do{
+        // Supply-only power-on deliberately omitted the reference func_en tail.
+        // Open the minimal HCI register window before manipulating PCI HCI,
+        // as mac_dmac_pre_init precedes PCI mac_pre_init in rtw89. BM stays off.
+        r.accessAttempted=true;
+        if(!wr(0x8400,0x60440000))break;
+        r.accessDmac=d.read32(0x8400);
+        if(!matches(0x8400,r.accessDmac,0xffffffff,0x60440000)){r.status=Status::writeFailed;break;}
+        if(!wr(0x8404,0x00040000))break;
+        r.accessClock=d.read32(0x8404);
+        if(!matches(0x8404,r.accessClock,0xffffffff,0x00040000)){r.status=Status::writeFailed;break;}
+        r.accessReady=true;
+        hci=d.read32(0x1000);stop=d.read32(0x1010);
+        if(invalid(hci)||invalid(stop)){r.status=Status::invalidRead;break;}
+        r.hciBefore=hci;r.stopBefore=stop;r.hciCaptured=true;
         r.phase=1;
         if(!wr(0x1000,hci&~0x2800u)||!wr(0x1010,stop|stopChannels))break;
         uint32_t idle=0;if(!poll(0x101c,busyChannels,0,2000,idle))break;
@@ -56,7 +72,7 @@ template<class D> Result probe(D &d){
         if(!matches(0x1000,r.hciPaused,0x2800,0)||!matches(0x1010,r.stopPaused,stopChannels,stopChannels)){r.status=Status::writeFailed;break;}
         r.phase=2;
         // DLFW layout: 64 KiB WDE (0 linked pages), 128 KiB PLE (64 linked).
-        if(!wr(0x8400,0x60440000)||!wr(0x8404,0x00040000)||!rm(0x8400,0x04800000,0)||!rm(0x8404,0x04800000,0x04800000))break;
+        if(!rm(0x8400,0x04800000,0)||!rm(0x8404,0x04800000,0x04800000))break;
         if(!rm(0x8c08,0x1fff3f03,0)||!rm(0x9008,0x1fff3f03,0x00400801))break;
         // WCPU min quota is inherited from the SCC configuration (48).
         if(!wr(0x8c40,0)||!wr(0x8c44,48)||!wr(0x8c4c,0)||!wr(0x8c50,0))break;
@@ -85,8 +101,8 @@ template<class D> Result probe(D &d){
     // Every cleanup operation executes, even after an earlier one failed.
     bool ok=true;
     auto clean=[&](uint32_t a,uint32_t mask,uint32_t v){const bool result=rm(a,mask,v);ok=result&&ok;};
-    // Only clean blocks whose initialization was attempted. In particular a
-    // phase-1 rejection must not write unclocked DMAC/HFC or reset an untouched CPU.
+    // Only clean blocks whose initialization was attempted. The access window
+    // now precedes phase 1, but later HFC/CPU blocks remain stage-scoped.
     if(r.phase>=5){
         clean(0x88,2,0);clean(0x1e0,7,0);clean(8,0x4000,0);
         clean(0x88,4,0);clean(0x88,4,4);clean(0x88,1,0);clean(0x88,1,1);
@@ -94,7 +110,15 @@ template<class D> Result probe(D &d){
     if(r.phase>=4)clean(0x8a00,9,0);
     // Verify clocked HFC before disabling its parent DMAC block.
     if(r.phase>=4&&!matches(0x8a00,d.read32(0x8a00),9,0))r.cleanupFailures|=1;
-    if(r.phase>=2){
+    // Restore HCI while MAC access is still live; a gated shadow readback is
+    // not evidence that a restore write reached the actual register.
+    if(r.hciCaptured){
+        const bool st=wr(0x1010,stop),h=wr(0x1000,hci);ok=st&&h&&ok;
+        r.hciAfter=d.read32(0x1000);r.stopAfter=d.read32(0x1010);
+        if(!matches(0x1000,r.hciAfter,0xffffffff,hci))r.cleanupFailures|=16;
+        if(!matches(0x1010,r.stopAfter,0xffffffff,stop))r.cleanupFailures|=32;
+    }
+    if(r.accessAttempted){
         // MAC_FUNC_EN gates the downstream register window. 0.0.9 hardware
         // returned 0xffffffff at CLK_EN after FUNC_EN was cleared. Disable and
         // verify clocks while that window is still enabled, then close it.
@@ -113,17 +137,21 @@ template<class D> Result probe(D &d){
         if(!matches(0x8400,r.cleanupDmac,0xffffffff,0))r.cleanupFailures|=2;
     }
     if(r.phase>=5){const bool s=wr(0xc00,sec);++r.writes;const bool b=d.bootWrite16(0x1e6,reason);ok=s&&b&&ok;}
-    const bool st=wr(0x1010,stop),h=wr(0x1000,hci);ok=st&&h&&ok;
     const auto platform=d.read32(0x88),clock=d.read32(8),control=d.read32(0x1e0);
     r.cpuStopped=!invalid(platform)&&!(platform&2)&&!invalid(clock)&&!(clock&0x4000)&&!invalid(control)&&!(control&7);
     if(r.phase>=5&&(d.read32(0xc00)!=sec||d.read16(0x1e6)!=reason))r.cleanupFailures|=8;
-    r.hciAfter=d.read32(0x1000);r.stopAfter=d.read32(0x1010);
-    if(!matches(0x1000,r.hciAfter,0xffffffff,hci))r.cleanupFailures|=16;
-    if(!matches(0x1010,r.stopAfter,0xffffffff,stop))r.cleanupFailures|=32;
     if(!ok)r.cleanupFailures|=64;
     if(!r.cpuStopped)r.cleanupFailures|=128;
     if((d.command()&6)!=2)r.cleanupFailures|=256;
     r.cleanupOK=r.cleanupFailures==0;
     r.status=r.cleanupOK?r.operationStatus:Status::cleanupFailed;return r;
+}
+struct RepeatedResult {Result first{},second{};bool secondAttempted{};};
+template<class D> RepeatedResult probeRepeated(D &d){
+    RepeatedResult r;r.first=probe(d);
+    // Confirmation after successful shutdown, never an automatic retry of a
+    // failed/ambiguous attempt. Both passes leave DMA and RF disabled.
+    if(r.first.status==Status::ready&&r.first.cleanupOK){r.secondAttempted=true;r.second=probe(d);}
+    return r;
 }
 } }
