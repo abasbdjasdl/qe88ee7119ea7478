@@ -61,7 +61,10 @@ def make(base, modified_hfs, patch):
             modified.seek(run[2] * 512)
             replacement = modified.read(len(raw))
             assert len(replacement) == len(raw)
-            checksum = zlib.crc32(replacement, checksum)
+            # UDIF IGNORE runs are omitted from blkx CRC, even though their
+            # zero-filled sectors remain part of the logical HFS image.
+            if run[0] != 2 or raw != replacement:
+                checksum = zlib.crc32(replacement, checksum)
             if raw != replacement:
                 packed = zlib.compress(replacement, 6)
                 name = 'chunks/%d.zlib' % index
@@ -120,7 +123,8 @@ def apply(base, patch, target):
     for run in verify.runs:
         raw = verify.raw(run)
         digest.update(raw)
-        checksum = zlib.crc32(raw, checksum)
+        if run[0] != 2:
+            checksum = zlib.crc32(raw, checksum)
     assert digest.hexdigest() == manifest['hfs_sha256']
     assert checksum == manifest['hfs_crc32']
     result = dict(bytes=pathlib.Path(target).stat().st_size, sha256=sha(target), hfs_sha256=digest.hexdigest(), changed_chunks=len(seen))

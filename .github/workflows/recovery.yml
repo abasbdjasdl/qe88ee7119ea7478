@@ -2,7 +2,7 @@ name: Build recovery diagnostic overlay
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: macos-15-intel
@@ -11,6 +11,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Retrieve temporary draft build input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build/recovery
+          gh release download recovery-build-input-20260921 --repo "$GITHUB_REPOSITORY" --pattern BaseSystem.dmg --dir build/recovery
       - name: Build and validate recovery patch
         shell: bash
         run: |
