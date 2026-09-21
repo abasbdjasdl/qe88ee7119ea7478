@@ -92,6 +92,17 @@ retains resources and logs if shutdown/unmapping was not confirmed, avoiding DMA
 use-after-free. That is an error containment measure, not a substitute for a
 controller stop implementation. `DataMapping.physical` is an IOVM bus address.
 
+`MacTxDmaQueue` and `MacFirmwareDmaQueue` now connect these allocations to the
+existing data/RPQ and firmware/multi-tag ledgers. Allocation occurs outside the
+gate, protocol attachment/staging under the gate; data and firmware buffers are
+fully preallocated. Data staging reports the actual WD page (not the BD index),
+then synchronizes frame, WD and BD in that order before exposing a producer for
+the caller's doorbell. A sync failure retains committed ownership, faults the
+bank and prevents subsequent staging. Cleanup reclaims protocol leases only
+after the controller has confirmed DMA stop. Tests compile all three actual
+native source files with IOKit/mbuf models, check packet bytes and completion
+ownership, inject all three sync failures and all 194 bank allocation failures.
+
 `RxDmaQueue<MacDmaBuffer>` allocates a 64-entry RX ring and 64 buffers, writes the
 original 8-byte RTL8852B RX BDs, processes a bounded batch using the hardware
 producer index, synchronizes each received/recycled buffer and returns a host

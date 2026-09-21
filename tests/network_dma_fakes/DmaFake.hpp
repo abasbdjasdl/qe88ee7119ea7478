@@ -12,7 +12,8 @@ constexpr int kIOPCIConfigVendorID=0,kIOPCIConfigDeviceID=2,kernel_task=0;
 struct DmaFake {
     enum Failure {none,allocation,memoryPrepare,command,attach,dmaPrepare,segments,cpuPointer,syncOut,syncIn,commandComplete,clear,memoryComplete};
     Failure failure=none;unsigned memories{},commands{},mappers{},memoryPrepared{},dmaPrepared{},logs{};
-    bool noMapper{},partialAttach{};uint64_t bus=0x120000,lengthOverride{},offsetOverride{};uint32_t segmentCount=1;
+    bool noMapper{},partialAttach{},advanceBus{};uint64_t bus=0x120000,lengthOverride{},offsetOverride{};uint32_t segmentCount=1;
+    size_t allocationCalls{},failAllocationAt=size_t(-1),syncCalls{},failSyncAt=size_t(-1);std::vector<void*> allocations;
     uint32_t requestedAlignment{};size_t requestedBytes{};std::vector<std::string> trace;
     void record(const char *s){trace.emplace_back(s);}
 };
@@ -29,7 +30,8 @@ struct IOBufferMemoryDescriptor {
     explicit IOBufferMemoryDescriptor(size_t n):bytes(n,0xa5){}
     static IOBufferMemoryDescriptor *inTaskWithPhysicalMask(int,int flags,size_t bytes,uint64_t mask){
         fake.record("allocate");assert(flags==15&&mask==0xffffffffULL);fake.requestedBytes=bytes;
-        if(fake.failure==DmaFake::allocation)return nullptr;++fake.memories;return new IOBufferMemoryDescriptor(bytes);
+        if(fake.allocationCalls++==fake.failAllocationAt||fake.failure==DmaFake::allocation)return nullptr;
+        ++fake.memories;auto *m=new IOBufferMemoryDescriptor(bytes);fake.allocations.push_back(m);return m;
     }
     int prepare(){fake.record("memoryPrepare");if(fake.failure==DmaFake::memoryPrepare)return 1;prepared=true;++fake.memoryPrepared;return 0;}
     int complete(){fake.record("memoryComplete");assert(prepared);if(fake.failure==DmaFake::memoryComplete)return 1;prepared=false;--fake.memoryPrepared;return 0;}
@@ -54,11 +56,11 @@ struct IODMACommand {
     int gen64IOVMSegments(UInt64 *offset,Segment64 *s,UInt32 *count){
         fake.record("segments");assert(prepared&&!*offset&&*count==1);if(fake.failure==DmaFake::segments)return 1;
         *offset=fake.offsetOverride?fake.offsetOverride:memory->bytes.size();*count=fake.segmentCount;
-        *s={fake.bus,fake.lengthOverride?fake.lengthOverride:memory->bytes.size()};return 0;
+        *s={fake.bus,fake.lengthOverride?fake.lengthOverride:memory->bytes.size()};if(fake.advanceBus)fake.bus+=65536;return 0;
     }
     int synchronize(int direction){
         assert(prepared);fake.record(direction==kIODirectionOut?"out":"in");
-        return fake.failure==(direction==kIODirectionOut?DmaFake::syncOut:DmaFake::syncIn)?1:0;
+        return fake.syncCalls++==fake.failSyncAt||fake.failure==(direction==kIODirectionOut?DmaFake::syncOut:DmaFake::syncIn)?1:0;
     }
     int complete(){fake.record("dmaComplete");assert(prepared);if(fake.failure==DmaFake::commandComplete)return 1;prepared=false;--fake.dmaPrepared;return 0;}
     int clearMemoryDescriptor(bool autoComplete){

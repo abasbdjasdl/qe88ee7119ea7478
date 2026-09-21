@@ -34,7 +34,7 @@ public:
     // must cache-sync frame/WD/BD, issue a DMA write barrier, then ring the
     // doorbell. If publishing fails, retain ownership until proven shutdown.
     // Descriptor policy (rate, MACID, sequence, port) comes from chip/sta state.
-    int stage(TxLease &lease,TxInfo info,uint16_t &nextProducer);
+    int stage(TxLease &lease,TxInfo info,uint16_t &nextProducer,uint16_t *usedPage=nullptr);
     int consumeTo(uint16_t hardwareConsumer);
     int releaseReport(const ReleaseReport &report);
     bool full()const;

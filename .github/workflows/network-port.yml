@@ -42,6 +42,8 @@ jobs:
           ./build/network_dma_test | tee build/network-stack/dma-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_rx_dma_test.cpp -o build/network_rx_dma_test
           ./build/network_rx_dma_test | tee build/network-stack/rx-dma-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_dma_fakes tests/network_tx_dma_test.cpp -o build/network_tx_dma_test
+          ./build/network_tx_dma_test | tee build/network-stack/tx-dma-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_descriptors_test.cpp -o build/network_descriptors_test
           ./build/network_descriptors_test | tee build/network-stack/descriptor-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_pci_test.cpp -o build/network_pci_test

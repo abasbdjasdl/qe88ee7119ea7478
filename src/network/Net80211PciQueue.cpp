@@ -28,8 +28,8 @@ bool Net80211PciQueue::full()const{
     TxOwnership<count>::Ticket ticket;
     return !ic_||ownership_.peek(ticket)!=QueueStatus::ok;
 }
-int Net80211PciQueue::stage(TxLease &lease,TxInfo info,uint16_t &nextProducer){
-    nextProducer=0;
+int Net80211PciQueue::stage(TxLease &lease,TxInfo info,uint16_t &nextProducer,uint16_t *usedPage){
+    nextProducer=0;if(usedPage)*usedPage=0xffff;
     if(!ic_)return ENETDOWN;
     if(!lease.frame||!lease.node||lease.bytes!=mbuf_pkthdr_len(lease.frame)||
        !lease.bytes||lease.bytes>16383||info.pkt_size!=lease.bytes||info.ch_dma!=channel_)return EINVAL;
@@ -42,6 +42,7 @@ int Net80211PciQueue::stage(TxLease &lease,TxInfo info,uint16_t &nextProducer){
     if(ownership_.commit(ticket,info.qsel,info.mac_id,&leases_[ticket.page])!=QueueStatus::ok)return EBUSY;
     leases_[ticket.page]=lease;lease={};
     for(size_t i=0;i<8;++i)ring_.bytes[ticket.bd*8+i]=wire.bd[i];
+    if(usedPage)*usedPage=ticket.page;
     nextProducer=ticket.nextProducer;return 0;
 }
 void Net80211PciQueue::drainCompletions(){
