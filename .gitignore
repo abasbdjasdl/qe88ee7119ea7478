@@ -2,3 +2,5 @@ build/
 MacKernelSDK/
 *.zip
 *.dSYM/
+__pycache__/
+*.pyc
