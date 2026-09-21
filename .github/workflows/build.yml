@@ -39,6 +39,8 @@ jobs:
           ./build/pci_config_test | tee build/host-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/report_buffer_test.cpp -o build/report_buffer_test
           ./build/report_buffer_test
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/mmio_probe_test.cpp -o build/mmio_probe_test
+          ./build/mmio_probe_test | tee -a build/host-tests.txt
       - name: Build with Apple toolchain
         shell: bash
         env:

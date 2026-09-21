@@ -18,6 +18,9 @@ struct Snapshot {
     uint16_t vendorID{}, deviceID{}, subsystemVendor{}, subsystemDevice{};
     uint16_t command{};
     uint8_t revision{}, headerType{};
+    uint8_t pmOffset{};
+    uint16_t pmControlStatus{};
+    bool pmControlReadable{};
     uint32_t bars[6]{};
     uint64_t capabilities{}; // Standard capability IDs below 64.
     unsigned capabilityCount{};
@@ -56,6 +59,13 @@ inline bool decode(const uint8_t *bytes, size_t length, Snapshot &out) {
         if (visited & bit) { out.capStatus = CapStatus::cycle; break; }
         visited |= bit;
         const unsigned id = bytes[offset];
+        if (id == 1 && !out.pmOffset) {
+            out.pmOffset = offset;
+            if (size_t(offset) + 6 <= length) {
+                out.pmControlStatus = read16(bytes + offset + 4);
+                out.pmControlReadable = true;
+            }
+        }
         if (id < 64) out.capabilities |= uint64_t(1) << id;
         ++out.capabilityCount;
         offset = bytes[offset + 1];

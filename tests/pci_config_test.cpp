@@ -18,6 +18,10 @@ int main() {
     c[0x50]=5; c[0x51]=0x60; c[0x60]=0x10;
     assert(decode(c, sizeof(c), s) && s.capStatus == CapStatus::valid);
     assert(s.capabilityCount == 3 && s.hasCapability(1) && s.hasCapability(5) && s.hasCapability(0x10));
+    assert(s.pmOffset == 0x40 && s.pmControlReadable && s.pmControlStatus == 0);
+    c[0x44]=3;
+    assert(decode(c, sizeof(c), s) && s.pmControlStatus == 3);
+    c[0x44]=0;
     assert(!s.hasCapability(0x11) && !s.hasCapability(64));
     c[0x61]=0x40;
     assert(decode(c, sizeof(c), s) && s.capStatus == CapStatus::cycle);
