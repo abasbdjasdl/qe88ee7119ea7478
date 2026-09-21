@@ -22,9 +22,8 @@ inline TransferStatus controlError(uint8_t c){
     default:return TransferStatus::notRun;
     }
 }
-// Portable firmware-transfer orchestration. There is deliberately NO hardware
-// backend in the live kext yet. A future backend must satisfy the contract in
-// docs/firmware-transport.md, especially quiesceAndProveIdle and ownership.
+// Portable firmware-transfer orchestration. The bounded PCI backend implements
+// the contract in docs/firmware-transport.md, including idle proof and ownership.
 // All packet buffers stay pinned for the ENTIRE transaction; no ring-index
 // observation alone releases/recycles a buffer (rtw89 PCI MULTITAG=8).
 template<class Backend>

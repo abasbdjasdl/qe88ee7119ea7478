@@ -14,6 +14,8 @@ inline bool uploadAddress16(uint32_t a){return a==0x1038||a==0x1080;}
 struct PciDownloadResult {
     unsigned stage{},writes{},polls{},published{},failureAddress{},gate{};
     uint32_t failureExpected{},failureActual{},busy{},index{},init{},stop{},hci{};
+    uint32_t pollFailureAddress{},pollFailureMask{},pollFailureExpected{},pollFailureActual{},resetHci{},resetControl{};
+    unsigned pollFailureReason{}; // 1 deadline, 2 backwards clock, 3 invalid read, 4 iteration cap
     bool attempted{},busMasterEnabled{},doorbellAttempted{},idle{},busMasterOff{},restored{};
 };
 // D owns MMIO and PCI config; packet bank ownership remains with the caller.
@@ -34,11 +36,15 @@ template<class D> class PciDownload {
     bool w16(uint32_t a,uint16_t v){++result.writes;const bool ok=uploadAddress16(a)&&d.uploadWrite16(a,v);if(!ok&&!result.failureAddress){result.failureAddress=a;result.failureExpected=v;result.failureActual=d.read16(a);}return ok;}
     bool poll(uint32_t a,uint32_t mask,uint32_t expected,unsigned timeout,uint32_t &v){
         const auto begin=d.nowUs();
+        auto failed=[&](unsigned reason){
+            if(!result.pollFailureReason){result.pollFailureReason=reason;result.pollFailureAddress=a;result.pollFailureMask=mask;result.pollFailureExpected=expected;result.pollFailureActual=v;}
+            return false;
+        };
         for(unsigned i=0;i<timeout/50+1;++i){
-            const auto now=d.nowUs();if(now<begin||now-begin>=timeout)return false;
-            v=d.read32(a);++result.polls;if(invalid(v))return false;
+            const auto now=d.nowUs();if(now<begin)return failed(2);if(now-begin>=timeout)return failed(1);
+            v=d.read32(a);++result.polls;if(invalid(v))return failed(3);
             if((v&mask)==expected)return true;d.pauseUs(50);
-        }return false;
+        }return failed(4);
     }
 public:
     PciDownloadResult result{};
@@ -75,9 +81,15 @@ public:
         if(!equal(0x1160,0xffffffff,static_cast<uint32_t>(ring.address))||!equal(0x1164,0xffffffff,0)||
            (d.read16(0x1038)&0xfff)!=256||!equal(0x1228,0xffffff,0x01041c))return false;
         result.stage=3;
+        // rtw89 mac_partial_init enables both internal HCI engines before
+        // pci_mac_pre_init resets BDRAM. These are local engine gates, not
+        // permission to access host memory: BM and TXHCI/RXHCI remain off,
+        // all implemented queues and PCI IO remain stopped until reset ends.
+        if(!w(0x8380,(saved[7]&~3u)|3)||!equal(0x8380,3,3))return false;
+        result.resetHci=d.read32(0x8380);
         if(!w(0x1014,0x400)||!equal(0x1080,0x0fff0fff,0))return false;
-        uint32_t reset=0;
-        if(!w(0x1000,init|8)||!poll(0x1000,8,0,10000,reset))return false;
+        if(!w(0x1000,init|8)||!poll(0x1000,8,0,10000,result.resetControl))return false;
+        // Only TX is needed after reset; close the internal RX gate before BM.
         if(!w(0x8380,(saved[7]&~3u)|1)||!equal(0x8380,3,1))return false;
         // Only CH12 can run. WPDMA + every other implemented TX channel stop;
         // RXHCI and HCI_RXDMA stay disabled. Producer is still zero.

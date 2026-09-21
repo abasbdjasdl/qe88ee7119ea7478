@@ -10,7 +10,7 @@ namespace t=rtl8852be::transport;
 struct Device {
     std::map<uint32_t,uint32_t> regs{{0x1000,0xc15000},{0x1010,0xfff00},{0x1e0,0x23}};
     uint16_t cmd=2;uint64_t time=0;unsigned writes=0,fail=0,barriers=0,doorbells=0,releases=0;
-    bool safe=true,stuck=false,resetStuck=false,noHeader=false,noFirmware=false,busyAfter=false,denyOff=false,partialEnable=false;
+    bool safe=true,stuck=false,resetStuck=false,noHeader=false,noFirmware=false,busyAfter=false,denyOff=false,partialEnable=false,hciOffAtReset=false;
     uint16_t command(){return cmd;}bool interruptsSafe(){return safe;}
     uint64_t nowUs(){return time;}void pauseUs(unsigned n){if(!stuck)time+=n;}
     uint32_t read32(uint32_t a){if(a==0x101c&&busyAfter&&doorbells)return 0x40000;return regs[a];}
@@ -21,7 +21,11 @@ struct Device {
         assert(t::uploadAddress32(a));++writes;if(writes==fail)return false;
         if(cmd&4)assert(a==0x1000||a==0x1010||a==0x8380||a==0x160||a==0x164);
         regs[a]=v;
-        if(a==0x1000&&(v&8)&&!resetStuck)regs[a]&=~8u;
+        if(a==0x1000&&(v&8)){
+            assert(!(cmd&4)&&!(v&0x2800)&&(regs[0x1010]&0x1f0f00)==0x1f0f00);
+            if(hciOffAtReset)regs[0x8380]&=~3u;
+            if((regs[0x8380]&3)==3&&!resetStuck)regs[a]&=~8u;
+        }
         if(a==0x1014)regs[0x1080]=0;
         return true;
     }
@@ -47,6 +51,7 @@ int main(int argc,char **argv){
     Device d;auto r=run(d);
     assert(r.first.status==t::TransferStatus::complete&&r.first.buffersReleased&&r.first.submitted==164);
     assert(r.second.idle&&r.second.busMasterOff&&r.second.restored&&r.second.published==164);
+    assert(r.second.resetHci==3&&!(r.second.resetControl&8)&&!r.second.pollFailureReason);
     assert(d.cmd==2&&d.barriers==164&&!d.regs[0x1160]&&!d.regs[0x1038]&&d.releases==1);
     const auto writes=d.writes;
     for(unsigned i=1;i<=writes;++i){d=Device{};d.fail=i;r=run(d);assert(r.first.status!=t::TransferStatus::complete);assert(!(d.cmd&4));}
@@ -57,6 +62,11 @@ int main(int argc,char **argv){
     d=Device{};d.noHeader=true;r=run(d);assert(r.first.status==t::TransferStatus::timeout&&d.doorbells==1&&r.first.buffersReleased);
     d=Device{};d.noFirmware=true;r=run(d);assert(r.first.status==t::TransferStatus::timeout&&d.doorbells==164&&r.first.buffersReleased);
     d=Device{};d.resetStuck=true;d.stuck=true;r=run(d);assert(r.first.status==t::TransferStatus::startFailed&&!d.doorbells&&r.second.polls<250);
+    assert(r.second.pollFailureReason==4&&r.second.pollFailureAddress==0x1000&&(r.second.pollFailureActual&8));
+    d=Device{};d.hciOffAtReset=true;r=run(d);
+    assert(r.first.status==t::TransferStatus::startFailed&&!d.doorbells&&r.first.buffersReleased);
+    assert(r.second.pollFailureReason==1&&r.second.pollFailureAddress==0x1000&&r.second.pollFailureMask==8&&r.second.pollFailureExpected==0&&(r.second.pollFailureActual&8));
+    assert(r.second.restored&&!(d.cmd&4));
     d=Device{};d.busyAfter=true;r=run(d);assert(r.first.status==t::TransferStatus::quiesceFailed&&r.first.retainBuffers&&!r.first.buffersReleased&&d.cmd==2&&!d.releases);
     d=Device{};d.denyOff=true;r=run(d);assert(r.first.status==t::TransferStatus::quiesceFailed&&r.first.retainBuffers&&!r.first.buffersReleased&&!d.releases);
     assert(!t::uploadAddress32(0xc000)&&!t::uploadAddress32(0x30)&&!t::uploadAddress16(0x1082));

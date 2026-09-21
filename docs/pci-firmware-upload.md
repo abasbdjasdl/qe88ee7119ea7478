@@ -1,8 +1,19 @@
-# 0.0.12: bounded PCI firmware upload experiment
+# 0.0.13: bounded PCI firmware upload experiment
 
-This is the first hardware upload candidate, not a network driver. Hardware
-results are pending. 0.0.11 passed two ROM preparation/cleanup cycles, bank memory
-verification, power-off and PCI restoration in one physical recovery boot.
+This is an experimental firmware uploader, not a network driver. 0.0.12 reached
+PCI stage 3 and stopped before submission; ROM passes, quiescence, power-off,
+PCI restoration and memory release passed. Its 30 writes and lack of a readback
+failure locate the stop at the BDRAM reset poll, but the last reset value was
+not exported. 0.0.13 hardware results are pending.
+
+The reference mac_partial_init opens HCI TX/RX internal gates before PCI pre-init
+and BDRAM reset. 0.0.12 instead opened only TX after reset. 0.0.13 opens both
+internal gates for reset with bus mastering/TXHCI/RXHCI disabled and all channels
+stopped, then closes RX before bus mastering. This corrects an ordering mismatch;
+whether it explains the physical timeout remains a hardware hypothesis.
+The mock now requires these gates for reset completion and exercises a forced
+closed-gate failure. Poll failures preserve register, mask, expected/last values
+and reason across cleanup; reset gate/control values and PCI polls are exported.
 
 The same native 165-page bank is prepared and retained. A first ROM/cleanup pass
 must succeed, then a second ROM pass invokes the transfer core while WCPU is
@@ -10,7 +21,8 @@ ready. The backend checks inactive MSI/MSI-X, bus mastering off, an idle device
 and an empty CH12 queue. It configures the 256-entry ring, 32-bit addresses,
 CH12 BDRAM, 8852B burst/tag/descriptor settings, resets the CH12 index and BDRAM,
 masks chip interrupts, and enables only CH12 TX with PCI INTx disabled. RXHCI,
-HCI RX DMA, WPDMA and other implemented TX queues stay stopped. No CMAC/RF
+WPDMA and other implemented TX queues stay stopped. HCI RX is enabled only for
+the local reset with host DMA disabled, then closed. No CMAC/RF
 registers are enabled. PHY/link calibration quirks and networking are not ported;
 the experiment can fail at explicit readback/timeout gates on real hardware.
 
@@ -37,7 +49,7 @@ full protocol to complete; WiFiOperational remains false. No scan, association,
 WPA authentication, network interface or network traffic is implemented.
 
 Portable tests run the real 164-packet fixture through the register backend,
-inject all 199 write failures, active MSI/dirty queue rejection, partial bus-master
+inject all 200 write failures, active MSI/dirty queue rejection, partial bus-master
 enable, lost header/firmware readiness, stuck clocks/reset, persistent DMA busy
 and failed bus-master disable. The last two assert no release callback occurs.
 Apple CI adds sanitizers and native kernel compilation. Mocks are not hardware

@@ -10,7 +10,7 @@ bundle = pathlib.Path(sys.argv[1])
 info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
 assert info['CFBundlePackageType'] == 'KEXT'
 assert info['CFBundleIdentifier'] == 'local.rtl8852be.probe'
-assert info['CFBundleVersion'] == '0.0.12'
+assert info['CFBundleVersion'] == '0.0.13'
 assert info['CFBundleExecutable'] == 'RTL8852BEProbe'
 personality = info['IOKitPersonalities']['RTL8852BE-R16-Diagnostic']
 assert personality['IOPCIMatch'] == '0xb85210ec'

@@ -3,12 +3,13 @@
 This is an experimental diagnostic service, not a working Wi-Fi driver.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Current candidate: 0.0.12 (bounded real firmware upload)
+## Current candidate: 0.0.13 (HCI gate ordering before BDRAM reset)
 
-0.0.11 passed two physical ROM and cleanup cycles. 0.0.12 adds a CH12-only PCI
-backend for the real immutable firmware batch: queue setup, header acceptance,
-full upload, firmware-ready/drain checks and verified DMA shutdown in one boot.
-Physical upload results are pending. See [pci-firmware-upload.md](docs/pci-firmware-upload.md).
+0.0.12 stopped during queue reset, with no packet submitted and successful
+cleanup. 0.0.13 corrects the internal HCI gate order and adds persistent poll
+failure evidence. The same boot attempts queue setup, header acceptance, full
+upload, firmware-ready/drain checks and verified shutdown. Physical upload
+success is not established. See [pci-firmware-upload.md](docs/pci-firmware-upload.md).
 
 The stopped command-ring experiment passed on hardware in 0.0.7. Version 0.0.11
 prepares the complete real firmware batch in 165 native IOKit pages, initializes
@@ -33,7 +34,7 @@ RF and Wi-Fi remain unimplemented. See [firmware-bank-rom.md](docs/firmware-bank
 - 0.0.7: physical stopped FWCMD ring readback/restoration passed, including
   six setup/six restore writes, supply-off and memory cleanup. No DMA submitted.
 - Offline additions: 8852B firmware packet encoder and bounded transfer protocol
-  with simulated-backend fault tests; no live transport backend yet.
+  with simulated-backend fault tests, used by the upload candidate below.
 - 0.0.8: native firmware bank passed on hardware (164 packets, 165 pages, cleanup
   OK). ROM preparation stopped at phase 1 with a readback failure; ROM was not
   started. Outer supply-off and PCI restoration passed. Exact failed bits were
@@ -47,7 +48,10 @@ RF and Wi-Fi remain unimplemented. See [firmware-bank-rom.md](docs/firmware-bank
 - 0.0.11: establishes/verifies minimal MAC access before HCI snapshot/stop and
   restores HCI before disabling that access. A successful, cleaned-up first pass
   is followed by one confirmation pass; both passed on physical hardware.
-- 0.0.12: native upload backend implemented and under test; no hardware success claim.
+- 0.0.12: hardware PCI stage 3/startFailed, 0 submitted; ROM, cleanup and PCI
+  restore passed. BDRAM poll failure inferred from control flow/write count.
+- 0.0.13: corrects internal HCI gate order before BDRAM reset and adds poll
+  failure/register evidence; hardware validation pending.
 - Not implemented: RF initialization, network DMA queues, network TX/RX, scan,
   association, WPA authentication, or an IO80211 network interface.
 

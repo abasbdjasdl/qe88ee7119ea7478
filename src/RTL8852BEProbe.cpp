@@ -195,8 +195,8 @@ bool RTL8852BEProbe::start(IOService *provider) {
     pci->close(this);
     bool ok = setProperty("DiagnosticOnly", true);
     ok &= setProperty("WiFiOperational", false);
-    ok &= setProperty("DriverVersion", "0.0.12");
-    ok &= setProperty("Experiment", "FIRMWARE-UPLOAD-01");
+    ok &= setProperty("DriverVersion", "0.0.13");
+    ok &= setProperty("Experiment", "FIRMWARE-UPLOAD-02");
     ok &= setProperty("Stage", rtl8852be::statusName(r.status));
     ok &= setProperty("VendorID", s.vendorID, 16);
     ok &= setProperty("DeviceID", s.deviceID, 16);
@@ -332,6 +332,14 @@ bool RTL8852BEProbe::start(IOService *provider) {
     ok &= setProperty("UploadPciStop",static_cast<uint64_t>(pciTransfer.stop),64);
     ok &= setProperty("UploadPciHci",static_cast<uint64_t>(pciTransfer.hci),64);
     ok &= setProperty("UploadPciWrites",pciTransfer.writes,32);
+    ok &= setProperty("UploadPciPolls",pciTransfer.polls,32);
+    ok &= setProperty("UploadResetHci",pciTransfer.resetHci,32);
+    ok &= setProperty("UploadResetControl",pciTransfer.resetControl,32);
+    ok &= setProperty("UploadPollFailureReason",pciTransfer.pollFailureReason,32);
+    ok &= setProperty("UploadPollFailureAddress",pciTransfer.pollFailureAddress,32);
+    ok &= setProperty("UploadPollFailureMask",pciTransfer.pollFailureMask,32);
+    ok &= setProperty("UploadPollFailureExpected",pciTransfer.pollFailureExpected,32);
+    ok &= setProperty("UploadPollFailureActual",pciTransfer.pollFailureActual,32);
     ok &= setProperty("UploadPciIdle",pciTransfer.idle);
     ok &= setProperty("UploadPciMasterOff",pciTransfer.busMasterOff);
     ok &= setProperty("UploadPciRestored",pciTransfer.restored);
@@ -359,7 +367,7 @@ bool RTL8852BEProbe::start(IOService *provider) {
         ok &= setProperty(key, s.bars[i], 32);
     }
     if (!ok) { IOService::stop(provider); return false; }
-    IOLog("RTL8852BEProbe 0.0.12: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
+    IOLog("RTL8852BEProbe 0.0.13: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
           rtl8852be::statusName(r.status), r.reads, r.cfgFirst, r.cfgSecond,
           r.commandBefore, r.commandDuring, r.commandAfter);
     IOLog("RTL8852BEProbe XTAL: %s writes=%u polls=%u raw=%02x power=%08x/%08x\n",
