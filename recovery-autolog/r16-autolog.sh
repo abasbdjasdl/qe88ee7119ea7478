@@ -27,12 +27,14 @@ run() {
 }
 
 target=
+out=
 find_target() {
     for marker in /Volumes/*/r16-autolog/capture-target.txt /Volumes/*/EFI/OC/r16-autolog/capture-target.txt; do
         [ -f "$marker" ] || continue
         [ "$(cat "$marker")" = "$token" ] || continue
         candidate=${marker%/capture-target.txt}
-        if [ -w "$candidate" ]; then target=$candidate; return 0; fi
+        candidate_out="$candidate/logs-$(date +%Y%m%d-%H%M%S)-$$"
+        if mkdir "$candidate_out" 2>/dev/null; then target=$candidate; out=$candidate_out; return 0; fi
     done
     return 1
 }
@@ -63,12 +65,6 @@ while [ "$attempt" -lt 6 ]; do
     sleep 5
 done
 
-if [ -n "$target" ]; then
-    out="$target/logs-$(date +%Y%m%d-%H%M%S)"
-    mkdir "$out" || out=
-else
-    out=
-fi
 if [ -n "$out" ]; then
     echo "STARTED $token" > "$out/status.txt"
     cp "$ram"/* "$out/" 2>/dev/null
