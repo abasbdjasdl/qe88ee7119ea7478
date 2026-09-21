@@ -1,0 +1,62 @@
+name: Build PCI diagnostic kext
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Fetch pinned kernel SDK
+        shell: bash
+        run: |
+          git init MacKernelSDK
+          git -C MacKernelSDK remote add origin https://github.com/acidanthera/MacKernelSDK.git
+          git -C MacKernelSDK fetch --depth 1 origin 05094e5e88cec7caedbfb35e8449ed0db94bf95b
+          git -C MacKernelSDK checkout --detach FETCH_HEAD
+          test "$(git -C MacKernelSDK rev-parse HEAD)" = 05094e5e88cec7caedbfb35e8449ed0db94bf95b
+      - name: Test PCI parser
+        shell: bash
+        run: |
+          mkdir -p build
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/pci_config_test.cpp -o build/pci_config_test
+          ./build/pci_config_test | tee build/host-tests.txt
+      - name: Build with Apple toolchain
+        shell: bash
+        env:
+          MAC_KERNEL_SDK: ${{ github.workspace }}/MacKernelSDK
+        run: |
+          set -o pipefail
+          bash build_macos.sh 2>&1 | tee build/build.log
+          python3 verify_bundle.py build/macos/RTL8852BEProbe.kext
+      - name: Package diagnostic artifact
+        shell: bash
+        run: |
+          xcrun clang --version > build/toolchain.txt
+          xcodebuild -version >> build/toolchain.txt
+          git rev-parse HEAD > build/source-commit.txt
+          ditto -c -k --keepParent build/macos/RTL8852BEProbe.kext build/RTL8852BEProbe-diagnostic.zip
+          shasum -a 256 build/RTL8852BEProbe-diagnostic.zip > build/SHA256SUMS.txt
+      - name: Upload diagnostic artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: RTL8852BEProbe-diagnostic-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            build/RTL8852BEProbe-diagnostic.zip
+            build/SHA256SUMS.txt
+            build/macos/bundle-verification.json
+            build/host-tests.txt
+            build/toolchain.txt
+            build/source-commit.txt
+            build/build.log
