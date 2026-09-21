@@ -23,12 +23,14 @@ jobs:
           git -C MacKernelSDK remote add origin https://github.com/acidanthera/MacKernelSDK.git
           git -C MacKernelSDK fetch --depth 1 origin 05094e5e88cec7caedbfb35e8449ed0db94bf95b
           git -C MacKernelSDK checkout --detach FETCH_HEAD
-      - name: Test Realtek data descriptor adapter
+      - name: Test Realtek descriptors, PCI queues and firmware packets
         shell: bash
         run: |
           mkdir -p build/network-stack
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_descriptors_test.cpp -o build/network_descriptors_test
           ./build/network_descriptors_test | tee build/network-stack/descriptor-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_pci_test.cpp -o build/network_pci_test
+          ./build/network_pci_test | tee build/network-stack/pci-tests.txt
       - name: Compile existing macOS 802.11 and WPA stack
         shell: bash
         env:

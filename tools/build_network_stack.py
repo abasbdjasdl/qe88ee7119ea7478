@@ -13,7 +13,7 @@ flags=['-target','x86_64-apple-macos11.0','-mkernel','-DKERNEL','-DKERNEL_EXTENS
 for include in ('itl80211/openbsd','itl80211','itl80211/linux','include'):
     flags+=['-I',str(source/include)]
 flags+=['-I',str(sdk/'Headers')]
-files=sorted(p for p in (source/'itl80211').rglob('*') if p.suffix in ('.c','.cpp'))
+files=sorted(p for p in (source/'itl80211').rglob('*') if p.suffix in ('.c','.cpp') and p.name!='CTimeout.cpp')
 objects=[];manifest=[]
 for i,p in enumerate(files):
     output=dest/f'{i:03d}-{p.stem}.o'
@@ -25,13 +25,14 @@ for i,p in enumerate(files):
         print(result.stdout[-12000:]);result.check_returncode()
     objects.append(output)
     manifest.append({'path':p.relative_to(source).as_posix(),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
-bridge=root/'src/network/Net80211PacketBridge.cpp'
-bridge_obj=dest/'Net80211PacketBridge.o'
-subprocess.run(['xcrun','clang++',*flags,'-c',str(bridge),'-o',str(bridge_obj)],check=True)
-objects.append(bridge_obj)
+for bridge in sorted((root/'src/network').glob('*.cpp')):
+    bridge_obj=dest/(bridge.stem+'.o')
+    subprocess.run(['xcrun','clang++',*flags,'-c',str(bridge),'-o',str(bridge_obj)],check=True)
+    objects.append(bridge_obj)
+    manifest.append({'path':bridge.relative_to(root).as_posix(),'sha256':hashlib.sha256(bridge.read_bytes()).hexdigest()})
 subprocess.run(['xcrun','ld','-r','-arch','x86_64','-o',str(dest/'NetworkStack-reloc.o'),*map(str,objects)],check=True)
 undefined=subprocess.check_output(['xcrun','nm','-uj',str(dest/'NetworkStack-reloc.o')],text=True).splitlines()
-unresolved_protocol=[s for s in undefined if any(x in s for x in ('ieee80211_','HMAC_','pbkdf2_','rijndael','SHA1','SHA256'))]
+unresolved_protocol=[s for s in undefined if any(x in s for x in ('ieee80211_','HMAC_','pbkdf2_','rijndael','SHA1','SHA256','CTimeout','_fCommandGate','_fWorkloop'))]
 assert not unresolved_protocol, 'Protocol dependency still unresolved: '+repr(unresolved_protocol)
 archive=dest/'libR16Net80211.a'
 subprocess.run(['xcrun','libtool','-static','-o',str(archive),*map(str,objects)],check=True)

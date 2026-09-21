@@ -23,9 +23,9 @@ inline DescriptorStatus encodeTx(const TxInfo &p,uint8_t *out,size_t capacity,si
     for(size_t i=0;i<needed;++i)out[i]=encoded[i];length=needed;return DescriptorStatus::ok;
 }
 struct RxPacket {RxInfo info{};const uint8_t *payload{};size_t length{},offset{};};
-// A complete first-and-last RX segment, after the PCI RXBD prefix. Fragmented
-// RX assembly must finish separately; this never accepts a partial DMA buffer.
-inline DescriptorStatus decodeRx(const uint8_t *data,size_t size,size_t descriptorOffset,RxPacket &out){
+// Header-only inspection for the first PCI fragment. Payload is never exposed
+// until the complete-frame decoder has checked the advertised packet length.
+inline DescriptorStatus decodeRxHeader(const uint8_t *data,size_t size,size_t descriptorOffset,RxPacket &out){
     out={};if(!data)return DescriptorStatus::nullPointer;
     if(descriptorOffset>size||size-descriptorOffset<16)return DescriptorStatus::truncated;
     const auto word=little32(data+descriptorOffset);
@@ -40,9 +40,16 @@ inline DescriptorStatus decodeRx(const uint8_t *data,size_t size,size_t descript
     reference::rtw89_core_query_rxdesc(&device,&info,descriptor,0);
     const size_t overhead=size_t(info.offset)+info.rxd_len;
     if(!info.pkt_size||info.pkt_type==15)return DescriptorStatus::invalidLength;
-    if(overhead>size-descriptorOffset||info.pkt_size>size-descriptorOffset-overhead)return DescriptorStatus::truncated;
+    if(overhead>size-descriptorOffset)return DescriptorStatus::truncated;
     if(info.icv_err||info.crc32_err)return DescriptorStatus::corruptFrame;
-    out.info=info;out.offset=descriptorOffset+overhead;out.payload=data+out.offset;out.length=info.pkt_size;
+    out.info=info;out.offset=descriptorOffset+overhead;out.length=info.pkt_size;
+    return DescriptorStatus::ok;
+}
+inline DescriptorStatus decodeRx(const uint8_t *data,size_t size,size_t descriptorOffset,RxPacket &out){
+    auto status=decodeRxHeader(data,size,descriptorOffset,out);
+    if(status!=DescriptorStatus::ok)return status;
+    if(out.length>size-out.offset){out={};return DescriptorStatus::truncated;}
+    out.payload=data+out.offset;
     return DescriptorStatus::ok;
 }
 static_assert(sizeof(reference::rtw89_txwd_body)==24,"8852B TXWD must be 24 bytes");
