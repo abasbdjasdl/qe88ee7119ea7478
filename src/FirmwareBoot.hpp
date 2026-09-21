@@ -17,12 +17,25 @@ inline bool allowed32(uint32_t a){
     case 0x8a00:case 0x8a04:case 0x8c08:case 0x9008:case 0x8c40:case 0x8c44:case 0x8c4c:case 0x8c50:return true;default:return false;}
 }
 inline bool invalid(uint32_t v){return v==0xffffffff||v==0xdeadbeef;}
-struct Result {Status status{Status::notRun},operationStatus{Status::notRun};unsigned phase{},writes{},polls{};uint32_t wde{},ple{},control{},dmac{},clock{},wdeConfig{},pleConfig{},hfcControl{},hfcPages{};bool attempted{},cleanupOK{},cpuStopped{};};
+// 8852B uses B_AX_TX_STOP1_MASK_V1: ACH4..7 do not exist on this chip.
+// RX is stopped by RXHCI_EN above; rtw8852be does not use STOP_RXQ/RPQ.
+constexpr uint32_t txChannels=0x00070f00,stopChannels=txChannels;
+constexpr uint32_t busyChannels=txChannels|0x00780003;
+struct Result {Status status{Status::notRun},operationStatus{Status::notRun};unsigned phase{},writes{},polls{};uint32_t wde{},ple{},control{},dmac{},clock{},wdeConfig{},pleConfig{},hfcControl{},hfcPages{};
+    uint32_t hciBefore{},stopBefore{},hciPaused{},stopPaused{},hciAfter{},stopAfter{},cleanupFailures{};
+    uint32_t failureAddress{},failureMask{},failureExpected{},failureActual{};
+    bool failureRecorded{},attempted{},cleanupOK{},cpuStopped{};};
 template<class D> Result probe(D &d){
     Result r;if((d.command()&6)!=2){r.status=Status::unsafeCommand;return r;}
     const auto hci=d.read32(0x1000),stop=d.read32(0x1010),sec=d.read32(0xc00);
     const auto reason=d.read16(0x1e6);
     if(invalid(hci)||invalid(stop)||invalid(sec)||reason==0xffff){r.status=Status::invalidRead;return r;}
+    r.hciBefore=hci;r.stopBefore=stop;
+    auto matches=[&](uint32_t address,uint32_t value,uint32_t mask,uint32_t expected){
+        if(!invalid(value)&&(value&mask)==expected)return true;
+        if(!r.failureRecorded){r.failureRecorded=true;r.failureAddress=address;r.failureMask=mask;r.failureExpected=expected;r.failureActual=value;}
+        return false;
+    };
     auto wr=[&](uint32_t a,uint32_t v){++r.writes;if(!d.bootWrite32(a,v)){r.status=Status::writeFailed;return false;}return true;};
     auto rm=[&](uint32_t a,uint32_t mask,uint32_t value){const auto old=d.read32(a);if(invalid(old)){r.status=Status::invalidRead;return false;}return wr(a,(old&~mask)|value);};
     auto poll=[&](uint32_t a,uint32_t mask,uint32_t wanted,unsigned timeout,uint32_t &last){
@@ -36,9 +49,10 @@ template<class D> Result probe(D &d){
     r.attempted=true;
     do{
         r.phase=1;
-        if(!wr(0x1000,hci&~0x2800u)||!wr(0x1010,stop|0x7ff03u))break;
-        uint32_t idle=0;if(!poll(0x101c,0x7fff03,0,2000,idle))break;
-        if((d.read32(0x1000)&0x2800)||((d.read32(0x1010)&0x7ff03)!=0x7ff03)){r.status=Status::writeFailed;break;}
+        if(!wr(0x1000,hci&~0x2800u)||!wr(0x1010,stop|stopChannels))break;
+        uint32_t idle=0;if(!poll(0x101c,busyChannels,0,2000,idle))break;
+        r.hciPaused=d.read32(0x1000);r.stopPaused=d.read32(0x1010);
+        if(!matches(0x1000,r.hciPaused,0x2800,0)||!matches(0x1010,r.stopPaused,stopChannels,stopChannels)){r.status=Status::writeFailed;break;}
         r.phase=2;
         // DLFW layout: 64 KiB WDE (0 linked pages), 128 KiB PLE (64 linked).
         if(!wr(0x8400,0x60440000)||!wr(0x8404,0x00040000)||!rm(0x8400,0x04800000,0)||!rm(0x8404,0x04800000,0x04800000))break;
@@ -50,37 +64,52 @@ template<class D> Result probe(D &d){
         r.phase=3;if(!poll(0x8d00,3,3,2000,r.wde)||!poll(0x9100,3,3,2000,r.ple))break;
         r.phase=4;if(!rm(0x8a00,9,0)||!wr(0x8a04,40u<<16)||!rm(0x8a00,0xc00,0)||!rm(0x8a00,9,8))break;
         r.wdeConfig=d.read32(0x8c08);r.pleConfig=d.read32(0x9008);r.hfcControl=d.read32(0x8a00);r.hfcPages=d.read32(0x8a04);
-        if(invalid(r.wdeConfig)||invalid(r.pleConfig)||invalid(r.hfcControl)||
-           (r.wdeConfig&0x1fff3f03)!=0||(r.pleConfig&0x1fff3f03)!=0x00400801||
-           (r.hfcControl&0xc09)!=8||r.hfcPages!=(40u<<16)){r.status=Status::invalidRead;break;}
+        if(!matches(0x8c08,r.wdeConfig,0x1fff3f03,0)||!matches(0x9008,r.pleConfig,0x1fff3f03,0x00400801)||
+           !matches(0x8a00,r.hfcControl,0xc09,8)||!matches(0x8a04,r.hfcPages,0xffffffff,40u<<16)){r.status=Status::invalidRead;break;}
         r.phase=5;
         if(!rm(0x88,2,0)||!rm(0x1e0,7,0)||!rm(8,0x4000,0)||!rm(0x88,4,0)||!rm(0x88,4,4)||!rm(0x88,1,0)||!rm(0x88,1,1))break;
         if(!wr(0x1f4,0)||!wr(0x1f8,0)||!wr(0x160,0)||!wr(0x164,0)||!wr(0x168,0)||!wr(0x16c,0))break;
         if(!rm(8,0x4000,0x4000)||!rm(0x1e0,0xe7,1)||!rm(0xc00,0x30000,0x20000))break;
         ++r.writes;if(!d.bootWrite16(0x1e6,static_cast<uint16_t>(reason&~7u))){r.status=Status::writeFailed;break;}
-        const auto reset=d.read32(0x1e0);if(invalid(reset)||(reset&0xe7)!=1){r.status=Status::staleReady;break;}
+        const auto reset=d.read32(0x1e0);if(!matches(0x1e0,reset,0xe7,1)){r.status=Status::staleReady;break;}
         if(!rm(0x88,2,2))break;
         r.phase=6;if(!poll(0x1e0,2,2,400000,r.control))break;
         if((r.control&0xe0)==0xe0){r.status=Status::staleReady;break;}
         const auto state=(r.control>>5)&7;if(state>=2&&state<=4){r.status=Status::romError;break;}
         r.dmac=d.read32(0x8400);r.clock=d.read32(0x8404);
-        if(r.dmac!=0x64c40000||r.clock!=0x04840000){r.status=Status::invalidRead;break;}
+        if(!matches(0x8400,r.dmac,0xffffffff,0x64c40000)||!matches(0x8404,r.clock,0xffffffff,0x04840000)){r.status=Status::invalidRead;break;}
         r.status=Status::ready;
     }while(false);
     r.operationStatus=r.status;
     // Every cleanup operation executes, even after an earlier one failed.
     bool ok=true;
     auto clean=[&](uint32_t a,uint32_t mask,uint32_t v){const bool result=rm(a,mask,v);ok=result&&ok;};
-    clean(0x88,2,0);clean(0x1e0,7,0);clean(8,0x4000,0);
-    clean(0x88,4,0);clean(0x88,4,4);clean(0x88,1,0);clean(0x88,1,1);
-    clean(0x8a00,9,0);
-    const bool f=wr(0x8400,0),c=wr(0x8404,0);ok=f&&c&&ok;
-    const bool s=wr(0xc00,sec),b=d.bootWrite16(0x1e6,reason),st=wr(0x1010,stop),h=wr(0x1000,hci);ok=s&&b&&st&&h&&ok;
+    // Only clean blocks whose initialization was attempted. In particular a
+    // phase-1 rejection must not write unclocked DMAC/HFC or reset an untouched CPU.
+    if(r.phase>=5){
+        clean(0x88,2,0);clean(0x1e0,7,0);clean(8,0x4000,0);
+        clean(0x88,4,0);clean(0x88,4,4);clean(0x88,1,0);clean(0x88,1,1);
+    }
+    if(r.phase>=4)clean(0x8a00,9,0);
+    // Verify clocked HFC before disabling its parent DMAC block.
+    if(r.phase>=4&&!matches(0x8a00,d.read32(0x8a00),9,0))r.cleanupFailures|=1;
+    if(r.phase>=2){const bool f=wr(0x8400,0),c=wr(0x8404,0);ok=f&&c&&ok;}
+    if(r.phase>=5){const bool s=wr(0xc00,sec);++r.writes;const bool b=d.bootWrite16(0x1e6,reason);ok=s&&b&&ok;}
+    const bool st=wr(0x1010,stop),h=wr(0x1000,hci);ok=st&&h&&ok;
     const auto platform=d.read32(0x88),clock=d.read32(8),control=d.read32(0x1e0);
     r.cpuStopped=!invalid(platform)&&!(platform&2)&&!invalid(clock)&&!(clock&0x4000)&&!invalid(control)&&!(control&7);
-    const auto hfc=d.read32(0x8a00);
-    r.cleanupOK=ok&&r.cpuStopped&&d.read32(0x8400)==0&&d.read32(0x8404)==0&&!invalid(hfc)&&!(hfc&9)&&
-        d.read32(0xc00)==sec&&d.read16(0x1e6)==reason&&d.read32(0x1000)==hci&&d.read32(0x1010)==stop&&(d.command()&6)==2;
+    if(r.phase>=2){
+        if(!matches(0x8400,d.read32(0x8400),0xffffffff,0))r.cleanupFailures|=2;
+        if(!matches(0x8404,d.read32(0x8404),0xffffffff,0))r.cleanupFailures|=4;
+    }
+    if(r.phase>=5&&(d.read32(0xc00)!=sec||d.read16(0x1e6)!=reason))r.cleanupFailures|=8;
+    r.hciAfter=d.read32(0x1000);r.stopAfter=d.read32(0x1010);
+    if(!matches(0x1000,r.hciAfter,0xffffffff,hci))r.cleanupFailures|=16;
+    if(!matches(0x1010,r.stopAfter,0xffffffff,stop))r.cleanupFailures|=32;
+    if(!ok)r.cleanupFailures|=64;
+    if(!r.cpuStopped)r.cleanupFailures|=128;
+    if((d.command()&6)!=2)r.cleanupFailures|=256;
+    r.cleanupOK=r.cleanupFailures==0;
     r.status=r.cleanupOK?r.operationStatus:Status::cleanupFailed;return r;
 }
 } }

@@ -1,4 +1,21 @@
-# 0.0.8: native packet bank and download-ROM preparation
+# 0.0.9: native packet bank and download-ROM preparation
+
+0.0.8 hardware passed all bank checks, but stopped at the phase-1 stop-control
+readback (BOOT_WRITE_FAILED); its unconditional cleanup also failed verification.
+Supply-off, PCI restoration and memory release succeeded. No ROM or firmware
+upload ran. The log lacks the failed register value, so the exact rejected bits
+are not established. Source review identified use of the generic TX channel mask
+plus STOP_RXQ/RPQ, whereas rtw8852be uses TX V1 (0x70f00) and RXHCI_EN.
+
+0.0.9 uses that chip-specific TX mask with global TX/RX HCI disabled, preserves
+other register bits, and checks busy bits for the implemented channels. Cleanup
+only touches blocks whose initialization was attempted, and verifies HFC before
+disabling its parent DMAC clocks. It publishes HCI/stop snapshots, first failed
+readback address/mask/expected/actual, and a cleanup-failure bitmap (HFC=1,
+DMAC=2, clock=4, CPU config restore=8, HCI=16, stop=32, write=64,
+CPU stopped=128, PCI command=256). The operation result remains distinct from
+cleanup. Simulations cover absent-channel/RX-stop bits and reserved bits latched
+as in the earlier 0.0.7 hardware snapshot; this is not physical proof of the fix.
 
 This is a combined hardware experiment, not a working Wi-Fi driver or an upload.
 0.0.7 established stopped queue configuration readback and restoration. 0.0.8
@@ -48,8 +65,8 @@ H2C readiness is bounded at 400 ms / 8001 polls. WDE/PLE and DMA-idle polls are
 bounded at 2 ms. A stuck or backward clock cannot cause an unbounded loop.
 ROM error states 2/3/4 and stale firmware-ready state 7 are rejected.
 
-Every attempted path runs cleanup: stop WCPU, clear download/path bits, disable
-CPU clock/HFC/DMAC functions/clocks, restore security sizing, boot reason and HCI
+Every attempted path runs stage-scoped cleanup: stop WCPU, clear download/path bits, disable
+CPU clock/HFC/DMAC functions/clocks only if attempted, restore security sizing, boot reason and HCI
 controls, and verify shutdown. Internal DLE quotas/mailboxes are initialization
 state, not a restorable snapshot; the outer tested supply-off always follows.
 Neither CMAC/RF functions nor PCI bus mastering are enabled. No ring index,
@@ -67,7 +84,7 @@ Host tests inject every packet allocation/prepare/sync failure (165 slots),
 overlapping/misaligned mappings and corruption. ROM tests inject all 60 writes
 failing, stuck timers, missing WDE/PLE/H2C readiness and ROM errors, and verify
 the configured layout/shutdown. CI adds ASan/UBSan and Apple kernel compilation.
-Physical 0.0.8 results are pending.
+Physical 0.0.9 results are pending.
 
 Reference source: rtw89 mac.c/mac.h/reg.h and rtw8852b.c at
 d1fced1b8a741dc9f92b47c69489c24385945f6e, BSD license option.
