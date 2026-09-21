@@ -1,5 +1,18 @@
 # RTL8852BE PCI diagnostic prototype
 
+**Hardware test status:** the 0.0.2 NVRAM capture experiment failed to reach the
+recovery UI on the target machine and produced no report. It has been rolled
+back to 0.0.1; the cause remains unresolved. Do not treat this build as a working
+Wi-Fi driver or as a validated automatic-capture implementation.
+
+`recovery-autolog/` is a separate userspace diagnostic experiment. It adds a
+launchd collector to a copy of the verified recovery image while retaining the
+previously bootable kernel drivers and runtime NVRAM write protection. Its CI
+workflow verifies the rebuilt disk image and exercises launchd, automatic FAT
+mounting and file logging on a disposable disk image. Those checks still do not
+replace a physical boot test. The temporary original-image draft input is removed
+after verification; the artifact contains changed chunks only.
+
 This is an experimental **PCI diagnostic service, not a working Wi-Fi driver**.
 It targets x86-64 macOS and PCI 10ec:b852, subsystem 1a3b:5470.
 

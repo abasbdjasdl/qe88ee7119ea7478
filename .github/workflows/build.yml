@@ -2,6 +2,13 @@ name: Build PCI diagnostic kext
 on:
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Info.plist'
+      - 'build_macos.sh'
+      - 'verify_bundle.py'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 permissions:
   contents: read
