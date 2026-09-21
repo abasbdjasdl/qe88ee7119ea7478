@@ -110,9 +110,20 @@ These are host tests with a register model, not hardware evidence. The table
 importer verifies the upstream commit and records hashes, and CI checks that
 regeneration produces the committed files unchanged.
 
+`EfuseReader` now reads the main DDV bank and PHY calibration window through
+`MacEfuseIo`. The adapter permits only read commands and the required rail/burst
+control bits. It acquires a quiescent rail, applies the cut-A burst workaround,
+enforces per-byte and total deadlines, handles cancellation and attempts every
+cleanup step even after errors. Readback must confirm restoration before output
+is marked valid. Native I/O stays available during cancellation for cleanup;
+the owner must retain the mapping until the operation returns. The register-model
+test injects failure at all 58 read/write points plus delay failures, stale clocks,
+ignored cleanup writes and device removal. This has not yet read this device's
+physical OTP in macOS. The DAV/XTAL bank read path is still missing.
+
 1. Complete and preserve the RTL8852B power/MAC/PHY/RF/efuse/calibration sequence;
    the diagnostic subset currently shuts the chip down after probing. Physical
-   eFuse reads, applying gain state to channel registers, full BB reset/TX power
+   DAV eFuse reads, applying gain state to channel registers, full BB reset/TX power
    and RFK remain.
 2. Connect the new RXQ/RPQ/data/management/firmware queue components to native
    allocation, cache synchronization, hardware start/stop, interrupts and recovery.
