@@ -16,6 +16,9 @@ jobs:
         run: |
           set -o pipefail
           bash recovery-autolog/build.sh 2>&1 | tee recovery-build.log
+      - name: Test launchd collection and automatic FAT mount
+        shell: bash
+        run: bash recovery-autolog/test-collector.sh
       - name: Upload only changed chunks and verification
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -28,4 +31,5 @@ jobs:
             build/recovery/Diagnostic.dmg.verification.json
             build/recovery/source-commit.txt
             build/recovery/verification.txt
+            build/recovery/collector-integration-test.txt
             recovery-build.log

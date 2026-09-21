@@ -5,7 +5,7 @@ mkdir -p build/recovery build/recovery-mount build/recovery-verify
 base="$PWD/build/recovery/BaseSystem.dmg"
 mount="$PWD/build/recovery-mount"
 verify="$PWD/build/recovery-verify"
-curl --fail --location --retry 3 --output "$base" 'https://oscdn.apple.com/content/downloads/04/11/082-33203/orvwro1v8xhjrakr7tvl5hu1s1ew3epxne/RecoveryImage/BaseSystem.dmg'
+curl --fail --location --retry 3 --output "$base" 'http://oscdn.apple.com/content/downloads/04/11/082-33203/orvwro1v8xhjrakr7tvl5hu1s1ew3epxne/RecoveryImage/BaseSystem.dmg'
 echo "7314eb401f5e84087f621b3599f0ad21ca3cdcc2685ea2da7f76806792328e20  $base" | shasum -a 256 -c -
 hdiutil verify "$base"
 sudo hdiutil attach "$base" -shadow "$PWD/build/recovery/edit.shadow" -nobrowse -owners on -mountpoint "$mount" -plist > build/recovery/attach.plist
