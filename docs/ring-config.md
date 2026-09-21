@@ -47,4 +47,5 @@ writes, invalid MMIO, bad DMA mapping, active PCI bus mastering, busy state,
 nonzero indices, register widths and reserved fields. Callback tests confirm DMA
 buffers are live during the extension, rejected prepares never call it, and the
 power extension only runs after an observed active state with shutdown afterward.
-CI adds Apple kernel compilation and ASan/UBSan. 0.0.7 hardware test is pending.
+CI adds Apple kernel compilation and ASan/UBSan. 0.0.7 physical test passed on 2026-09-21: six setup/six restore writes,
+matching readback, supply-off and DMA memory release; still no transfer submitted.

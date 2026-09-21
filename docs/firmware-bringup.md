@@ -55,7 +55,7 @@ the installed diagnostic kext. Host tests do not establish hardware compatibilit
 
 Versions 0.0.4, 0.0.5 and 0.0.6 have now passed physical XTAL read,
 supply-on/off, and DMA memory preparation tests respectively. Version 0.0.7
-adds a stopped command-ring configuration/readback experiment with restoration;
+passed a stopped command-ring configuration/readback experiment with restoration;
 see `ring-config.md`. It still never enables PCI bus mastering or uploads firmware.
 Group useful observations in one boot; do not request a reboot to recheck an
 already validated offline parser.
@@ -66,3 +66,6 @@ Firmware source commit and hashes are recorded in `firmware/provenance.json`.
 The binary has its own Realtek license, including a limited patent grant; this
 project's source license does not relicense the binary or expand that grant.
 No firmware has been installed or uploaded to the chip by this stage.
+Packet encoding and a portable transfer protocol now exist offline; see
+`firmware-transport.md` for the unimplemented hardware backend and required
+networking work.

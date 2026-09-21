@@ -57,6 +57,8 @@ jobs:
           python3 tools/verify_firmware.py
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/firmware_plan_test.cpp -o build/firmware_plan_test
           ./build/firmware_plan_test firmware/rtw8852b_fw-1.bin | tee -a build/host-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/firmware_transport_test.cpp -o build/firmware_transport_test
+          ./build/firmware_transport_test firmware/rtw8852b_fw-1.bin | tee -a build/host-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tools/firmware_inspect.cpp -o build/firmware_inspect
           ./build/firmware_inspect firmware/rtw8852b_fw-1.bin 1 > build/firmware-layout-cut1.json
           ./build/firmware_inspect firmware/rtw8852b_fw-1.bin 2 > build/firmware-layout-cut2.json

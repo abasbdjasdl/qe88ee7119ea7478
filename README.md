@@ -3,7 +3,7 @@
 This is an experimental diagnostic service, not a working Wi-Fi driver.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Current version: 0.0.7 (stopped command-ring hardware test pending)
+## Installed diagnostic: 0.0.7 (physical stopped command-ring test passed)
 
 DMA memory preparation passed on the physical R16 with 0.0.6. Version 0.0.7
 keeps these buffers alive while the tested supply-on/off wrapper configures and
@@ -29,7 +29,10 @@ the preceding memory-only test.
   cleanup and PCI command restoration confirmed.
 - 0.0.6: physical DMA memory preparation passed: two single-segment 4096-byte
   mappings, CPU verification and cleanup OK, OS return 0; no transfer submitted.
-- 0.0.7: stopped FWCMD ring readback/restoration implemented; hardware test pending.
+- 0.0.7: physical stopped FWCMD ring readback/restoration passed, including
+  six setup/six restore writes, supply-off and memory cleanup. No DMA submitted.
+- Offline additions: 8852B firmware packet encoder and bounded transfer protocol
+  with simulated-backend fault tests; no live transport backend yet.
 - Not implemented: firmware upload, RF initialization, DMA queues, TX/RX, scan,
   association, WPA authentication, or an IO80211 network interface.
 
@@ -62,3 +65,14 @@ Project source uses BSD-3-Clause. The firmware binary is **not** BSD-licensed;
 see `firmware/LICENCE.rtlwifi_firmware.txt` and `firmware/provenance.json`.
 Referenced SDK/reference code retains its original licenses. The Linux wireless
 stack, firmware transport and hardware initialization have not been ported.
+
+## Firmware transport development
+
+`FirmwarePackets.hpp` constructs the chip-specific 24-byte TXWD, header command
+and section packets. `FirmwareTransfer.hpp` implements bounded handshake,
+publish/drain and ownership/cleanup orchestration against a backend contract.
+The pinned firmware produces a 164-packet batch for each supported cut. Buffers
+remain owned until DMA quiescence is proven; a consumer index alone never frees
+one. These additions are tested offline and kernel-compiled, not linked into the
+installed kext. See [firmware-transport.md](docs/firmware-transport.md). There is no
+working firmware upload, scan, connection or packet TX/RX implementation yet.
