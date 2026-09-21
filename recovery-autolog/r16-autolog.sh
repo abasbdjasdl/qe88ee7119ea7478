@@ -51,7 +51,7 @@ while [ "$attempt" -lt 6 ]; do
     find_target && break
     attempt=$((attempt + 1))
     run 12 disk-list.txt diskutil list
-    awk '/MACRECOVERY|EFI/ {print $NF}' "$ram/disk-list.txt" | grep -E '^disk[0-9]+s[0-9]+$' > "$ram/candidates.txt"
+    awk '/MACRECOVERY|EFI/ {print $NF}' "$ram/disk-list.txt" | grep -E '^disk[0-9]+(s[0-9]+)?$' > "$ram/candidates.txt"
     while read dev; do
         run 8 volume-info.plist diskutil info -plist "$dev"
         size=$(PlistBuddy -c 'Print :TotalSize' "$ram/volume-info.plist" 2>/dev/null)
