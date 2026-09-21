@@ -3,9 +3,9 @@
 This is an experimental diagnostic service, not a working Wi-Fi driver.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Current candidate: 0.0.9 (8852B stop-mask and cleanup correction)
+## Current candidate: 0.0.10 (verify clocks before disabling MAC access)
 
-The stopped command-ring experiment passed on hardware in 0.0.7. Version 0.0.9
+The stopped command-ring experiment passed on hardware in 0.0.7. Version 0.0.10
 prepares the complete real firmware batch in 165 native IOKit pages, initializes
 the DLFW DMAC/DLE/HFC blocks, resets the firmware CPU and polls the ROM H2C-ready
 bit. It then stops the CPU/internal blocks, powers down and releases the bank.
@@ -33,8 +33,11 @@ RF and Wi-Fi remain unimplemented. See [firmware-bank-rom.md](docs/firmware-bank
   OK). ROM preparation stopped at phase 1 with a readback failure; ROM was not
   started. Outer supply-off and PCI restoration passed. Exact failed bits were
   not captured; the generic stop mask and unconditional cleanup were incorrect.
-- 0.0.9: uses the 8852B TX V1 mask, RXHCI disable, stage-scoped cleanup and HFC
-  readback before parent-clock shutdown, with failure snapshots. Hardware pending.
+- 0.0.9: physical ROM_H2C_READY reached (control 0x23); WDE/PLE/HFC and bank
+  checks passed. Cleanup failed only at CLK_EN readback (0xffffffff after MAC
+  function disable); CPU stop, outer power-off, PCI restore and bank cleanup passed.
+- 0.0.10: clears/verifies CLK_EN while MAC register access remains enabled, then
+  clears/verifies FUNC_EN; adds cleanup snapshots and failure tests. Hardware pending.
 - Not implemented: firmware upload, RF initialization, DMA queues, TX/RX, scan,
   association, WPA authentication, or an IO80211 network interface.
 

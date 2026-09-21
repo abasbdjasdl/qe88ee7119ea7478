@@ -23,6 +23,7 @@ constexpr uint32_t txChannels=0x00070f00,stopChannels=txChannels;
 constexpr uint32_t busyChannels=txChannels|0x00780003;
 struct Result {Status status{Status::notRun},operationStatus{Status::notRun};unsigned phase{},writes{},polls{};uint32_t wde{},ple{},control{},dmac{},clock{},wdeConfig{},pleConfig{},hfcControl{},hfcPages{};
     uint32_t hciBefore{},stopBefore{},hciPaused{},stopPaused{},hciAfter{},stopAfter{},cleanupFailures{};
+    uint32_t cleanupClock{},cleanupDmac{};bool cleanupClockChecked{};
     uint32_t failureAddress{},failureMask{},failureExpected{},failureActual{};
     bool failureRecorded{},attempted{},cleanupOK{},cpuStopped{};};
 template<class D> Result probe(D &d){
@@ -93,15 +94,28 @@ template<class D> Result probe(D &d){
     if(r.phase>=4)clean(0x8a00,9,0);
     // Verify clocked HFC before disabling its parent DMAC block.
     if(r.phase>=4&&!matches(0x8a00,d.read32(0x8a00),9,0))r.cleanupFailures|=1;
-    if(r.phase>=2){const bool f=wr(0x8400,0),c=wr(0x8404,0);ok=f&&c&&ok;}
+    if(r.phase>=2){
+        // MAC_FUNC_EN gates the downstream register window. 0.0.9 hardware
+        // returned 0xffffffff at CLK_EN after FUNC_EN was cleared. Disable and
+        // verify clocks while that window is still enabled, then close it.
+        const auto function=d.read32(0x8400);
+        if(!invalid(function)&&(function&0x40000000)){
+            const bool c=wr(0x8404,0);ok=c&&ok;
+            r.cleanupClock=d.read32(0x8404);r.cleanupClockChecked=true;
+            if(!matches(0x8404,r.cleanupClock,0xffffffff,0))r.cleanupFailures|=4;
+        }else{
+            // The initial FUNC_EN write may itself have failed. Do not reopen
+            // MAC just to inspect clocks; keep the cleanup result unresolved.
+            r.cleanupFailures|=4;
+        }
+        const bool f=wr(0x8400,0);ok=f&&ok;
+        r.cleanupDmac=d.read32(0x8400);
+        if(!matches(0x8400,r.cleanupDmac,0xffffffff,0))r.cleanupFailures|=2;
+    }
     if(r.phase>=5){const bool s=wr(0xc00,sec);++r.writes;const bool b=d.bootWrite16(0x1e6,reason);ok=s&&b&&ok;}
     const bool st=wr(0x1010,stop),h=wr(0x1000,hci);ok=st&&h&&ok;
     const auto platform=d.read32(0x88),clock=d.read32(8),control=d.read32(0x1e0);
     r.cpuStopped=!invalid(platform)&&!(platform&2)&&!invalid(clock)&&!(clock&0x4000)&&!invalid(control)&&!(control&7);
-    if(r.phase>=2){
-        if(!matches(0x8400,d.read32(0x8400),0xffffffff,0))r.cleanupFailures|=2;
-        if(!matches(0x8404,d.read32(0x8404),0xffffffff,0))r.cleanupFailures|=4;
-    }
     if(r.phase>=5&&(d.read32(0xc00)!=sec||d.read16(0x1e6)!=reason))r.cleanupFailures|=8;
     r.hciAfter=d.read32(0x1000);r.stopAfter=d.read32(0x1010);
     if(!matches(0x1000,r.hciAfter,0xffffffff,hci))r.cleanupFailures|=16;

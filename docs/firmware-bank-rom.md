@@ -1,4 +1,16 @@
-# 0.0.9: native packet bank and download-ROM preparation
+# 0.0.10: native packet bank and download-ROM preparation
+
+0.0.9 reached ROM_H2C_READY on hardware (control 0x23), with the complete bank,
+WDE/PLE/HFC, DMAC and clock checks passing. Cleanup alone failed at 0x8404:
+it returned 0xffffffff after 0x8400 MAC_FUNC_EN was cleared. CPU stop, outer
+power-off, PCI command restoration and memory release all passed. This does not
+prove the earlier clock-clear write took effect. 0.0.10 clears and reads back
+CLK_EN while MAC register access remains enabled, then disables/reads FUNC_EN.
+The all-ones value remains a failure. If the initial MAC enable failed, cleanup
+does not reopen it solely to check clocks and retains an unresolved status.
+CleanupClockChecked, CleanupClock and CleanupDmac record the actual verification.
+Register failure values are published as zero-extended 64-bit IOReg numbers.
+Tests model the post-MAC-disable inaccessible window and silently dropped clears.
 
 0.0.8 hardware passed all bank checks, but stopped at the phase-1 stop-control
 readback (BOOT_WRITE_FAILED); its unconditional cleanup also failed verification.
@@ -84,7 +96,7 @@ Host tests inject every packet allocation/prepare/sync failure (165 slots),
 overlapping/misaligned mappings and corruption. ROM tests inject all 60 writes
 failing, stuck timers, missing WDE/PLE/H2C readiness and ROM errors, and verify
 the configured layout/shutdown. CI adds ASan/UBSan and Apple kernel compilation.
-Physical 0.0.9 results are pending.
+Physical 0.0.10 results are pending.
 
 Reference source: rtw89 mac.c/mac.h/reg.h and rtw8852b.c at
 d1fced1b8a741dc9f92b47c69489c24385945f6e, BSD license option.

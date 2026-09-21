@@ -139,8 +139,8 @@ bool RTL8852BEProbe::start(IOService *provider) {
     pci->close(this);
     bool ok = setProperty("DiagnosticOnly", true);
     ok &= setProperty("WiFiOperational", false);
-    ok &= setProperty("DriverVersion", "0.0.9");
-    ok &= setProperty("Experiment", "FIRMWARE-BANK-ROM-02");
+    ok &= setProperty("DriverVersion", "0.0.10");
+    ok &= setProperty("Experiment", "FIRMWARE-BANK-ROM-03");
     ok &= setProperty("Stage", rtl8852be::statusName(r.status));
     ok &= setProperty("VendorID", s.vendorID, 16);
     ok &= setProperty("DeviceID", s.deviceID, 16);
@@ -232,11 +232,14 @@ bool RTL8852BEProbe::start(IOService *provider) {
     ok &= setProperty("RomHciAfter",rom.hciAfter,32);
     ok &= setProperty("RomStopAfter",rom.stopAfter,32);
     ok &= setProperty("RomCleanupFailures",rom.cleanupFailures,32);
+    ok &= setProperty("RomCleanupClockChecked",rom.cleanupClockChecked);
+    ok &= setProperty("RomCleanupClock",static_cast<uint64_t>(rom.cleanupClock),64);
+    ok &= setProperty("RomCleanupDmac",static_cast<uint64_t>(rom.cleanupDmac),64);
     ok &= setProperty("RomFailureRecorded",rom.failureRecorded);
     ok &= setProperty("RomFailureAddress",rom.failureAddress,32);
-    ok &= setProperty("RomFailureMask",rom.failureMask,32);
-    ok &= setProperty("RomFailureExpected",rom.failureExpected,32);
-    ok &= setProperty("RomFailureActual",rom.failureActual,32);
+    ok &= setProperty("RomFailureMask",static_cast<uint64_t>(rom.failureMask),64);
+    ok &= setProperty("RomFailureExpected",static_cast<uint64_t>(rom.failureExpected),64);
+    ok &= setProperty("RomFailureActual",static_cast<uint64_t>(rom.failureActual),64);
     ok &= setProperty("SupplyStatus",rtl8852be::power::statusName(supply.status));
     ok &= setProperty("SupplyOnError",static_cast<unsigned>(supply.on.error),32);
     ok &= setProperty("SupplyOffError",static_cast<unsigned>(supply.off.error),32);
@@ -251,7 +254,7 @@ bool RTL8852BEProbe::start(IOService *provider) {
         ok &= setProperty(key, s.bars[i], 32);
     }
     if (!ok) { IOService::stop(provider); return false; }
-    IOLog("RTL8852BEProbe 0.0.9: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
+    IOLog("RTL8852BEProbe 0.0.10: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
           rtl8852be::statusName(r.status), r.reads, r.cfgFirst, r.cfgSecond,
           r.commandBefore, r.commandDuring, r.commandAfter);
     IOLog("RTL8852BEProbe XTAL: %s writes=%u polls=%u raw=%02x power=%08x/%08x\n",
