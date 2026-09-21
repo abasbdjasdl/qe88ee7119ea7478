@@ -3,6 +3,15 @@
 This is an experimental diagnostic service, not a working Wi-Fi driver.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
+## Network port under development (not deployed)
+
+The existing itlwm/OpenBSD protocol and software-crypto stack is now built as a
+separate reusable archive. A packet bridge handles management-first TX,
+encapsulation/encryption and bounded Realtek RX delivery. Actual rtw89 descriptor
+routines are imported with pinned provenance. These components do not yet have
+a complete Realtek radio/DMA backend or controller lifecycle, and do not provide
+network connectivity. See [network-port.md](docs/network-port.md).
+
 ## Current candidate: 0.0.13 (HCI gate ordering before BDRAM reset)
 
 0.0.12 stopped during queue reset, with no packet submitted and successful
@@ -79,10 +88,13 @@ retains its separate Realtek license. Test data corruption uses synthetic data.
 CI runs ASan/UBSan tests, a bounded libFuzzer campaign, both real cut-1/cut-2
 images, and a compile-only check under the kernel SDK. The packet parser/encoder is linked into 0.0.8 for in-memory preparation only. See `docs/firmware-bringup.md` for remaining dependencies.
 
-Project source uses BSD-3-Clause. The firmware binary is **not** BSD-licensed;
+Diagnostic/descriptor code uses BSD-3-Clause. The new net80211 bridge is
+GPL-2.0-or-later and the reused itlwm stack retains its GPL and per-file notices;
+see [network-port licensing](docs/network-port.md#licensing).
+The firmware binary is **not** BSD-licensed;
 see `firmware/LICENCE.rtlwifi_firmware.txt` and `firmware/provenance.json`.
-Referenced SDK/reference code retains its original licenses. The Linux wireless
-stack, firmware transport and hardware initialization have not been ported.
+Referenced SDK/reference code retains its original licenses. The complete Linux
+hardware backend has not been ported.
 
 ## Firmware transport development
 
@@ -91,6 +103,6 @@ and section packets. `FirmwareTransfer.hpp` implements bounded handshake,
 publish/drain and ownership/cleanup orchestration against a backend contract.
 The pinned firmware produces a 164-packet batch for each supported cut. Buffers
 remain owned until DMA quiescence is proven; a consumer index alone never frees
-one. The packet encoder is used by the 0.0.8 candidate; the transfer protocol
-remains offline without an active DMA backend. See [firmware-transport.md](docs/firmware-transport.md). There is no
+one. The packet encoder entered the 0.0.8 candidate; the bounded hardware upload
+backend entered 0.0.12. See [firmware-transport.md](docs/firmware-transport.md). There is no
 working firmware upload, scan, connection or packet TX/RX implementation yet.
