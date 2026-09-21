@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 test ! -e /Volumes/MACRECOVERY
 test ! -e /private/tmp/r16-autolog
-hdiutil create -size 4194304s -layout NONE -fs MS-DOS -volname MACRECOVERY build/recovery/test-log-volume.dmg
+hdiutil create -size 2g -layout NONE -fs MS-DOS -volname MACRECOVERY build/recovery/test-log-volume.dmg
 hdiutil attach build/recovery/test-log-volume.dmg -nobrowse -plist > build/recovery/test-log-attach.plist
 device=$(python3 -c 'import plistlib; p=plistlib.load(open("build/recovery/test-log-attach.plist","rb")); print(next(x["dev-entry"] for x in p["system-entities"] if "mount-point" in x))')
 mkdir -p /Volumes/MACRECOVERY/r16-autolog

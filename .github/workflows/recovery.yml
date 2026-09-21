@@ -17,14 +17,14 @@ jobs:
         run: |
           mkdir -p build/recovery
           gh release download recovery-build-input-20260921 --repo "$GITHUB_REPOSITORY" --pattern BaseSystem.dmg --dir build/recovery
+      - name: Test launchd collection and automatic FAT mount
+        shell: bash
+        run: bash recovery-autolog/test-collector.sh
       - name: Build and validate recovery patch
         shell: bash
         run: |
           set -o pipefail
           bash recovery-autolog/build.sh 2>&1 | tee recovery-build.log
-      - name: Test launchd collection and automatic FAT mount
-        shell: bash
-        run: bash recovery-autolog/test-collector.sh
       - name: Upload only changed chunks and verification
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
