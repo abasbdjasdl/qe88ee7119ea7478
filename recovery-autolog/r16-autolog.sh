@@ -5,7 +5,8 @@ export PATH
 umask 077
 token=R16-FILE-CAPTURE-20260921-01
 ram=/private/tmp/r16-autolog
-mkdir "$ram" 2>/dev/null || exit 0
+[ -d "$ram" ] && exit 0
+mkdir "$ram" 2>/dev/null || exit 75
 exec > "$ram/collector.log" 2>&1
 echo "$token"
 date
@@ -54,7 +55,8 @@ while [ "$attempt" -lt 6 ]; do
         size=$(PlistBuddy -c 'Print :TotalSize' "$ram/volume-info.plist" 2>/dev/null)
         [ -n "$size" ] || size=$(PlistBuddy -c 'Print :DiskSize' "$ram/volume-info.plist" 2>/dev/null)
         name=$(PlistBuddy -c 'Print :VolumeName' "$ram/volume-info.plist" 2>/dev/null)
-        case "$name:$size" in MACRECOVERY:2147483648|EFI:272629760) ;; *) continue ;; esac
+        content=$(PlistBuddy -c 'Print :Content' "$ram/volume-info.plist" 2>/dev/null)
+        if [ "$name:$size" != MACRECOVERY:2147483648 ] && [ "$content:$size" != EFI:272629760 ]; then continue; fi
         run 10 "mount-$dev.txt" diskutil mount "$dev"
     done < "$ram/candidates.txt"
     find_target && break
