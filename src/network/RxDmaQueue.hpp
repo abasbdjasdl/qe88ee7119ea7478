@@ -15,7 +15,7 @@ public:
     using Receive=void (*)(void *,const uint8_t *,size_t);
 private:
     Buffer ring_,buffers_[count];uint16_t consumer_{};
-    bool occupied_{},ready_{},visible_{},faulted_{};
+    bool occupied_{},ready_{},visible_{},faulted_{},polling_{};
 public:
     RxDmaQueue()=default;RxDmaQueue(const RxDmaQueue &)=delete;RxDmaQueue &operator=(const RxDmaQueue &)=delete;
     template<class Device,class Loop> bool allocate(Device *device,Loop *loop){
@@ -42,7 +42,8 @@ public:
     }
     RxDmaPoll poll(uint16_t producer,size_t budget,Receive receive,void *context){
         RxDmaPoll result;result.consumer=consumer_;
-        if(!ready_||!visible_||faulted_||producer>=count||!budget||!receive)return result;
+        if(!ready_||!visible_||faulted_||polling_||producer>=count||!budget||!receive)return result;
+        struct PollGuard {bool &flag;~PollGuard(){flag=false;}} guard{polling_};polling_=true;
         size_t pending=(producer+count-consumer_)%count;if(pending>budget)pending=budget;
         for(size_t i=0;i<pending;++i){auto &buffer=buffers_[consumer_];
             if(!buffer.syncForCpu()){faulted_=true;return result;}
@@ -58,12 +59,15 @@ public:
         result.ok=true;return result;
     }
     bool release(){
-        if(visible_)return false;ready_=false;bool ok=true;
+        if(visible_||polling_)return false;ready_=false;bool ok=true;
         for(auto &b:buffers_)ok=b.release()&&ok;
         ok=ring_.release()&&ok;if(ok){occupied_=false;faulted_=false;consumer_=0;}return ok;
     }
     // Same quiescence contract as MacDmaBuffer::releaseAfterDmaStopped.
     bool releaseAfterDmaStopped(){
+        // A protocol callback can request stop reentrantly under the same gate.
+        // Defer teardown until poll returns so its borrowed buffer stays alive.
+        if(polling_)return false;
         ready_=false;visible_=false;bool ok=true;
         for(auto &b:buffers_)ok=b.releaseAfterDmaStopped()&&ok;
         ok=ring_.releaseAfterDmaStopped()&&ok;

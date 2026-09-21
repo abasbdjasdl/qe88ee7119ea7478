@@ -57,4 +57,13 @@ void failures(){
     {RxDmaQueue<Buffer> q;assert(!q.allocate(&d,&l)&&model.alive==1);assert(!q.allocate(&d,&l));model.failRelease=~0u;assert(q.release()&&!model.alive);}
     reset();model.failDevice=0;{RxDmaQueue<Buffer> q;assert(!q.allocate(&d,&l)&&!model.alive);}
 }
-int main(){run();failures();std::puts("RX DMA: 64 exact BDs, 100000 wrap/recycle operations, bounded budget, malformed packets, all 65 allocation failures and sync/cleanup faults passed");}
+void reentry(){
+    reset();int d=0,l=0;RxDmaQueue<Buffer> q;assert(q.allocate(&d,&l)&&q.markDeviceVisible());packet(0,1);
+    const auto callback=[](void *context,const uint8_t *data,size_t bytes){
+        auto &queue=*static_cast<RxDmaQueue<Buffer>*>(context);assert(bytes==8&&data[4]==1);
+        Received ignored;assert(!queue.poll(1,1,receive,&ignored).ok);
+        assert(!queue.releaseAfterDmaStopped()&&model.alive==65&&data[4]==1);
+    };
+    assert(q.poll(1,1,callback,&q).ok&&q.releaseAfterDmaStopped()&&!model.alive);
+}
+int main(){run();failures();reentry();std::puts("RX DMA: 64 exact BDs, 100000 wrap/recycle operations, bounded budget, malformed packets, all 65 allocation failures, sync/cleanup faults and reentrant stop passed");}
