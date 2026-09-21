@@ -3,23 +3,21 @@
 This is an experimental diagnostic service, not a working Wi-Fi driver.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Current version: 0.0.5 (supply-cycle hardware test pending)
+## Current version: 0.0.6 (DMA memory hardware test pending)
 
-The proven PCI/MMIO/XTAL preflight remains. With digital cut 1, analog byte 0x11,
-PCI bus mastering off and MAC state initially off, this experiment runs the
-RTL8852B supply/isolation sequence and then its shutdown sequence in the same
-call. Cleanup is also attempted after partial power-on failure. No DMAC/CMAC
-function enabling, DMA queues, firmware upload or network transmission is added.
+The PCI/MMIO/XTAL checks remain, but the already validated supply cycle is not
+repeated. After BAR unmapping and PCI command restoration, this version allocates
+two page-aligned 4096-byte kernel buffers, requests 32-bit I/O virtual mappings
+through IODMACommand, encodes one unsubmitted 8-byte TXBD, synchronizes outbound
+memory and checks its CPU contents. Both mappings and buffers are then released.
+A device mapper is used when available, otherwise the documented system mapper
+fallback is used. Each buffer must have one contiguous 32-bit I/O segment; zero,
+overlapping, misaligned, partial or out-of-range mappings are rejected.
 
-Power writes now include masked analog XTAL commands and allowlisted system
-registers. Polls and whole sequences are bounded. A successful result requires
-MAC active observed, shutdown complete, MAC returned off and PCI configuration
-restored. Cleanup failure is reported distinctly; this is not an exact register
-snapshot rollback. See [power-sequence.md](docs/power-sequence.md) for scope,
-timeout behavior, reference provenance, tests and remaining hardware uncertainty.
-
-The existing recovery collector captures IORegistry and requests a reboot without
-terminal input. The driver does not reboot or modify NVRAM itself.
+No address is written into the hardware, PCI bus mastering stays disabled, and
+no queue or transfer is started. The buffer contains a synthetic test pattern,
+not firmware or a valid WLAN command. This experiment tests memory preparation
+and cleanup, not hardware DMA or Wi-Fi. See [dma-memory.md](docs/dma-memory.md).
 
 ## Evidence and remaining work
 
@@ -30,7 +28,9 @@ terminal input. The driver does not reboot or modify NVRAM itself.
   PCI Command was 0 -> 2 -> 0, and automatic collection/reboot completed.
 - 0.0.4: physical XTAL read passed: raw analog revision 0x11, one command,
   two polls in 75 us, power register unchanged, PCI Command restored to 0.
-- 0.0.5: supply-cycle implementation and host tests; physical result pending.
+- 0.0.5: physical supply cycle passed, MAC state 0 -> 1 -> 0; on/off errors 0,
+  cleanup and PCI command restoration confirmed.
+- 0.0.6: DMA memory preparation implemented; physical mapping validation pending.
 - Not implemented: firmware upload, RF initialization, DMA queues, TX/RX, scan,
   association, WPA authentication, or an IO80211 network interface.
 

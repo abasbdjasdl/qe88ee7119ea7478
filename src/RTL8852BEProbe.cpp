@@ -8,7 +8,7 @@
 #include "PciConfig.hpp"
 #include "MmioProbe.hpp"
 #include "XtalProbe.hpp"
-#include "PowerSequence.hpp"
+#include "KernelDma.hpp"
 
 class PciMmioAccess {
     IOPCIDevice *pci;
@@ -46,20 +46,6 @@ public:
         return ns/1000;
     }
     void pause50Us() { IODelay(50); }
-    void pauseUs(unsigned us) { if (us<=1000) IODelay(us); }
-    uint8_t read8(uint32_t offset) {
-        return *reinterpret_cast<const volatile uint8_t *>(mapping->getVirtualAddress()+offset);
-    }
-    bool powerWrite32(uint32_t offset,uint32_t value) {
-        if (!mapping || !rtl8852be::power::allowed32(offset) || (command()&6)!=2) return false;
-        OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping->getVirtualAddress()),offset,value);
-        return true;
-    }
-    bool powerWrite8(uint32_t offset,uint8_t value) {
-        if (!mapping || !rtl8852be::power::allowed8(offset) || (command()&6)!=2) return false;
-        *reinterpret_cast<volatile uint8_t *>(mapping->getVirtualAddress()+offset)=value;
-        return true;
-    }
     void unmap() { if (mapping) { mapping->release(); mapping = nullptr; } }
     ~PciMmioAccess() { unmap(); }
 };
@@ -92,18 +78,24 @@ bool RTL8852BEProbe::start(IOService *provider) {
     }
     PciMmioAccess access(pci);
     rtl8852be::XtalResult x;
-    rtl8852be::power::Result power;
+
     const auto r = rtl8852be::sampleMmio(access, s,
-        [&x,&power](PciMmioAccess &d, const rtl8852be::MmioResult &base) {
+        [&x](PciMmioAccess &d, const rtl8852be::MmioResult &base) {
             x=rtl8852be::sampleXtal(d,base);
-            power=rtl8852be::power::cycle(d,base,x);
         });
+    rtl8852be::dma::Result dmaResult;
+    bool deviceMapper=false;
+    if(r.status==rtl8852be::MmioStatus::sampled && r.stableValue() && r.commandRestored) {
+        KernelDma buffers(pci);
+        deviceMapper=buffers.deviceMapper();
+        dmaResult=rtl8852be::dma::probe(buffers);
+    }
     const auto memoryCount = pci->getDeviceMemoryCount();
     pci->close(this);
     bool ok = setProperty("DiagnosticOnly", true);
     ok &= setProperty("WiFiOperational", false);
-    ok &= setProperty("DriverVersion", "0.0.5");
-    ok &= setProperty("Experiment", "SUPPLY-CYCLE-01");
+    ok &= setProperty("DriverVersion", "0.0.6");
+    ok &= setProperty("Experiment", "DMA-MEMORY-01");
     ok &= setProperty("Stage", rtl8852be::statusName(r.status));
     ok &= setProperty("VendorID", s.vendorID, 16);
     ok &= setProperty("DeviceID", s.deviceID, 16);
@@ -157,39 +149,37 @@ bool RTL8852BEProbe::start(IOService *provider) {
     }
     if (x.powerAfterSampled) ok &= setProperty("SysPowerAfter", x.powerAfter, 32);
     ok &= setProperty("FirmwareUploaded", false);
-    ok &= setProperty("SupplyStatus", rtl8852be::power::statusName(power.status));
-    ok &= setProperty("SupplyAttempted", power.attempted);
-    ok &= setProperty("SupplyCleanupAttempted", power.cleanupAttempted);
-    ok &= setProperty("SupplyReturnedOff", power.returnedOff);
-    ok &= setProperty("SupplyActiveObserved", power.activeObserved);
-    ok &= setProperty("SupplyInitialState", static_cast<uint64_t>(power.initialState),64);
-    ok &= setProperty("SupplyActiveState", static_cast<uint64_t>(power.activeState),64);
-    ok &= setProperty("SupplyFinalState", static_cast<uint64_t>(power.finalState),64);
-    ok &= setProperty("SupplyInitialPower", static_cast<uint64_t>(power.initialPower),64);
-    ok &= setProperty("SupplyFinalPower", static_cast<uint64_t>(power.finalPower),64);
-    ok &= setProperty("SupplyOnError", static_cast<unsigned>(power.on.error),32);
-    ok &= setProperty("SupplyOnStep", power.on.step,32);
-    ok &= setProperty("SupplyOnWrites", power.on.writes,32);
-    ok &= setProperty("SupplyOnPolls", power.on.polls,32);
-    ok &= setProperty("SupplyOnLastValue", static_cast<uint64_t>(power.on.last),64);
-    ok &= setProperty("SupplyOffError", static_cast<unsigned>(power.off.error),32);
-    ok &= setProperty("SupplyOffStep", power.off.step,32);
-    ok &= setProperty("SupplyOffWrites", power.off.writes,32);
-    ok &= setProperty("SupplyOffPolls", power.off.polls,32);
-    ok &= setProperty("SupplyOffLastValue", static_cast<uint64_t>(power.off.last),64);
+    ok &= setProperty("DmaStatus", rtl8852be::dma::statusName(dmaResult.status));
+    ok &= setProperty("DmaOperationStatus", rtl8852be::dma::statusName(dmaResult.operationStatus));
+    ok &= setProperty("DmaDeviceMapper", deviceMapper);
+    ok &= setProperty("DmaAllocations", dmaResult.allocations,32);
+    ok &= setProperty("DmaPrepared", dmaResult.prepared,32);
+    ok &= setProperty("DmaSynchronized", dmaResult.synchronized,32);
+    ok &= setProperty("DmaFailedBuffer", dmaResult.failedBuffer,32);
+    ok &= setProperty("DmaOSReturn", static_cast<uint64_t>(dmaResult.osError),64);
+    ok &= setProperty("DmaCleanupOK", dmaResult.cleanupOk);
+    ok &= setProperty("DmaCPUVerified", dmaResult.cpuVerified);
+    ok &= setProperty("DmaBusMasterBefore", dmaResult.busMasterBefore);
+    ok &= setProperty("DmaBusMasterAfter", dmaResult.busMasterAfter);
+    ok &= setProperty("DmaRingAddress", dmaResult.ring.address,64);
+    ok &= setProperty("DmaRingLength", dmaResult.ring.length,64);
+    ok &= setProperty("DmaRingSegments", dmaResult.ring.segments,32);
+    ok &= setProperty("DmaPacketAddress", dmaResult.packet.address,64);
+    ok &= setProperty("DmaPacketLength", dmaResult.packet.length,64);
+    ok &= setProperty("DmaPacketSegments", dmaResult.packet.segments,32);
+    ok &= setProperty("DmaSubmittedToHardware", false);
     for (unsigned i = 0; i < 6; ++i) {
         char key[16]; snprintf(key, sizeof(key), "BAR%uRaw", i);
         ok &= setProperty(key, s.bars[i], 32);
     }
     if (!ok) { IOService::stop(provider); return false; }
-    IOLog("RTL8852BEProbe 0.0.5: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
+    IOLog("RTL8852BEProbe 0.0.6: %s reads=%u cfg=%08x/%08x command=%04x/%04x/%04x; Wi-Fi unavailable\n",
           rtl8852be::statusName(r.status), r.reads, r.cfgFirst, r.cfgSecond,
           r.commandBefore, r.commandDuring, r.commandAfter);
     IOLog("RTL8852BEProbe XTAL: %s writes=%u polls=%u raw=%02x power=%08x/%08x\n",
           rtl8852be::xtalStatusName(x.status),x.writes,x.polls,x.rawRevision,x.powerBefore,x.powerAfter);
-    IOLog("RTL8852BEProbe supply: %s on=%u/%u off=%u/%u state=%08x/%08x/%08x\n",
-          rtl8852be::power::statusName(power.status),static_cast<unsigned>(power.on.error),power.on.step,
-          static_cast<unsigned>(power.off.error),power.off.step,power.initialState,power.activeState,power.finalState);
+    IOLog("RTL8852BEProbe DMA memory: %s allocations=%u prepared=%u cleanup=%d; nothing submitted\n",
+          rtl8852be::dma::statusName(dmaResult.status),dmaResult.allocations,dmaResult.prepared,dmaResult.cleanupOk);
     registerService();
     return true;
 }
