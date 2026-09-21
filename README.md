@@ -6,6 +6,20 @@ It targets x86-64 macOS and PCI 10ec:b852, subsystem 1a3b:5470.
 Implemented: device matching, read-only PCI configuration capture, bounded
 capability-list parsing, and IORegistry diagnostic properties.
 
+Version 0.0.2 adds a command-free capture experiment: 60 seconds after matching,
+the service saves at most 2047 bytes to the new Apple-vendor NVRAM variable
+`RTL8852BE-AutoReport`. The report contains the build's test token, the 256-byte
+PCI configuration snapshot, counts of keyboard/storage services, and up to eight
+IOMedia BSD names, sizes and partition UUIDs. It does not contain network names,
+passwords, user files or serial numbers. It never edits boot variables or disk
+partitions. A matching token already in NVRAM suppresses future writes for that
+build. Readiness retries stop after five attempts over two minutes; successful
+submission stops the timer. Firmware persistence must be verified after reboot.
+
+The bounded-buffer tests run under ASan and UBSan. They cannot validate hardware,
+kernel ABI compatibility, timer lifecycle on real hardware, or NVRAM persistence.
+The ordinary IORegistry diagnostics remain available if automatic capture fails.
+
 Not implemented: firmware upload, radio initialization, DMA, TX/RX, scan,
 association, WPA authentication, or a network interface. A successful build
 does not establish hardware compatibility or provide Internet access.
