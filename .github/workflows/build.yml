@@ -52,9 +52,6 @@ jobs:
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tools/firmware_inspect.cpp -o build/firmware_inspect
           ./build/firmware_inspect firmware/rtw8852b_fw-1.bin 1 > build/firmware-layout-cut1.json
           ./build/firmware_inspect firmware/rtw8852b_fw-1.bin 2 > build/firmware-layout-cut2.json
-          python3 tests/make_firmware_corpus.py
-          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=fuzzer,address,undefined tests/firmware_fuzz.cpp -o build/firmware_fuzz
-          ./build/firmware_fuzz build/firmware-corpus -max_len=4096 -runs=100000 -max_total_time=45 2>&1 | tee build/firmware-fuzz.txt
       - name: Build with Apple toolchain
         shell: bash
         env:
@@ -86,4 +83,26 @@ jobs:
             build/source-commit.txt
             build/build.log
             build/firmware-layout-*.json
+  firmware-fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Fuzz synthetic containers with Clang sanitizers
+        shell: bash
+        run: |
+          python3 tests/make_firmware_corpus.py
+          clang++ --version > build/fuzz-toolchain.txt
+          clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=fuzzer,address,undefined tests/firmware_fuzz.cpp -o build/firmware_fuzz
+          ./build/firmware_fuzz build/firmware-corpus -max_len=4096 -runs=100000 -max_total_time=45 2>&1 | tee build/firmware-fuzz.txt
+      - name: Upload fuzz evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: firmware-fuzz-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
             build/firmware-fuzz.txt
+            build/fuzz-toolchain.txt
