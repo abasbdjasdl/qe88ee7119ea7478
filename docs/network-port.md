@@ -83,8 +83,37 @@ explicit IOKit model; they are not a claim of running timer tests inside macOS.
 
 ## Remaining real integration
 
+The radio port now contains the pinned RTL8852B BB, RF A/B, NCTL and gain tables,
+original packed eFuse layout, bounded DDV/DAV decoder, board/PHY calibration
+parsing, AX RF v1 direct/SWSI access, RF firmware pages, NCTL handshake and
+thermal/PA trim stages. `BasebandGain` decodes the signed receive gain and
+bandwidth/subchannel compensation tables with preflight bounds checks; tests
+compare both the complete gain table and every supported record form against
+the original upstream decoder. `MacRadioIo` supplies actual kernel MMIO access through
+validated BAR2; AX PHY offsets include the required `0x10000` base. RF v1 treats
+`0xf9..0xfe` as register addresses, unlike the BB delay opcodes.
+
+`RadioInitialization` exposes separate programming stages, not a complete radio
+startup. It validates tables and firmware-page capacity before writes, stops on
+I/O errors/cancellation, bounds SWSI/NCTL polling and exposes RF firmware pages
+only after all writes and the final SWSI drain succeed. Partial hardware writes
+are not rolled back: the controller must quiesce/reset the chip before retrying.
+Caller-owned firmware-page storage must stay alive until the command queue has
+copied it and obeys that queue's DMA ownership rules. No stage enables DMA or
+claims RF calibration/association has completed.
+
+The new radio test compares 6,400 complete table traces against the unaltered
+pinned upstream selection/execution functions. It also checks 100,000 malformed
+eFuse banks, exact RF register/firmware bytes, bank/output bounds, package
+selection, interrupted writes, timeout/cancellation, NCTL gating and trim data.
+These are host tests with a register model, not hardware evidence. The table
+importer verifies the upstream commit and records hashes, and CI checks that
+regeneration produces the committed files unchanged.
+
 1. Complete and preserve the RTL8852B power/MAC/PHY/RF/efuse/calibration sequence;
-   the diagnostic subset currently shuts the chip down after probing.
+   the diagnostic subset currently shuts the chip down after probing. Physical
+   eFuse reads, applying gain state to channel registers, full BB reset/TX power
+   and RFK remain.
 2. Connect the new RXQ/RPQ/data/management/firmware queue components to native
    allocation, cache synchronization, hardware start/stop, interrupts and recovery.
    The one-shot diagnostic CH12 bank remains separate from this runtime path.

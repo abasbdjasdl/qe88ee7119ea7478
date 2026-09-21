@@ -1,0 +1,43 @@
+{
+  "repository": "https://github.com/lwfinger/rtw89",
+  "commit": "d1fced1b8a741dc9f92b47c69489c24385945f6e",
+  "license": "BSD-3-Clause option",
+  "tables": {
+    "bb": {
+      "rows": 1013,
+      "original_block_sha256": "a493804a0389093132bb30c775257b07ad458d1d585e5ab1dd7abbb2b634560c"
+    },
+    "radioA": {
+      "rows": 8295,
+      "original_block_sha256": "be8a951470d23d0c5aa1bb7ccda9d0d65f2134d85cb8be34f7d8c2af0012fde0"
+    },
+    "radioB": {
+      "rows": 8392,
+      "original_block_sha256": "f7f736436851b48089823c9ed6f97f7b3775d44c08a378614bced54d79d3f2dd"
+    },
+    "nctl": {
+      "rows": 1320,
+      "original_block_sha256": "b56f3a29b79c569180bc6b67fad20db5090b51ddd501d3cdb31e6a0c73599f16"
+    },
+    "gain": {
+      "rows": 66,
+      "original_block_sha256": "4fa631cef4d139a589095c38223d4879fab847783f9ea2fa347849d824578c45"
+    }
+  },
+  "sources": {
+    "rtw8852b_table.c": "8b9b5fc32628037d8dec86cff976913164723d87abe38fd09d229c57b509b42f",
+    "rtw8852b.h": "fe243e53bdc4fdf8ca5df118dcb82dfdbe4550dfbf83e589254a8a5997acd26d",
+    "rtw8852b.c": "be0fbd13013d64835742c089f5c66963e4154cf1d78723dd7b88f2c5e28df3c2",
+    "phy.c": "8d0e06bdc14878648f2be84e4ec67de76ad20718202e1d00199618d356b9fd72",
+    "phy.h": "ceac88b387d211f48b07a8e94466d6968a28ed23fd88ee9b0e21aa214f95e5dd",
+    "efuse.c": "d58a024a237ca5fc2316667efbbb2586dd7b81493edea4fbb49506cb5b321f7c",
+    "core.h": "ec8c6d32fe8f86620ed23190b26d8f4aaa11238fb195bba4c4e66ee01d5e2366",
+    "reg.h": "9609382125b396708d52f2d64a4e8a1e7abb080690ea2776308323834b725d03"
+  },
+  "generated": {
+    "Rtw8852bRadioTables.cpp": "253a9ca1b72116f67db4bb8bae1fb823b7eecc8c1c97a206bba16f664d07339f",
+    "Rtw8852bEfuseLayout.hpp": "5d07160be0c3d53cc76ed48200a4cd43312bf46a5e88d4bb227878fc202a7eb9"
+  },
+  "test_oracle_sha256": "aa059f0c2a73ce61a12627ec103bc88d307c2e5499610f856e8f438b8ad44459",
+  "hardware_tested": false
+}

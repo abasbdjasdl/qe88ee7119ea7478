@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', '.github/workflows/network-port.yml']
+    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', '.github/workflows/network-port.yml']
 permissions:
   contents: read
 jobs:
@@ -32,6 +32,10 @@ jobs:
         run: |
           mkdir -p build/network-stack
           python3 tools/check_network_reference.py build-rtw89 | tee build/network-stack/wire-reference-tests.txt
+          python3 tools/import_radio_reference.py build-rtw89
+          git diff --exit-code -- src/network/Rtw8852bRadioTables.cpp src/network/Rtw8852bEfuseLayout.hpp src/network/radio-reference-provenance.json tests/network_radio_reference.inc
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_radio_test.cpp src/network/Rtw8852bRadioTables.cpp -o build/network_radio_test
+          ./build/network_radio_test | tee build/network-stack/radio-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_descriptors_test.cpp -o build/network_descriptors_test
           ./build/network_descriptors_test | tee build/network-stack/descriptor-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_pci_test.cpp -o build/network_pci_test
@@ -48,7 +52,7 @@ jobs:
           set -o pipefail
           python3 tools/build_network_stack.py build-itlwm 2>&1 | tee build/network-stack/build.log
           tar -czf build/network-stack/itlwm-stack-source.tar.gz -C build-itlwm itl80211 include itlwm/PrivateSPI.pch LICENSE
-          tar -czf build/network-stack/port-source.tar.gz src/network tools/build_network_stack.py tools/check_network_reference.py tools/import_network_reference.py tests/network_* LICENSE
+          tar -czf build/network-stack/port-source.tar.gz src/network tools/build_network_stack.py tools/check_network_reference.py tools/import_network_reference.py tools/import_radio_reference.py tests/network_* LICENSE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
