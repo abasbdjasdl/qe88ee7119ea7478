@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/lwfinger/rtw89",
+  "commit": "d1fced1b8a741dc9f92b47c69489c24385945f6e",
+  "license": "BSD-3-Clause option of GPL-2.0 OR BSD-3-Clause",
+  "functions": [
+    "rtw89_build_txwd_body0",
+    "rtw89_build_txwd_body2",
+    "rtw89_build_txwd_body3",
+    "rtw89_build_txwd_info0",
+    "rtw89_build_txwd_info1",
+    "rtw89_build_txwd_info2",
+    "rtw89_build_txwd_info4",
+    "rtw89_core_fill_txdesc",
+    "rtw89_core_query_rxdesc"
+  ],
+  "files": {
+    "core.c": "8bf82ecea98e9423b072807d21fbb4cd08d171dc9c4132d25c05cb671c39df24",
+    "core.h": "270894eef74cd6b07fe0d67dd3daf8a1aca8f45c70e6493529c61b6cda80538b",
+    "txrx.h": "1f1ca1b8f2b0987bb8f3da25d90ea7324e4bfab6c87b5635c61e475f95089648"
+  },
+  "generated_sha256": "024755a7a4f4600902933d7d8a83c6cd1467eea4d99ecbceafca90d204ea4a5b"
+}

@@ -1,0 +1,51 @@
+name: Build reusable network components
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['src/network/**', 'tests/network_*', 'tools/build_network_stack.py', '.github/workflows/network-port.yml']
+permissions:
+  contents: read
+jobs:
+  network:
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Fetch pinned upstream stack and kernel headers
+        shell: bash
+        run: |
+          git init build-itlwm
+          git -C build-itlwm remote add origin https://github.com/OpenIntelWireless/itlwm.git
+          git -C build-itlwm fetch --depth 1 origin 53c51c2cdd6e4b69beb91f310d74c53422b0f8bd
+          git -C build-itlwm checkout --detach FETCH_HEAD
+          git init MacKernelSDK
+          git -C MacKernelSDK remote add origin https://github.com/acidanthera/MacKernelSDK.git
+          git -C MacKernelSDK fetch --depth 1 origin 05094e5e88cec7caedbfb35e8449ed0db94bf95b
+          git -C MacKernelSDK checkout --detach FETCH_HEAD
+      - name: Test Realtek data descriptor adapter
+        shell: bash
+        run: |
+          mkdir -p build/network-stack
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_descriptors_test.cpp -o build/network_descriptors_test
+          ./build/network_descriptors_test | tee build/network-stack/descriptor-tests.txt
+      - name: Compile existing macOS 802.11 and WPA stack
+        shell: bash
+        env:
+          MAC_KERNEL_SDK: ${{ github.workspace }}/MacKernelSDK
+        run: |
+          set -o pipefail
+          python3 tools/build_network_stack.py build-itlwm 2>&1 | tee build/network-stack/build.log
+          tar -czf build/network-stack/itlwm-stack-source.tar.gz -C build-itlwm itl80211 include itlwm/PrivateSPI.pch LICENSE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: network-components-${{ github.sha }}
+          path: |
+            build/network-stack/*.a
+            build/network-stack/*.json
+            build/network-stack/*.txt
+            build/network-stack/*.log
+            build/network-stack/*LICENSE
+            build/network-stack/*.tar.gz
+          retention-days: 7
