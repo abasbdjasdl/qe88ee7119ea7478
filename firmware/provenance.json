@@ -1,0 +1,19 @@
+{
+  "repository": "https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware",
+  "commit": "2b8daaf611fbade74f26a5b58ec1defe6a02f5e0",
+  "purpose": "Unmodified offline layout validation fixture; not uploaded to hardware",
+  "files": [
+    {
+      "name": "rtw8852b_fw-1.bin",
+      "bytes": 1245944,
+      "sha256": "5b68415e3bfe72715d63a70703d4471b04b5475b8ff69cfdc8cdf48233cd5d3a",
+      "source": "https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+/2b8daaf611fbade74f26a5b58ec1defe6a02f5e0/rtw89/rtw8852b_fw-1.bin"
+    },
+    {
+      "name": "LICENCE.rtlwifi_firmware.txt",
+      "bytes": 2115,
+      "sha256": "a61351665b4f264f6c631364f85b907d8f8f41f8b369533ef4021765f9f3b62e",
+      "source": "https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+/2b8daaf611fbade74f26a5b58ec1defe6a02f5e0/LICENSES/LICENCE.rtlwifi_firmware.txt"
+    }
+  ]
+}

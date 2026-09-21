@@ -1,5 +1,5 @@
 #!/bin/bash
-# Candidate build procedure; has NOT been executed on macOS in this task.
+# Apple toolchain build, exercised in GitHub Actions.
 set -euo pipefail
 cd "$(dirname "$0")"
 : "${MAC_KERNEL_SDK:?Set MAC_KERNEL_SDK to the pinned MacKernelSDK checkout}"
@@ -15,6 +15,8 @@ flags=(-target x86_64-apple-macos11.0 -mkernel -DKERNEL -DKERNEL_EXTENSION
 xcrun clang++ "${flags[@]}" -std=c++14 -fno-exceptions -fno-rtti \
   -c src/RTL8852BEProbe.cpp -o build/macos/RTL8852BEProbe.o
 xcrun clang "${flags[@]}" -c src/Module.c -o build/macos/Module.o
+xcrun clang++ "${flags[@]}" -std=c++14 -fno-exceptions -fno-rtti \
+  -Wall -Wextra -Werror -c tests/firmware_kernel_compile.cpp -o build/macos/FirmwarePlan-compile-only.o
 bundle=build/macos/RTL8852BEProbe.kext
 mkdir -p "$bundle/Contents/MacOS"
 xcrun ld -arch x86_64 -kext -undefined dynamic_lookup \

@@ -29,7 +29,9 @@ Windows. Keep that collector and runtime NVRAM write protection for this test.
 
 - 0.0.1: physical matching and PCI/resource capture confirmed on macOS 15.4.1.
 - 0.0.2: earlier NVRAM experiment failed; retired, cause not established.
-- 0.0.3: build and host validation pending; physical register reads pending.
+- 0.0.3: Apple build, ASan/UBSan tests and physical register reads passed on
+  macOS 15.4.1. SYS_CFG1 was 0x0C491D39 twice, SYS_STATUS1 was 0x1401F278;
+  PCI Command was 0 -> 2 -> 0, and automatic collection/reboot completed.
 - Not implemented: firmware upload, RF initialization, DMA queues, TX/RX, scan,
   association, WPA authentication, or an IO80211 network interface.
 
@@ -42,5 +44,23 @@ References:
 - https://github.com/lwfinger/rtw89/tree/d1fced1b8a741dc9f92b47c69489c24385945f6e
   (pci.c BAR2 mapping; reg.h offsets 0xF0/0xF4; core.c chip-cut extraction)
 
-Sources in this repository use BSD-3-Clause; referenced SDK/reference code retains
-its original licenses. Firmware and the Linux wireless stack have not been ported.
+## Firmware preparation (offline; not installed)
+
+`src/FirmwarePlan.hpp` selects a normal CE/normal image for the exact chip-cut
+field, validates the multi-image container and v0 sections, and enumerates bounded
+2020-byte payload chunks. There is no allocation or OS dependency in this module.
+All failures clear its output. Unsupported layouts are rejected. Dynamic feature
+records remain opaque; file-layout acceptance is not firmware ABI compatibility,
+cryptographic verification, hardware checksum verification or permission to DMA.
+
+The unchanged fixture in `firmware/` is pinned by source commit and SHA-256 and
+retains its separate Realtek license. Test data corruption uses synthetic data.
+`tools/firmware_inspect.cpp` produces a JSON layout without writing to hardware.
+CI runs ASan/UBSan tests, a bounded libFuzzer campaign, both real cut-1/cut-2
+images, and a compile-only check under the kernel SDK. This module is not linked
+into the live 0.0.3 driver. See `docs/firmware-bringup.md` for remaining dependencies.
+
+Project source uses BSD-3-Clause. The firmware binary is **not** BSD-licensed;
+see `firmware/LICENCE.rtlwifi_firmware.txt` and `firmware/provenance.json`.
+Referenced SDK/reference code retains its original licenses. The Linux wireless
+stack, firmware transport and hardware initialization have not been ported.

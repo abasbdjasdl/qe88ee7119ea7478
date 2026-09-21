@@ -5,6 +5,8 @@ on:
     paths:
       - 'src/**'
       - 'tests/**'
+      - 'tools/**'
+      - 'firmware/**'
       - 'Info.plist'
       - 'build_macos.sh'
       - 'verify_bundle.py'
@@ -41,6 +43,18 @@ jobs:
           ./build/report_buffer_test
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/mmio_probe_test.cpp -o build/mmio_probe_test
           ./build/mmio_probe_test | tee -a build/host-tests.txt
+      - name: Validate firmware layout and malformed input
+        shell: bash
+        run: |
+          python3 tools/verify_firmware.py
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/firmware_plan_test.cpp -o build/firmware_plan_test
+          ./build/firmware_plan_test firmware/rtw8852b_fw-1.bin | tee -a build/host-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tools/firmware_inspect.cpp -o build/firmware_inspect
+          ./build/firmware_inspect firmware/rtw8852b_fw-1.bin 1 > build/firmware-layout-cut1.json
+          ./build/firmware_inspect firmware/rtw8852b_fw-1.bin 2 > build/firmware-layout-cut2.json
+          python3 tests/make_firmware_corpus.py
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=fuzzer,address,undefined tests/firmware_fuzz.cpp -o build/firmware_fuzz
+          ./build/firmware_fuzz build/firmware-corpus -max_len=4096 -runs=100000 -max_total_time=45 2>&1 | tee build/firmware-fuzz.txt
       - name: Build with Apple toolchain
         shell: bash
         env:
@@ -71,3 +85,5 @@ jobs:
             build/toolchain.txt
             build/source-commit.txt
             build/build.log
+            build/firmware-layout-*.json
+            build/firmware-fuzz.txt
