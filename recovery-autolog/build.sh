@@ -19,7 +19,7 @@ plutil -lint "$mount/System/Library/LaunchDaemons/local.r16.autolog.plist"
 test "$(/usr/libexec/PlistBuddy -c 'Print :ProductVersion' "$mount/System/Library/CoreServices/SystemVersion.plist")" = 15.4.1
 sync
 sudo diskutil unmount "$device"
-raw="${device/\/dev\/disk/\/dev\/rdisk}"
+raw="/dev/r${device#/dev/}"
 sudo dd if="$raw" of=build/recovery/modified.hfs bs=1m
 sudo chown "$(id -u):$(id -g)" build/recovery/modified.hfs
 hdiutil detach "$device"
