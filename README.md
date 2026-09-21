@@ -3,27 +3,23 @@
 This is an experimental diagnostic service, not a working Wi-Fi driver.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Current version: 0.0.4 (hardware test pending)
+## Current version: 0.0.5 (supply-cycle hardware test pending)
 
-The PCI/resource/D0/no-bus-master gates and three SYS_CFG1/SYS_STATUS1 reads from
-0.0.3 remain. Inside that same transaction, the new preflight captures system
-isolation, power, clock and firmware-control registers. Only a stable digital
-cut 1, valid system power-ready state with the analog crystal not off, and an
-idle XTAL interface permit one indirect READ command for analog revision 0x41.
-The exact MMIO write is 0x81000041 to BAR2 offset 0x270; the adapter exposes no
-arbitrary write API. The mapping is now uncached read/write for this command.
+The proven PCI/MMIO/XTAL preflight remains. With digital cut 1, analog byte 0x11,
+PCI bus mastering off and MAC state initially off, this experiment runs the
+RTL8852B supply/isolation sequence and then its shutdown sequence in the same
+call. Cleanup is also attempted after partial power-on failure. No DMAC/CMAC
+function enabling, DMA queues, firmware upload or network transmission is added.
 
-Polling has a 50 ms monotonic deadline and a 1001-read cap. Invalid register
-values, a busy interface or power not ready cause a diagnostic exit. There is
-no retry, analog-register write, power-on/reset, DMA, interrupt setup or firmware
-upload. The transaction unmaps BAR2 and restores the PCI memory-enable bit after
-every normal return, including timeout. It does not replay the old XTAL command.
-A kernel fault or stalled bus access cannot be recovered by this software timer.
+Power writes now include masked analog XTAL commands and allowlisted system
+registers. Polls and whole sequences are bounded. A successful result requires
+MAC active observed, shutdown complete, MAC returned off and PCI configuration
+restored. Cleanup failure is reported distinctly; this is not an exact register
+snapshot rollback. See [power-sequence.md](docs/power-sequence.md) for scope,
+timeout behavior, reference provenance, tests and remaining hardware uncertainty.
 
-IORegistry contains XtalStatus, polls/writes/elapsed time, analog revision validity,
-raw power/control samples and PCI before/during/after values. The recovery collector
-already captures that whole service automatically and reboots after collection.
-The driver itself does not trigger a reboot or change NVRAM.
+The existing recovery collector captures IORegistry and requests a reboot without
+terminal input. The driver does not reboot or modify NVRAM itself.
 
 ## Evidence and remaining work
 
@@ -32,7 +28,9 @@ The driver itself does not trigger a reboot or change NVRAM.
 - 0.0.3: Apple build, ASan/UBSan tests and physical register reads passed on
   macOS 15.4.1. SYS_CFG1 was 0x0C491D39 twice, SYS_STATUS1 was 0x1401F278;
   PCI Command was 0 -> 2 -> 0, and automatic collection/reboot completed.
-- 0.0.4: bounded XTAL/power preflight implemented; physical validation pending.
+- 0.0.4: physical XTAL read passed: raw analog revision 0x11, one command,
+  two polls in 75 us, power register unchanged, PCI Command restored to 0.
+- 0.0.5: supply-cycle implementation and host tests; physical result pending.
 - Not implemented: firmware upload, RF initialization, DMA queues, TX/RX, scan,
   association, WPA authentication, or an IO80211 network interface.
 

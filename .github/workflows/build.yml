@@ -45,6 +45,8 @@ jobs:
           ./build/mmio_probe_test | tee -a build/host-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/xtal_probe_test.cpp -o build/xtal_probe_test
           ./build/xtal_probe_test | tee -a build/host-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/power_sequence_test.cpp -o build/power_sequence_test
+          ./build/power_sequence_test | tee -a build/host-tests.txt
       - name: Validate firmware layout and malformed input
         shell: bash
         run: |
