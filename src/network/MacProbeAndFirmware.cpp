@@ -68,6 +68,11 @@ bool MacProbeAndFirmware::fail(ProbeFirmwareError error){
                 const auto &power=cycle->power.result.on;
                 state_->device.setProperty("R16ProbePciError",uint64_t(pci.error),32);
                 state_->device.setProperty("R16ProbePowerError",uint64_t(power.error),32);
+                state_->device.setProperty("R16ProbePowerAddress",uint64_t(power.address),32);
+                state_->device.setProperty("R16ProbePowerExpected",uint64_t(power.expected),32);
+                state_->device.setProperty("R16ProbePowerActual",uint64_t(power.actual),32);
+                state_->device.setProperty("R16ProbePowerReads",uint64_t(power.reads),32);
+                state_->device.setProperty("R16ProbePowerWrites",uint64_t(power.writes),32);
                 state_->device.setProperty("R16ProbeDownloadStatus",uint64_t(fw.status),32);
                 state_->device.setProperty("R16ProbePollAddress",uint64_t(downloadPci.pollFailureAddress),32);
                 state_->device.setProperty("R16ProbePollMask",uint64_t(downloadPci.pollFailureMask),32);

@@ -103,11 +103,15 @@ int main(){
     for(unsigned i=1;i<onOps;++i){Device f;f.cancelAt=i;p::DevicePower<Device> q(f);assert(!q.start(1,&s));
         assert(!(f.get(0xcc)&4));if(q.result.on.writes)assert(q.stop(&s,true));}
     {Device f;f.removeAt=10;p::DevicePower<Device> q(f);assert(!q.start(1,&s));assert(f.operations==10&&!q.stop(&s,true));}
-    for(unsigned cmd:{0u,4u,6u,0xffffu}){Device f;f.cmd=uint16_t(cmd);p::DevicePower<Device> q(f);assert(!q.start(1,&s)&&!f.operations);}
+    for(unsigned cmd:{0u,4u,6u,0xffffu}){Device f;f.cmd=uint16_t(cmd);p::DevicePower<Device> q(f);assert(!q.start(1,&s)&&!f.operations);
+        assert(q.result.on.error==p::Error::precondition&&q.result.on.address==4&&q.result.on.expected==2&&q.result.on.actual==cmd);}
     for(unsigned mode=0;mode<5;++mode){Device f;auto c=s;
         if(mode==0)f.gate=false;if(mode==1)f.cancel=true;if(mode==2)f.put(0x3f0,0x100,4);
         if(mode==3)f.put(0xcc,4,4);if(mode==4)c.board.identityValid=false;
-        p::DevicePower<Device> q(f);assert(!q.start(1,&c)&&!q.result.on.writes);if(mode==3)assert(f.get(0xcc)&4);}
+        p::DevicePower<Device> q(f);assert(!q.start(1,&c)&&!q.result.on.writes);if(mode==3)assert(f.get(0xcc)&4);
+        if(mode==0||mode==2||mode==3){assert(q.result.on.error==p::Error::precondition);
+            assert(q.result.on.address==(mode==0?0u:mode==2?0x3f0u:0xccu));
+            assert(q.result.on.expected==0&&q.result.on.actual==(mode==0?0u:mode==2?0x100u:4u));}}
     // Ready sampled only after the source's 20 ms poll timeout is not accepted.
     {Device f;unsigned ready=0;for(unsigned i=0;i<onTrace.size();++i)
         if(onTrace[i].write&&onTrace[i].a==4&&(onTrace[i].v&0x100)){ready=i+2;break;}
