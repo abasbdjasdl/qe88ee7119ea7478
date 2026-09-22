@@ -2,10 +2,15 @@
 // Compiled with the actual pinned Apple declarations; called by a host test runner.
 #include "../src/network/NativeWirelessData.hpp"
 #include "../src/network/NativeWirelessRequests.hpp"
+#include "../src/network/NativeWirelessDispatch.hpp"
 using namespace rtl8852be::network;
 #define CHECK(x) do { if(!(x))return __LINE__; } while(0)
 struct AdapterTestBackend {
     unsigned submitted{},disconnected{};
+    unsigned snapshots{};
+    IOReturn snapshotResult{kIOReturnSuccess};
+    wireless::Snapshot observed;
+    IOReturn copyWirelessStatus(wireless::Snapshot &s){++snapshots;s=observed;return snapshotResult;}
     IOReturn selectWirelessNetwork(const selection::Join &r){
         if(!selection::valid(r))return kIOReturnBadArgument;
         ++submitted;return kIOReturnBusy;
@@ -47,5 +52,22 @@ extern "C" int R16NativeAdapterTest(){
     CHECK(nativewifi::rssi(s,&rssi)==kIOReturnSuccess&&rssi.version==APPLE80211_VERSION&&
         rssi.rssi_unit==APPLE80211_UNIT_PERCENT&&rssi.aggregate_rssi==67);
     CHECK(nativewifi::ssid(s,nullptr)==kIOReturnBadArgument);
+    backend.observed=s;wireless::Snapshot scratch;
+    CHECK(nativewifi::getRequest(backend,scratch,APPLE80211_IOC_SSID,&ssid,sizeof(ssid)-1)==kIOReturnBadArgument);
+    CHECK(backend.snapshots==0);
+    CHECK(nativewifi::getRequest(backend,scratch,APPLE80211_IOC_SSID,&ssid,sizeof(ssid))==kIOReturnSuccess);
+    CHECK(backend.snapshots==1&&ssid.ssid_bytes[31]==255);
+    backend.snapshotResult=kIOReturnNotReady;
+    CHECK(nativewifi::getRequest(backend,scratch,APPLE80211_IOC_SSID,&ssid,sizeof(ssid))==kIOReturnNotReady);
+    CHECK(ssid.ssid_len==0&&ssid.ssid_bytes[31]==0);
+    CHECK(nativewifi::getRequest(backend,scratch,0xffffffff,&ssid,sizeof(ssid))==kIOReturnUnsupported);
+    CHECK(backend.snapshots==2);
+    a.ad_auth_upper=APPLE80211_AUTHTYPE_WPA2_PSK;
+    CHECK(nativewifi::setRequest(backend,APPLE80211_IOC_ASSOCIATE,&a,sizeof(a)-1)==kIOReturnBadArgument);
+    CHECK(backend.submitted==1);
+    CHECK(nativewifi::setRequest(backend,APPLE80211_IOC_ASSOCIATE,&a,sizeof(a))==kIOReturnBusy);
+    CHECK(backend.submitted==2);
+    CHECK(nativewifi::setRequest(backend,APPLE80211_IOC_DISASSOCIATE,nullptr,0)==kIOReturnSuccess);
+    CHECK(backend.disconnected==2);
     selection::wipe(&a,sizeof(a));selection::wipe(&out,sizeof(out));return 0;
 }
