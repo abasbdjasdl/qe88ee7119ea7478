@@ -188,6 +188,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             if(tx[ring].completions().full())break;
             const int error=submitNativeData(runtime,tx[ring],ring,pendingTx,info);
             if(error){if(pendingTx.frame)releaseTx(&ic,pendingTx);fail("native TX publication failed");break;}
+            ++txSubmitted;
         }
         outputPumping=false;
     }
@@ -196,6 +197,9 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         auto &s=*static_cast<State*>(p);if(s.faulted||s.stopping)return false;
         AssembledRx frame;const auto status=s.rxAssembly.feed(data,length,frame);
         if(status!=AssemblyStatus::complete)return true;
+        ++s.rxComplete;
+        if(frame.packet.info.pkt_type==0){++s.rxWireless;if(!s.attached||!s.owner.interface_||!s.enabled||s.actionInFlight)++s.rxGated;}
+        if(frame.packet.info.pkt_type==1)++s.rxPhy;
         if(frame.packet.info.pkt_type==10){
             FirmwareEvent event;if(!decodeC2h(frame.packet.payload,frame.packet.length,event))return true;
             return MacFirmwareEventBinding::receive(s.events,event)==0;
@@ -208,7 +212,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
                 if(s.boot->rxInfo(channel,rssi)&&(!report.channelKnown||report.channel==channel)){
                     const auto *pending=s.phyWait.take(frame.packet.info.ppdu_cnt,frame.packet.info.data_rate,s.now());
                     if(pending){s.receivingProtocol=true;
-                        deliverRealtekRx(&s.ic,pending->bytes,pending->length,4,channel,rssi);s.receivingProtocol=false;}
+                        ++s.rxDeliveryAttempts;deliverRealtekRx(&s.ic,pending->bytes,pending->length,4,channel,rssi);s.receivingProtocol=false;}
                 }
             }
             return !s.faulted;
@@ -216,7 +220,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(frame.packet.info.pkt_type==0&&s.attached&&s.owner.interface_&&s.enabled&&!s.actionInFlight){
             uint8_t channel=0;int rssi=0;
             if(s.boot->rxInfo(channel,rssi)){
-                s.receivingProtocol=true;deliverRealtekRx(&s.ic,frame.data,frame.bytes,4,channel,rssi);s.receivingProtocol=false;
+                s.receivingProtocol=true;++s.rxDeliveryAttempts;deliverRealtekRx(&s.ic,frame.data,frame.bytes,4,channel,rssi);s.receivingProtocol=false;
             }else s.phyWait.store(frame.packet.info.ppdu_cnt,frame.packet.info.data_rate,frame.data,frame.bytes,s.now());
         }
         return !s.faulted;
@@ -308,9 +312,16 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         for(const auto &q:tx)if(const_cast<MacTxDmaQueue&>(q).completions().outstanding())return false;
         return true;
     }
+    uint64_t txSubmitted{},rxComplete{},rxWireless{},rxPhy{},rxDeliveryAttempts{},rxGated{};
     uint64_t lastStatus{};
     void publishStatus(){
         if(!owner.pci_)return;
+        owner.pci_->setProperty("R16LiveTxSubmitted",uint64_t(txSubmitted),64);
+        owner.pci_->setProperty("R16LiveRxComplete",uint64_t(rxComplete),64);
+        owner.pci_->setProperty("R16LiveRxWireless",uint64_t(rxWireless),64);
+        owner.pci_->setProperty("R16LiveRxPhy",uint64_t(rxPhy),64);
+        owner.pci_->setProperty("R16LiveRxDeliveryAttempts",uint64_t(rxDeliveryAttempts),64);
+        owner.pci_->setProperty("R16LiveRxGated",uint64_t(rxGated),64);
         owner.pci_->setProperty("R16LiveCommands",uint64_t(commands?commands->allocated():0),64);
         owner.pci_->setProperty("R16LiveCommandError",uint64_t(commands?unsigned(commands->error()):0),64);
         owner.pci_->setProperty("R16LiveStation",uint64_t(unsigned(station.state())),64);

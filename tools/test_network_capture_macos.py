@@ -40,3 +40,21 @@ for shell in ('/bin/sh','/bin/bash'):
         assert (result.returncode==0)==ok
         assert result.stdout.strip()==(expected if ok else ''), result.stdout
 print('PASS: worker value suppresses failed plutil stdout; absent second controller stays empty.')
+
+# Class filtering without -l omits properties on nonmatching children.
+import re
+full=subprocess.check_output(['/usr/sbin/ioreg','-r','-c','IOPlatformExpertDevice','-a','-l','-d','2'],timeout=10)
+full_tree=plistlib.loads(full)
+candidates=[]
+for index,child in enumerate(full_tree[0].get('IORegistryEntryChildren',[])):
+    for key,value in child.items():
+        if not key.startswith('IORegistry') and re.fullmatch(r'[A-Za-z0-9_ -]+',key) and isinstance(value,(str,int)):
+            if key not in tree[0]['IORegistryEntryChildren'][index]:candidates.append((index,key))
+assert candidates, 'Expected a child property included only with -l'
+index,key=candidates[0]
+query='0.IORegistryEntryChildren.'+str(index)+'.'+key
+result=subprocess.run(['/usr/bin/plutil','-extract',query,'raw','-o','-','-'],input=full,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10)
+assert result.returncode==0
+for name in ('run-network-test.sh','collect_network_state.sh'):
+    assert '-c R16RTL8852BE -a -l -d 2' in Path(__file__).with_name(name).read_text()
+print('PASS: actual class-filtered ioreg child property requires -l; collector and worker include it.')
