@@ -514,6 +514,15 @@ never exposed as a usable board configuration. The object and its snapshot are
 heap-owned by the future controller, which must serialize XTAL-SI accesses.
 See [DAV reader](dav-efuse.md) for physical register and timeout evidence.
 
+The new [shared firmware command path](firmware-command-routing.md) binds one
+command allocator and ACK router to the actual native CH12 staging/sync/doorbell
+path. Per-command callbacks distinguish receipt from execution, retain their
+original RX epoch and support submitting the next station command from a
+completion. Timeouts and ambiguous errors invalidate all command clients. The
+current non-reuse policy has a 256-command-per-firmware-epoch limitation requiring
+verified reset/drain; it does not establish indefinite operation. The native
+event callback and BT MMIO adapter now compile into the component archive.
+
 The new [BT/RFK coordinator](bt-rfk-coordination.md) implements scoreboard
 arbitration, LTE grant access, acknowledged calibration-policy acquisition and
 restoration with a 300 ms absolute lease. Native RFK now requires a live lease
@@ -521,8 +530,9 @@ callback before/after I/O, inside indirect RF polls, and between 1 ms sleep
 slices. Lease loss blocks further programming and successful release until
 verified recovery, while narrow PMAC stop remains callable. Tests cover expiry
 inside a 50 ms sleep, inside an indirect RF poll and after an MMIO write. The
-coordinator still needs a native adapter, binding to that callback and physical
-reset recovery.
+coordinator's `MacBtRfkIo` now supplies native restricted MMIO and the shared
+command client. Controller ownership, actual binding to the RFK lease callback,
+initial coex policy and physical reset recovery remain.
 
 RFK initial RCK/DACK/RXDCK and channel RXDCK/IQK now have separate callable
 phases. This permits the controller to return to the workloop for policy ACKs

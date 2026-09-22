@@ -2,8 +2,9 @@
 
 `src/network/BtRfkCoordination.hpp` implements bounded RFK admission, physical
 grant programming, an acknowledged firmware calibration policy, and restoration
-of the previous policy and grants. It is a portable component, **not a native
-controller binding or a complete Bluetooth coexistence implementation**. No
+of the previous policy and grants. `MacBtRfkIo` now provides its native MMIO and
+shared-command transport adapter. It is **not a complete controller binding or
+Bluetooth coexistence implementation**. No
 hardware result or working networking is claimed.
 
 ## Source and protocol evidence
@@ -146,12 +147,13 @@ Local host verification:
 ./build/network_bt_rfk_test.exe
 ```
 
-A separate `x86_64-macos-none -mkernel` explicit-template compilation with a
-declaration-only I/O contract checks kernel-target compilation. It does not
-provide a native I/O implementation or link the component into the driver.
+A separate `x86_64-macos-none -mkernel` compilation now explicitly instantiates
+the native adapter. Its MMIO restrictions and shared command client also have an
+actual-source model test. See [command routing](firmware-command-routing.md).
+The archive is not yet linked into a complete networking driver.
 
-Still required: the concrete native MMIO/queue adapter; shared H2C ACK routing;
-controller async acquisition and synchronous lease consumption, including
+Still required: controller construction/ownership of the native adapter, shared
+command bus and RX callback binding; async acquisition and synchronous lease consumption, including
 binding its mandatory live RFK check to the acquired coordinator; actual
 firmware/BB/RF power-cycle recovery; valid
 coex initialization and policy snapshots; dynamic BT profile/antenna/AFH/TDMA

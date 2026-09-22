@@ -72,6 +72,10 @@ jobs:
           ./build/network_device_calibration_test | tee build/network-stack/device-calibration-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_bt_rfk_test.cpp -o build/network_bt_rfk_test
           ./build/network_bt_rfk_test | tee build/network-stack/bt-rfk-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_firmware_commands_test.cpp -o build/network_firmware_commands_test
+          ./build/network_firmware_commands_test | tee build/network-stack/firmware-commands-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_bt_native_test.cpp -o build/network_bt_native_test
+          ./build/network_bt_native_test | tee build/network-stack/bt-native-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_station_controller_test.cpp -o build/network_station_controller_test
           ./build/network_station_controller_test | tee build/network-stack/station-controller-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_dma_fakes tests/network_dma_test.cpp -o build/network_dma_test
