@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 #include "../src/PciFirmwareTransport.hpp"
+#include "../src/network/FirmwareBootPreparation.hpp"
 #include <assert.h>
 #include <fstream>
 #include <iterator>
@@ -49,6 +50,24 @@ struct Device {
         return true;
     }
 };
+// Share the same register state across real preparation, transfer and handoff
+// algorithms, instead of replacing each next phase with an idealized snapshot.
+struct PreparationIo {
+    Device &d;
+    bool inGate(){return true;}bool cancelled(){return false;}
+    uint16_t command(){return d.cmd;}uint64_t nowUs(){return d.time;}
+    void beginCleanup(){}void endCleanup(){}
+    bool delayUs(unsigned us){d.pauseUs(us);return true;}
+    bool read32(uint32_t a,uint32_t &v){v=d.read32(a);return true;}
+    bool read16(uint32_t a,uint16_t &v){v=d.read16(a);return true;}
+    bool write32(uint32_t a,uint32_t v){
+        assert(!(d.cmd&4));d.regs[a]=v;
+        if(a==0x8400&&(v&0x4800000)==0x4800000)d.regs[0x8d00]=d.regs[0x9100]=3;
+        if(a==0x88&&(v&2))d.regs[0x1e0]|=2;
+        return true;
+    }
+    bool write16(uint32_t a,uint16_t v){return write32(a,v);}
+};
 int main(int argc,char **argv){
     assert(argc==2);std::ifstream in(argv[1],std::ios::binary);
     std::vector<uint8_t> blob((std::istreambuf_iterator<char>(in)),{});
@@ -60,6 +79,14 @@ int main(int argc,char **argv){
     assert(r.second.resetHci==3&&!(r.second.resetControl&8)&&!r.second.pollFailureReason);
     assert(d.cmd==2&&d.barriers==164&&!d.regs[0x1160]&&!d.regs[0x1038]&&d.releases==1);
     const auto writes=d.writes;
+    for(unsigned pass=0;pass<2;++pass){
+        Device shared;shared.regs[0x3f0]=0x100;shared.firmwareUnmasks=true;
+        PreparationIo io{shared};rtl8852be::firmwareboot::Preparation<PreparationIo> prep(io);
+        assert(prep.prepareDmac()&&prep.enableCpuForDownload());
+        auto transfer=run(shared);assert(prep.acceptDownload(transfer.first));
+        assert(prep.result.cpuRunning&&prep.result.downloadReleased&&shared.cmd==2);
+        assert(prep.stopCpu()&&!prep.result.cpuRunning);
+    }
     d=Device{};d.firmwareUnmasks=true;r=run(d);
     assert(r.first.status==t::TransferStatus::complete&&r.second.restored&&d.regs[0x1a0]==0&&d.releases==1);
     for(unsigned mode=0;mode<2;++mode){d=Device{};d.firmwareUnmasks=true;

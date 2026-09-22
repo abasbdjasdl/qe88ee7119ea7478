@@ -136,6 +136,9 @@ public:
         // Cut off bus mastering even when stop writes or idle polling fail.
         const auto cmd=d_.command();result.masterOff=cmd!=0xffff&&command(uint16_t(cmd&~4u))&&!(d_.command()&4);
         ok=equal(0x1000,0x2800,0)&&equal(0x1010,runtimeStopMask,runtimeStopMask)&&ok;
+        // Stop/poll/config operations may outlive the initial mask writes.
+        // Re-establish and read back masks at the handoff, not a cached flag.
+        const bool finalMasked=maskInterrupts();ok=finalMasked&&ok;
         result.stopped=ok&&result.idle&&result.masterOff&&result.irqMasked;
         if(!result.stopped)faulted_=true;return result.stopped;
     }

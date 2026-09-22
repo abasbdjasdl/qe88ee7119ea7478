@@ -11,6 +11,7 @@ struct Device {
     std::vector<std::pair<uint32_t,uint32_t>> writes;
     uint16_t cmd=2;unsigned failWrite=0,ignoreWrite=0,barriers=0,pauseCount=0;
     uint64_t time=100;bool frozen=false,backwards=false,denyOff=false,partialOn=false;
+    bool unmaskOnStop=false,denyFinalMask=false;
     Device(){
         regs={{0x1000,0xc0d700},{0x1010,n::runtimeStopMask},{0x8380,3},
             {0x8400,0x60000000},{0xc000,0x40000000},{0x1e0,0xe0}};
@@ -21,12 +22,14 @@ struct Device {
         writes.push_back({4,c});if(writes.size()==failWrite)return false;
         if(denyOff&&!(c&4))return false;
         if(writes.size()!=ignoreWrite)cmd=c;
+        if(unmaskOnStop&&!(c&4))regs[0x1a0]=0x200000;
         return !(partialOn&&(c&4));
     }
     uint32_t read32(uint32_t a){return regs[a];}
     uint16_t read16(uint32_t a){return uint16_t(regs[a]);}
     bool write32(uint32_t a,uint32_t v){
         writes.push_back({a,v});if(writes.size()==failWrite)return false;
+        if(denyFinalMask&&!(cmd&4)&&a==0x1a0&&v==0)return false;
         if(writes.size()==ignoreWrite)return true;
         for(unsigned i=0;i<3;++i)if(a==n::irqStatus[i]){regs[a]&=~v;return true;}
         regs[a]=v;return true;
@@ -111,8 +114,13 @@ int main(){
         assert(!p.publish(8,5)&&p.faulted());assert(p.stop());
     }
     unsigned stopWrites=0;
+    for(unsigned failure=0;failure<2;++failure){Device d;n::PciRuntime<Device> p(d);assert(p.start(r));
+        d.unmaskOnStop=true;d.denyFinalMask=failure;const bool stopped=p.stop();
+        assert(stopped==!failure&&p.result.stopped==!failure&&p.result.irqMasked==!failure);
+        assert(!(d.cmd&4));assert(d.regs[0x1a0]==(failure?0x200000u:0u));}
     {Device d;n::PciRuntime<Device> p(d);assert(p.start(r));d.writes.clear();assert(p.stop());stopWrites=unsigned(d.writes.size());}
     for(unsigned at=1;at<=stopWrites;++at){Device d;n::PciRuntime<Device> p(d);assert(p.start(r));d.writes.clear();d.failWrite=at;
-        assert(!p.stop()&&!p.result.stopped);if(at!=stopWrites)assert(!(d.cmd&4));}
+        assert(!p.stop()&&!p.result.stopped);
+        if(d.writes[at-1].first!=4)assert(!(d.cmd&4));}
     printf("PASS: PCI runtime model; 70000 TX wraps, RX bounds, W1C/rearm, %u start and %u stop write failures, idle/clock/partial-BM errors\n",normalWrites,stopWrites);
 }

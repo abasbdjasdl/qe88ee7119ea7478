@@ -39,6 +39,12 @@ int main(){
      assert(p->attach(&d,&l,0)&&d.cmd==0x402);assert(p->detach());p->release();}
     {IOPCIDevice d;IOWorkLoop l;auto *p=new R16PciInterrupts;d.ignoreBusMasterDisable=true;
      assert(!p->attach(&d,&l,0)&&l.sources.empty());p->release();}
+    // Failure after both sources were added must clear both flags. A retry
+    // that fails timer addition must not remove an unregistered timer.
+    {IOPCIDevice d;IOWorkLoop l;auto *p=new R16PciInterrupts;d.ignoreBusMasterDisable=true;
+     assert(!p->attach(&d,&l,0)&&l.sources.empty());
+     d.ignoreBusMasterDisable=false;d.cmd=2;l.failAdd=l.adds+2;
+     assert(!p->attach(&d,&l,0)&&l.sources.empty());p->release();}
     {IOPCIDevice d;IOWorkLoop l;auto *p=new R16PciInterrupts;d.cmd=0x406;
      assert(!p->attach(&d,&l,0)&&d.cmd==0x406);p->release();}
     for(unsigned failure=1;failure<=4;++failure){

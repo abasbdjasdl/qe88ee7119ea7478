@@ -24,7 +24,7 @@ failed:
     if(timer_){if(timerAdded_)loop_->removeEventSource(timer_);timer_->release();timer_=nullptr;}
     if(irq_){if(irqAdded_)loop_->removeEventSource(irq_);irq_->release();irq_=nullptr;}
     device->setBusMasterEnable(false);
-    irqAdded_=false;loop_->release();loop_=nullptr;return false;
+    timerAdded_=irqAdded_=false;loop_->release();loop_=nullptr;return false;
 }
 bool R16PciInterrupts::start(Runtime *runtime,Service service,Fault fault,void *context){
     if(!loop_||!loop_->inGate()||!irqAdded_||!timerAdded_||runtime_||servicing_||!runtime||!runtime->running()||!service||!fault)return false;
