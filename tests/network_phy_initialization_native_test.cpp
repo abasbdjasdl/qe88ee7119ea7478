@@ -14,9 +14,9 @@ namespace model {
 struct Access {unsigned a;uint32_t value;bool write;};
 static std::vector<Access> trace;
 static uint32_t rf[2][256];static uint8_t serial[256];
-static bool stuckSi,corruptSi,frozen;static unsigned slowAt,reverseAt;static uint64_t slowUs;
+static bool stuckSi,corruptSi,frozen,dropCckThreshold,enableDuringCck;static unsigned slowAt,reverseAt;static uint64_t slowUs;
 static void reset(){fakeRfk::reset();trace.clear();std::memset(rf,0,sizeof(rf));std::memset(serial,0,sizeof(serial));
-    stuckSi=corruptSi=frozen=false;slowAt=reverseAt=0;slowUs=0;rf[0][0x42]=23u<<1;rf[1][0x42]=41u<<1;}
+    stuckSi=corruptSi=frozen=dropCckThreshold=enableDuringCck=false;slowAt=reverseAt=0;slowUs=0;rf[0][0x42]=23u<<1;rf[1][0x42]=41u<<1;}
 static void set(volatile void *b,unsigned a,uint32_t v){auto *p=reinterpret_cast<volatile uint8_t*>(b)+a;
     for(unsigned i=0;i<4;++i)p[i]=uint8_t(v>>(i*8));}
 static uint32_t raw(const volatile void *b,unsigned a){auto *p=reinterpret_cast<const volatile uint8_t*>(b)+a;
@@ -29,6 +29,8 @@ inline uint32_t OSReadLittleInt32(const volatile void *b,unsigned a){
 }
 inline void OSWriteLittleInt32(volatile void *b,unsigned a,uint32_t v){
     phyBaseWrite32(b,a,v);model::trace.push_back({a,v,true});if(fakeRfk::accesses==fakeRfk::ignoredWrite)return;
+    if(a==0x14b64){if(model::dropCckThreshold)model::set(b,a,v&0x00ffffff);
+        if(model::enableDuringCck)model::set(b,0x14b74,model::raw(b,0x14b74)|0x40000000);}
     if(a==0x270){assert((v&0x80000000)&&((v&255)==4||(v&255)==5));
         const auto address=uint8_t(v);const bool read=v&0x01000000;
         if(read){assert((v&0x00ff0000)==0);v=(v&~0xff00u)|(uint32_t(model::serial[address]^(model::corruptSi?1:0))<<8);}
@@ -81,6 +83,11 @@ int main(){
     assert(first.field(pc::R_CHBW_MOD_V1,pc::B_ANT_RX_SEG0)==3);
     assert(first.field(pc::R_PATH1_BT_SHARE_V1,pc::B_PATH1_BT_SHARE_V1)==1);
     assert(!first.init.receivePath({0,0,1}));
+    model::reset();Fixture inactive;model::dropCckThreshold=true;assert(inactive.all());
+    assert(inactive.field(pc::R_BMODE_PDTH_V1,pc::B_BMODE_PDTH_LOWER_BOUND_MSK_V1)==0);
+    assert(inactive.field(pc::R_BMODE_PDTH_EN_V1,pc::B_BMODE_PDTH_LIMIT_EN_MSK_V1)==0);
+    model::reset();Fixture activated;model::dropCckThreshold=model::enableDuringCck=true;
+    assert(!activated.all()&&activated.init.result().error==PhyInitError::readback&&activated.init.result().address==0x14b74);
     // A ready SI register read that itself takes over 50 ms is too late.
     for(unsigned n=0;n<golden.size();++n)if(golden[n].a==0x270&&!golden[n].write){
         model::reset();Fixture f;model::slowAt=n+1;model::slowUs=50001;
@@ -102,7 +109,8 @@ int main(){
         if(f.all()){
             for(unsigned a=0;a<sizeof(f.map.data);a+=4){
                 if(a==0x270||a==0x10370||a==0x10374||a==0x10378||a==0x1174c)continue;
-                assert(f.map.get(a)==first.map.get(a));
+                if(a==0x14b64){assert((f.map.get(a)&0x00ffffff)==(first.map.get(a)&0x00ffffff));assert(!(f.map.get(0x14b74)&0x40000000));}
+                else assert(f.map.get(a)==first.map.get(a));
             }
         }else assert(!f.init.result().afterRfkDone);++writeFaults;
     }

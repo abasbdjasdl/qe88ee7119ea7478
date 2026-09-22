@@ -23,7 +23,7 @@ class MacPhyInitialization {
     bool fail(PhyInitError,uint32_t=0,uint32_t=0,uint32_t=0);bool check();bool enter(PhyInitStage);
     bool read(uint32_t,uint32_t &);bool write(uint32_t,uint32_t);bool update(uint32_t,uint32_t,uint32_t,bool bb=true);
     bool delay(unsigned);bool siIdle();bool crystal(uint8_t,uint8_t);bool bbReset();bool gainOffset(uint8_t);
-    bool environment();bool phyStatus();bool dig();bool cfo();bool receivePaths(rfk::Channel);
+    bool environment();bool phyStatus();bool disabledCckThreshold();bool dig();bool cfo();bool receivePaths(rfk::Channel);
 public:
     MacPhyInitialization(IOPCIDevice *,IOMemoryMap *,IOWorkLoop *,RadioAccessGuard);
     MacPhyInitialization(const MacPhyInitialization&)=delete;MacPhyInitialization&operator=(const MacPhyInitialization&)=delete;

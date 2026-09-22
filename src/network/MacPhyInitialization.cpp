@@ -121,12 +121,29 @@ bool MacPhyInitialization::phyStatus(){
     return update(R_PHY_STS_BITMAP_ADDR_START+4*13,1u<<13,1)&&update(R_PHY_STS_BITMAP_ADDR_START+4*14,1u<<13,1)&&
         update(R_PHY_STS_BITMAP_ADDR_START+4*10,1u<<1,1);
 }
+bool MacPhyInitialization::disabledCckThreshold(){
+    // Initial DIG has dynamic CCK detection disabled. Keep the upstream
+    // threshold write, but it is not an active constraint until enabled.
+    // Some hardware reads zero here; require the enable bit to remain zero
+    // before and after the write instead of requiring an inactive latch.
+    const auto enable=0x10000+R_BMODE_PDTH_EN_V1;
+    const auto address=0x10000+R_BMODE_PDTH_V1;
+    uint32_t state=0,old=0,got=0;
+    if(!read(enable,state))return false;
+    if(state&B_BMODE_PDTH_LIMIT_EN_MSK_V1)return fail(PhyInitError::readback,enable,0,state&B_BMODE_PDTH_LIMIT_EN_MSK_V1);
+    if(!read(address,old))return false;
+    const auto desired=(old&~B_BMODE_PDTH_LOWER_BOUND_MSK_V1)|((uint32_t(-128)<<shift(B_BMODE_PDTH_LOWER_BOUND_MSK_V1))&B_BMODE_PDTH_LOWER_BOUND_MSK_V1);
+    if(!write(address,desired)||!read(address,got)||!read(enable,state))return false;
+    // Read still rejects invalid MMIO values. Enabling this feature in a
+    // future dynamic-DIG path must program and validate the threshold there.
+    return !(state&B_BMODE_PDTH_LIMIT_EN_MSK_V1)||fail(PhyInitError::readback,enable,0,state&B_BMODE_PDTH_LIMIT_EN_MSK_V1);
+}
 bool MacPhyInitialization::dig(){
     // 8852B support_igi is false: no forced IGI or gain-table reads. Initial DIG
     // is unlinked, its zero-initialized igi_rssi yields CCK clamp -18 => -128.
     if(!update(R_SEG0R_PD_V1,B_SEG0R_PD_LOWER_BOUND_MSK,0)||!update(R_SEG0R_PD_V1,B_SEG0R_PD_SPATIAL_REUSE_EN_MSK_V1,0))return false;
     if(caps_.supportCckpd&&(!update(R_BMODE_PDTH_EN_V1,B_BMODE_PDTH_LIMIT_EN_MSK_V1,0)||
-       !update(R_BMODE_PDTH_V1,B_BMODE_PDTH_LOWER_BOUND_MSK_V1,uint32_t(-128))))return false;
+       !disabledCckThreshold()))return false;
     return update(R_PATH0_P20_FOLLOW_BY_PAGCUGC_V2,B_PATH0_P20_FOLLOW_BY_PAGCUGC_EN_MSK,0)&&
         update(R_PATH0_S20_FOLLOW_BY_PAGCUGC_V2,B_PATH0_S20_FOLLOW_BY_PAGCUGC_EN_MSK,0)&&
         update(R_PATH1_P20_FOLLOW_BY_PAGCUGC_V2,B_PATH1_P20_FOLLOW_BY_PAGCUGC_EN_MSK,0)&&
