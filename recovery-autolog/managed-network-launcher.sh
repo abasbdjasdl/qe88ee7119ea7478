@@ -170,8 +170,8 @@ if [ "$mode" != production ]; then
 fi
 worker="$target/network-input/run-network-test.sh"
 collector="$target/network-input/collect_network_state.sh"
-expected_worker=51f68518711a33c3733488b973da74cd42629b58a56471be5c039996fd7936b5
-expected_collector=a34c9b1e37aff4c85536c8bb2c10ab7d4774a7d720c8b557a1293b442d185d23
+expected_worker=698db6967f6e2aeda782e147627d09a3c0180cf7467652dd48b659ca70bf8400
+expected_collector=78b58f9ea4a640e7d38cab6cee6626d1ecc0f7af51bb7984e39a2de131de5c1d
 for script in "$worker" "$collector"; do
     [ -f "$script" ] || { echo 'Missing input.'; exit 4; }
     actual=$(/sbin/sha256 -q "$script" 2>/dev/null)

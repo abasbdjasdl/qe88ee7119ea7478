@@ -29,3 +29,14 @@ for name in ('collect_network_state.sh', 'run-network-test.sh'):
         assert result.returncode!=0, 'Regression control unexpectedly passed'
     print('PASS: exact '+name+' timeout wrapper preserves native plist pipeline; old wrapper fails.')
 print('PASS: actual macOS ioreg XML and plutil scalar extraction; missing key reports error; no registry data persisted.')
+
+worker=Path(__file__).with_name('run-network-test.sh').read_text()
+value=worker[worker.index('value() {'):worker.index('\nresolve()')].replace('R16RTL8852BE','IOPlatformExpertDevice')
+start=worker.index('bounded() (');end=worker.index('\n)',start)+2
+for shell in ('/bin/sh','/bin/bash'):
+    for query,ok in [('0.IOObjectClass',True),('1.IOObjectClass',False)]:
+        command=worker[start:end]+'\n'+value+'\nexec 4>/dev/null\nvalue '+query
+        result=subprocess.run([shell,'-c',command],capture_output=True,text=True,timeout=10)
+        assert (result.returncode==0)==ok
+        assert result.stdout.strip()==(expected if ok else ''), result.stdout
+print('PASS: worker value suppresses failed plutil stdout; absent second controller stays empty.')

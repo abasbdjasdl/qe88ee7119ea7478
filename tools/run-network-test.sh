@@ -22,10 +22,11 @@ bounded() (
  exit "$result"
 )
 value() {
-    ( bounded 3 /usr/sbin/ioreg -r -c R16RTL8852BE -a -d 2 2>/dev/null
+    extracted=$( ( bounded 3 /usr/sbin/ioreg -r -c R16RTL8852BE -a -d 2 2>/dev/null
       code=$?; printf 'query=%s ioreg_exit=%s\n' "$1" "$code" >&4 ) |
-        bounded 3 /usr/bin/plutil -extract "$1" raw -o - - 2>/dev/null
+        bounded 3 /usr/bin/plutil -extract "$1" raw -o - - 2>/dev/null )
     code=$?; printf 'query=%s plutil_exit=%s\n' "$1" "$code" >&4
+    [ "$code" -ne 0 ] || printf '%s\n' "$extracted"
     return "$code"
 }
 resolve() {

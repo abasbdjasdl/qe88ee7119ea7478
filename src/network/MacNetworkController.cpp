@@ -51,7 +51,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(faulted)return;faulted=true;traffic=station::Traffic::none;enabled=false;
         ic.ic_if.if_flags&=~IFF_RUNNING;
         owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
-        owner.setProperty("R16Failure",reason);IOLog("RTL8852BE network: %s\n",reason);
+        publishStatus();owner.setProperty("R16Failure",reason);IOLog("RTL8852BE network: %s\n",reason);
         // No reclamation from a receive/ACK callback. stop() later proves idle.
         if(interrupt)interrupt->stop();else if(runtimeAttempted)runtime.stop();
     }
@@ -308,9 +308,25 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         for(const auto &q:tx)if(const_cast<MacTxDmaQueue&>(q).completions().outstanding())return false;
         return true;
     }
+    uint64_t lastStatus{};
+    void publishStatus(){
+        if(!owner.pci_)return;
+        owner.pci_->setProperty("R16LiveCommands",uint64_t(commands?commands->allocated():0),64);
+        owner.pci_->setProperty("R16LiveCommandError",uint64_t(commands?unsigned(commands->error()):0),64);
+        owner.pci_->setProperty("R16LiveStation",uint64_t(unsigned(station.state())),64);
+        owner.pci_->setProperty("R16LiveProtocol",uint64_t(unsigned(ic.ic_state)),64);
+        owner.pci_->setProperty("R16LiveEnabled",uint64_t(enabled),64);
+        owner.pci_->setProperty("R16LiveFaulted",uint64_t(faulted),64);
+        owner.pci_->setProperty("R16LiveBootReady",uint64_t(boot&&boot->ready()),64);
+        owner.pci_->setProperty("R16LiveTraffic",uint64_t(unsigned(traffic)),64);
+        owner.pci_->setProperty("R16LiveAction",uint64_t(unsigned(activeAction.action)),64);
+        owner.pci_->setProperty("R16LiveActionPending",uint64_t(actionInFlight),64);
+        owner.pci_->setProperty("R16LiveBsdNamed",uint64_t(owner.interface_&&owner.interface_->getProperty("BSD Name")),64);
+    }
     void poll(){
         if(stopping||faulted)return;
         const auto timestamp=now();
+        if(!lastStatus||timestamp-lastStatus>=1000000){lastStatus=timestamp;publishStatus();}
         if(!commands->service()){fail("firmware service failed");return;}
         if(stationStarted&&!station.tick(timestamp)){fail("station deadline expired");return;}
         if(actionDeferred&&dataDrained()){
@@ -441,7 +457,7 @@ bool R16NetworkController::start(IOService *provider){
         bool published=dict&&medium&&IONetworkMedium::addMedium(dict,medium)&&publishMediumDictionary(dict)&&setCurrentMedium(medium)&&setSelectedMedium(medium);
         if(medium)medium->release();if(dict)dict->release();if(!published)goto failed;
         recordStartup(provider,51);
-        if(!attachInterface(reinterpret_cast<IONetworkInterface**>(&interface_),false))goto failed;
+        if(!attachInterface(reinterpret_cast<IONetworkInterface**>(&interface_),true))goto failed;
     }
     IOEthernetController::setLinkStatus(kIONetworkLinkValid);registerService();interface_->registerService();
     recordStartup(provider,52);return true;
