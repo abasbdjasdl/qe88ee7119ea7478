@@ -88,7 +88,7 @@ test_id=$(provider_value 0.R16NetworkTestId) || test_id=
 second_id=$(provider_value 1.R16NetworkTestId) || second_id=
 if [ "$test_id" = NETWORK-START-02 ] && [ -z "$second_id" ]; then
     printf 'provider_test_id=NETWORK-START-02\n' >&3
-    for key in R16NetworkStage R16NetworkStartFailed R16ProbeStage R16ProbeError R16ProbePciError R16ProbePowerError R16ProbePowerAddress R16ProbePowerExpected R16ProbePowerActual R16ProbePowerReads R16ProbePowerWrites R16ProbeDownloadStatus R16ProbePollAddress R16ProbePollMask R16ProbePollWanted R16ProbePollActual R16MacStage R16MacError R16MacAddress R16MacExpected R16MacActual R16PrepStage R16PrepError R16PrepAddress R16PrepWanted R16PrepActual R16FwOperation R16FwPhase R16FwFailedPhase R16FwControl R16FwIndex R16FwQuiesced R16FwReleased R16FwRetained R16BankStatus R16BankSlot; do
+    for key in R16NetworkStage R16NetworkStartFailed R16ProbeStage R16ProbeError R16ProbePciError R16ProbePowerError R16ProbePowerAddress R16ProbePowerExpected R16ProbePowerActual R16ProbePowerReads R16ProbePowerWrites R16ProbeDownloadStatus R16ProbePollAddress R16ProbePollMask R16ProbePollWanted R16ProbePollActual R16MacStage R16MacError R16MacAddress R16MacExpected R16MacActual R16PrepStage R16PrepError R16PrepAddress R16PrepWanted R16PrepActual R16FwOperation R16FwPhase R16FwFailedPhase R16FwControl R16FwIndex R16FwQuiesced R16FwReleased R16FwRetained R16BankStatus R16BankSlot R16DmaAddress R16DmaExpected R16DmaActual R16DmaBusy R16DmaPolls R16DmaMasked R16DmaMasterOff R16DmaIdle R16DmaStopped; do
         value=$(provider_value "0.$key") || value=unknown
         case "$value" in true|false|unknown) ;; ''|*[!0-9]*) value=invalid;; esac
         printf '%s=%s\n' "$key" "$value" >&3

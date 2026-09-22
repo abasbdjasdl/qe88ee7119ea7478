@@ -57,6 +57,16 @@ bool MacProbeAndFirmware::fail(ProbeFirmwareError error){
             unsigned(result_.failedStage),unsigned(error),static_cast<unsigned long long>(result_.epoch),
             unsigned(result_.cut),state_?state_->currentCycle:0);
         if(state_){
+            const auto &dma=state_->dmaStop.result;
+            state_->device.setProperty("R16DmaAddress",uint64_t(dma.failureAddress),64);
+            state_->device.setProperty("R16DmaExpected",uint64_t(dma.expected),64);
+            state_->device.setProperty("R16DmaActual",uint64_t(dma.actual),64);
+            state_->device.setProperty("R16DmaBusy",uint64_t(dma.lastBusy),64);
+            state_->device.setProperty("R16DmaPolls",uint64_t(dma.polls),64);
+            state_->device.setProperty("R16DmaMasked",uint64_t(dma.irqMasked),64);
+            state_->device.setProperty("R16DmaMasterOff",uint64_t(dma.masterOff),64);
+            state_->device.setProperty("R16DmaIdle",uint64_t(dma.idle),64);
+            state_->device.setProperty("R16DmaStopped",uint64_t(dma.stopped),64);
             state_->device.setProperty("R16ProbeStage",uint64_t(result_.failedStage),32);
             state_->device.setProperty("R16ProbeError",uint64_t(error),32);
             // Zero-extended 64-bit OSNumbers keep uint32 MMIO values unsigned
