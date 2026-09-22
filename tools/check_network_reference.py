@@ -21,6 +21,23 @@ for channel in ('ACH0','ACH1','ACH2','ACH3','CH8','CH9','CH12','RXQ','RPQ'):
 adapted=(root/'src/network/PciRingSetup.hpp').read_text().split('ringRegisters[9]={',1)[1].split('};',1)[0]
 actual=[[int(x.strip(),0) for x in row.split(',')] for row in re.findall(r'\{([^{}]+)\}',adapted)]
 assert actual==expected,(actual,expected)
+bits={m[1]:1<<int(m[2]) for m in re.finditer(r'^#define\s+(B_AX_\w+)\s+BIT\((\d+)\)',texts['pci.h'],re.M)}
+runtime=(root/'src/network/PciRuntime.hpp').read_text()
+for array,symbols in {
+    'irqMasks':['R_AX_HIMR0','R_AX_PCIE_HIMR00','R_AX_PCIE_HIMR10'],
+    'irqStatus':['R_AX_HISR0','R_AX_PCIE_HISR00','R_AX_PCIE_HISR10']
+}.items():
+    values=[int(v,0) for v in re.search(array+r'\[3\]=\{([^}]+)\}',runtime)[1].split(',')]
+    assert values==[registers[s] for s in symbols]
+body=texts['pci.c'].split('void rtw89_pci_config_intr_mask(',1)[1].split('EXPORT_SYMBOL',1)[0]
+groups=[['B_AX_HALT_C2H_INT_EN'],re.findall(r'B_AX_\w+',body.split('rtwpci->intrs[0] = B_AX_TXDMA_STUCK_INT_EN',1)[1].split(';',1)[0])+
+        ['B_AX_TXDMA_STUCK_INT_EN','B_AX_HS0ISR_IND_INT_EN'],['B_AX_HC10ISR_IND_INT_EN']]
+expected_irq=[]
+for group in groups:
+    value=0
+    for symbol in group:value|=bits[symbol]
+    expected_irq.append(value)
+assert [int(v,0) for v in re.search(r'irqEnabled\[3\]=\{([^}]+)\}',runtime)[1].split(',')]==expected_irq
 assert re.search(r'\.fill_txaddr_info\s*=\s*rtw89_pci_fill_txaddr_info\s*,',texts['rtw8852be.c'])
 assert re.search(r'\.check_rx_tag\s*=\s*false\s*,',texts['rtw8852be.c'])
 assert re.search(r'\.rx_ring_eq_is_full\s*=\s*false\s*,',texts['rtw8852be.c'])

@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', '.github/workflows/network-port.yml']
+    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tests/network_irq_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', '.github/workflows/network-port.yml']
 permissions:
   contents: read
 jobs:
@@ -32,6 +32,12 @@ jobs:
         run: |
           mkdir -p build/network-stack
           python3 tools/check_network_reference.py build-rtw89 | tee build/network-stack/wire-reference-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_runtime_test.cpp -o build/network_runtime_test
+          ./build/network_runtime_test | tee build/network-stack/runtime-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_irq_fakes tests/network_interrupts_test.cpp -o build/network_interrupts_test
+          ./build/network_interrupts_test | tee build/network-stack/interrupt-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_queue_service_test.cpp -o build/network_queue_service_test
+          ./build/network_queue_service_test | tee build/network-stack/queue-service-tests.txt
           python3 tools/import_radio_reference.py build-rtw89
           git diff --exit-code -- src/network/Rtw8852bRadioTables.cpp src/network/Rtw8852bEfuseLayout.hpp src/network/radio-reference-provenance.json tests/network_radio_reference.inc
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_radio_test.cpp src/network/Rtw8852bRadioTables.cpp -o build/network_radio_test

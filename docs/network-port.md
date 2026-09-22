@@ -64,8 +64,47 @@ The register/BDRAM tables are checked against the pinned original driver.
 `Net80211Runtime` supplies the protocol workloop/gate symbols and enforces one
 owner. Teardown must run after protocol timers/tasks/nodes are drained. The timer
 adapter handles allocation/add/arm failures, cancellation and stale callbacks.
-There is still no IOEthernetController start/stop implementation or radio backend
-calling these components. None is wired into the installed diagnostic kext.
+There is still no IOEthernetController start/stop implementation or full radio
+backend calling these components. None is wired into the installed diagnostic kext.
+
+### Runtime DMA and MSI integration
+
+`PciRuntime` now starts/stops the nine native queues, checks fresh 64-entry ring
+addresses/counts/indices, MAC/CMAC/HCI/firmware prerequisites, masks interrupts,
+and handles bounded DMA-idle proof and PCI bus-master cutoff. It publishes only
+the host half of each queue index after a barrier, checks TX one-slot advance
+and RX consumption bounds, and latches errors. This does not replace full MAC,
+RFK, channel or PCI link initialization. Start is one-shot per queue epoch;
+recovery must build a fresh epoch after stopping and draining the old one.
+
+`MacPciRuntimeIo` supplies real, bounded BAR2/config accesses. Its writes are
+limited to IRQ masks/observed W1C status, DMA control bits and host doorbells.
+`R16PciInterrupts` attaches a verified MSI event source to the controller
+workloop. There is no primary-interrupt driver filter. Deferred handling masks
+chip interrupts, acknowledges only observed enabled causes, drains bounded
+queue work, then rearms. A 1 ms timer continues budget-limited work while IRQs
+remain masked; a 10 ms backstop handles coalesced/lost edges and firmware TX
+completion without a dedicated enabled TX cause. HALT or stuck-DMA causes stop
+the runtime and notify the controller; SER/reset/reconnect remains controller
+work. Reentrant stop cannot authorize buffer release until the callback returns.
+
+`PciQueueService` and its native `MacQueueService` binding now connect this
+dispatch to all seven TX consumer ledgers, RPQ first, and RXQ second, using the
+real native queue types. Each RX ring processes at most 32 descriptors per pass
+and rechecks hardware indices after publishing recycled buffers. Transmit entry
+points stage/synchronize the real data or firmware queue, verify its ring
+identity, and publish the hardware doorbell. Controller-provided synchronous
+receive callbacks still must bind packet/PHY/C2H handling and real channel/RSSI.
+Ownership of the device, BAR2, workloop, all queues and these callbacks belongs
+to the future controller; they must outlive the interrupt sources. Stop/detach
+precedes protocol/DMA destruction. All mappings remain retained on stop failure.
+
+Tests cover register-model TX wraparound, W1C/rearm races, each start/stop write
+failure, partial bus-master activation and bounded idle failures. Actual native
+MSI owner code is tested with explicit IOKit models for allocation/add/arm
+failures, continuation, fatal events, stale callbacks and callback reentrancy.
+The native sources compile against the pinned kernel SDK; no physical interrupt,
+packet reception or network connection is established by these tests.
 
 ## Build and verification
 
