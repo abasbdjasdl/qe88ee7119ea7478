@@ -127,4 +127,3 @@ bool MacStationIo::txInfo(const TxLease &lease,uint8_t macid,channel::Channel ch
     return stationio::legacyTx(header,sizeof(header),lease.bytes,macid,channel,basicRates,out,ring);
 }
 } }
-

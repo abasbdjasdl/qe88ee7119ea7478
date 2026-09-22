@@ -80,4 +80,3 @@ public:
     UInt32 outputPacket(mbuf_t,void*) override;
     bool setLinkStatus(UInt32,const IONetworkMedium * = nullptr,UInt64 = 0,OSData * = nullptr) override;
 };
-

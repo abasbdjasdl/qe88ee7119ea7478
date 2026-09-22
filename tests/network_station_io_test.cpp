@@ -66,4 +66,3 @@ int main(){
     assert(waiting.store(0,4,data,4,100));waiting.clear();assert(!waiting.take(0,4,101));
     std::printf("station IO TX/EDCA/PHY + RX-first-PPDU tests passed (%u MAC PPDU layouts)\n",combinations);
 }
-
