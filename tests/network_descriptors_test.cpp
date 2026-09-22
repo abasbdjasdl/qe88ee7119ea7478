@@ -18,6 +18,10 @@ int main(){
         const uint8_t llc[]={0xaa,0xaa,3,0,0,0,0x88,0x8e};memcpy(frame.data()+header,llc,8);
         n::RxPacket p{};p.payload=frame.data();p.length=header+12;
         assert(n::inspectRx(p,local).eapol);
+        assert(n::inspectRx(p,local).eapolType==256);
+        p.length=header+16;frame[header+9]=3;frame[header+10]=1;frame[header+11]=2;
+        assert(n::inspectRx(p,local).eapolType==3&&n::inspectRx(p,local).bodyLength==258);
+        p.length=header+12;
         --p.length;assert(!n::inspectRx(p,local).eapol);++p.length;
         p.info.hw_dec=true;assert(!n::inspectRx(p,local).eapol);
         p.info.sw_dec=true;assert(n::inspectRx(p,local).eapol);

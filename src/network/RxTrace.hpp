@@ -3,7 +3,7 @@
 #include "NetworkDescriptors.hpp"
 namespace rtl8852be { namespace network {
 // Metadata only. Never stores payloads, addresses or EAPOL key material.
-struct RxTrace {unsigned type{3};bool eapol{};uint16_t deauthReason{};bool deauth{};};
+struct RxTrace {unsigned type{3};bool eapol{};uint16_t deauthReason{};bool deauth{};unsigned eapolType{256},bodyLength{};};
 inline RxTrace inspectRx(const RxPacket &rx,const uint8_t *local){
     RxTrace result;
     if(rx.info.pkt_type||!rx.payload||rx.length<2||(rx.payload[0]&3))return result;
@@ -26,6 +26,8 @@ inline RxTrace inspectRx(const RxPacket &rx,const uint8_t *local){
     if(rx.length<header+8+4)return result;
     static const uint8_t llc[8]={0xaa,0xaa,3,0,0,0,0x88,0x8e};
     for(unsigned i=0;i<8;++i)if(p[header+i]!=llc[i])return result;
-    result.eapol=true;return result;
+    result.eapol=true;
+    if(rx.length>=header+8+4+4){result.eapolType=p[header+9];result.bodyLength=(unsigned(p[header+10])<<8)|p[header+11];}
+    return result;
 }
 } }

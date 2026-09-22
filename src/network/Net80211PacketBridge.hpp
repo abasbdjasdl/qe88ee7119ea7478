@@ -20,5 +20,6 @@ void releaseTx(ieee80211com *ic,TxLease &lease);
 // Complete first+last DMA segment. Includes Realtek RXWD and the on-air FCS.
 // A valid initialized channel/RSSI must come from the chip/PHY report layer.
 // No hardware-decrypted frames are accepted by this software-crypto bridge.
-int deliverRealtekRx(ieee80211com *ic,const uint8_t *dma,size_t bytes,size_t descriptorOffset,uint8_t channel,int rssi);
+struct RxDeliveryTrace {unsigned stage{};size_t packetLength{},firstLength{};};
+int deliverRealtekRx(ieee80211com *ic,const uint8_t *dma,size_t bytes,size_t descriptorOffset,uint8_t channel,int rssi,RxDeliveryTrace *trace=nullptr);
 } }

@@ -39,3 +39,21 @@ hardware decryption, HW_DEC+SW_DEC fallback, and clear local-addressed EAPOL
 LLC candidates before gating and at the bridge. Candidates do not prove valid
 EAPOL-Key messages. No payload/key/address is saved. Last clear local-addressed
 deauthentication reason is numeric and does not authenticate the sender.
+
+## 0.1.20 EAPOL bridge boundary
+
+EapolBridgeOk/Failed separate candidate-specific return codes from unrelated
+control-frame rejections. Stage maps to:1 attachment,2 decode,3 crypto/type,
+4 minimum length,5 frame type,6 version,7 channel,8 allocation,9 copy,10 pullup,
+11 node,12 input call,13 returned from input. Stage13 is not acceptance.
+Lengths packs mbuf packet length low32 and first segment length high32.
+Header packs FC0/FC1/fragment number/protocol state in consecutive bytes.
+Envelope packs EAPOL type low16 (256 means missing), advertised body length
+bits16..31, and RX frame length high32. No payload/key/nonce/MAC is recorded.
+DropMask records per-candidate statistic changes: bits0..9 short,wrongdir,
+wrongbss,duplicate,nowep,unencrypted,decap,unauth,eapol_key,nombuf. Last-candidate
+values do not describe every prior packet.
+
+The native packet bridge is exercised with synthetic EAPOL and a fake mbuf
+implementation for bytes, FCS removal, lengths, crypto filtering and cleanup.
+This does not execute the real macOS kernel or the net80211 input state machine.

@@ -40,11 +40,32 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     uint64_t stateRequests[5]{},runCommitted{},portAuthorizations{},rxBridgeOk{},rxBridgeError{},txPrepareErrors{};
     uint64_t lastStateRequest{},lastRxBridgeError{},lastTxPrepareError{};
     uint64_t rxTypes[4]{},rxHardwareCrypto{},rxSoftwareFallback{},rxEapol{},rxEapolGated{},rxEapolBridge{},lastDeauthReason{};
+    uint64_t eapolBridgeOk{},eapolBridgeFailed{},eapolStage{},eapolError{},eapolLengths{},eapolHeader{},eapolEnvelope{},eapolDropMask{};
     void deliver(const uint8_t *data,size_t length,uint8_t channel,int rssi){
         receivingProtocol=true;++rxDeliveryAttempts;
         RxPacket packet;
-        if(decodeRx(data,length,4,packet)==DescriptorStatus::ok&&inspectRx(packet,identity.interface.address.bytes).eapol)++rxEapolBridge;
-        const int error=deliverRealtekRx(&ic,data,length,4,channel,rssi);
+        RxTrace metadata;
+        if(decodeRx(data,length,4,packet)==DescriptorStatus::ok)metadata=inspectRx(packet,identity.interface.address.bytes);
+        const auto before=ic.ic_stats;RxDeliveryTrace trace;
+        if(metadata.eapol){++rxEapolBridge;
+            eapolHeader=uint64_t(packet.payload[0])|(uint64_t(packet.payload[1])<<8)|(uint64_t(packet.payload[22]&15)<<16)|(uint64_t(unsigned(ic.ic_state))<<24);
+            eapolEnvelope=uint64_t(metadata.eapolType)|(uint64_t(metadata.bodyLength)<<16)|(uint64_t(packet.length)<<32);}
+        const int error=deliverRealtekRx(&ic,data,length,4,channel,rssi,metadata.eapol?&trace:nullptr);
+        if(metadata.eapol){
+            if(error)++eapolBridgeFailed;else ++eapolBridgeOk;
+            eapolStage=trace.stage;eapolError=unsigned(error);eapolLengths=uint64_t(trace.packetLength)|(uint64_t(trace.firstLength)<<32);
+            const auto &after=ic.ic_stats;
+            eapolDropMask=uint64_t(after.is_rx_tooshort!=before.is_rx_tooshort)|
+                (uint64_t(after.is_rx_wrongdir!=before.is_rx_wrongdir)<<1)|
+                (uint64_t(after.is_rx_wrongbss!=before.is_rx_wrongbss)<<2)|
+                (uint64_t(after.is_rx_dup!=before.is_rx_dup)<<3)|
+                (uint64_t(after.is_rx_nowep!=before.is_rx_nowep)<<4)|
+                (uint64_t(after.is_rx_unencrypted!=before.is_rx_unencrypted)<<5)|
+                (uint64_t(after.is_rx_decap!=before.is_rx_decap)<<6)|
+                (uint64_t(after.is_rx_unauth!=before.is_rx_unauth)<<7)|
+                (uint64_t(after.is_rx_eapol_key!=before.is_rx_eapol_key)<<8)|
+                (uint64_t(after.is_rx_nombuf!=before.is_rx_nombuf)<<9);
+        }
         receivingProtocol=false;
         if(error){++rxBridgeError;lastRxBridgeError=unsigned(error);}else ++rxBridgeOk;
     }
@@ -339,6 +360,14 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     uint64_t lastStatus{};
     void publishStatus(){
         if(!owner.pci_)return;
+        owner.pci_->setProperty("R16TraceEapolBridgeOk",uint64_t(eapolBridgeOk),64);
+        owner.pci_->setProperty("R16TraceEapolBridgeFailed",uint64_t(eapolBridgeFailed),64);
+        owner.pci_->setProperty("R16TraceEapolStage",uint64_t(eapolStage),64);
+        owner.pci_->setProperty("R16TraceEapolError",uint64_t(eapolError),64);
+        owner.pci_->setProperty("R16TraceEapolLengths",uint64_t(eapolLengths),64);
+        owner.pci_->setProperty("R16TraceEapolHeader",uint64_t(eapolHeader),64);
+        owner.pci_->setProperty("R16TraceEapolEnvelope",uint64_t(eapolEnvelope),64);
+        owner.pci_->setProperty("R16TraceEapolDropMask",uint64_t(eapolDropMask),64);
         owner.pci_->setProperty("R16TraceRxManagement",uint64_t(rxTypes[0]),64);
         owner.pci_->setProperty("R16TraceRxControl",uint64_t(rxTypes[1]),64);
         owner.pci_->setProperty("R16TraceRxData",uint64_t(rxTypes[2]),64);

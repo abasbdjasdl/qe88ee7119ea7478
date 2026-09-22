@@ -55,29 +55,42 @@ int prepareNextTx(ieee80211com *ic,TxLease &out){
     if(!frame)return EAGAIN;
     return prepareEthernetTx(ic,frame,out);
 }
-int deliverRealtekRx(ieee80211com *ic,const uint8_t *dma,size_t bytes,size_t descriptorOffset,uint8_t channel,int rssi){
+int deliverRealtekRx(ieee80211com *ic,const uint8_t *dma,size_t bytes,size_t descriptorOffset,uint8_t channel,int rssi,RxDeliveryTrace *trace){
+    if(trace){*trace={};trace->stage=1;}
     if(!ic||!ic->ic_ac.ac_if.iface||!ic->ic_ac.ac_if.netStat)return ENETDOWN;
     RxPacket rx;
+    if(trace)trace->stage=2;
     if(decodeRx(dma,bytes,descriptorOffset,rx)!=DescriptorStatus::ok)return EINVAL;
     // C2H/PPDU/TX reports belong to their hardware handlers, never net80211.
+    if(trace)trace->stage=3;
     if(rx.info.pkt_type!=0||hardwareDecrypted(rx.info))return EOPNOTSUPP;
+    if(trace)trace->stage=4;
     if(rx.length<sizeof(ieee80211_frame)+4)return EINVAL;
     const auto type=rx.payload[0]&IEEE80211_FC0_TYPE_MASK;
+    if(trace)trace->stage=5;
     if(type!=IEEE80211_FC0_TYPE_DATA&&type!=IEEE80211_FC0_TYPE_MGT)return EOPNOTSUPP;
+    if(trace)trace->stage=6;
     if((rx.payload[0]&IEEE80211_FC0_VERSION_MASK)!=IEEE80211_FC0_VERSION_0)return EINVAL;
+    if(trace)trace->stage=7;
     if(!channel||!ic->ic_channels[channel].ic_freq)return EINVAL;
     const size_t frameBytes=rx.length-4; // rtw89 advertises RX_INCLUDES_FCS
     mbuf_t frame=nullptr;
+    if(trace)trace->stage=8;
     if(mbuf_allocpacket(MBUF_DONTWAIT,frameBytes,nullptr,&frame)!=0)return ENOBUFS;
+    if(trace)trace->stage=9;
     if(mbuf_copyback(frame,0,frameBytes,rx.payload,MBUF_DONTWAIT)!=0){mbuf_freem(frame);return ENOBUFS;}
+    if(trace)trace->stage=10;
     if(mbuf_len(frame)<sizeof(ieee80211_frame)&&mbuf_pullup(&frame,sizeof(ieee80211_frame))!=0)return ENOBUFS;
     auto *header=static_cast<ieee80211_frame *>(mbuf_data(frame));
     auto *node=ieee80211_find_rxnode(ic,header);
+    if(trace)trace->stage=11;
     if(!node){mbuf_freem(frame);return ENOENT;}
     ieee80211_rxinfo info{};info.rxi_tstamp=rx.info.free_run_cnt;info.rxi_rssi=rssi;info.rxi_chan=channel;
     // flags=0 deliberately: net80211 must perform decryption and replay checks.
+    if(trace){trace->stage=12;trace->packetLength=mbuf_pkthdr_len(frame);trace->firstLength=mbuf_len(frame);}
     ieee80211_input(&ic->ic_ac.ac_if,frame,node,&info);
     ieee80211_release_node(ic,node);
+    if(trace)trace->stage=13;
     return 0;
 }
 } }

@@ -120,6 +120,8 @@ jobs:
           ./build/network_tx_dma_test | tee build/network-stack/tx-dma-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_descriptors_test.cpp -o build/network_descriptors_test
           ./build/network_descriptors_test | tee build/network-stack/descriptor-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_bridge_fakes tests/network_packet_bridge_test.cpp src/network/Net80211PacketBridge.cpp -o build/network_packet_bridge_test
+          ./build/network_packet_bridge_test | tee build/network-stack/packet-bridge-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_pci_test.cpp -o build/network_pci_test
           ./build/network_pci_test | tee build/network-stack/pci-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_timer_fakes tests/network_timers_test.cpp -o build/network_timers_test
