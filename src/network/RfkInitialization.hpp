@@ -4,8 +4,8 @@
 #include "EfuseCalibration.hpp"
 namespace rtl8852be { namespace rfk {
 enum class Error {none,precondition,io,timeout,clock,cancelled,calibration};
-enum class Stage {idle,rck,dack,rxDc,complete,iqk,tssi};
-enum class Kind {rck,dack,rxDc,iqk,tssi};
+enum class Stage {idle,rck,dack,rxDc,complete,iqk,tssi,dpk,track};
+enum class Kind {rck,dack,rxDc,iqk,tssi,dpk,track};
 enum class Space {none,mac,baseband,radio};
 // Center channel and hardware bandwidth encoding (20/40/80 = 0/1/2).
 // This checks chip geometry only; the controller must enforce regulatory rules.
@@ -24,22 +24,28 @@ inline bool validChannel(Channel c){
 struct Result {
     Error error{Error::none};Stage stage{Stage::idle};Space space{Space::none};
     u32 address{},mask{},value{};u8 path{};unsigned operations{},polls{},messages{};
-    bool rckReady{},dackReady{},rxDcReady{},iqReady{},tssiReady{},requiresReset{},ownershipReleased{};
+    bool rckReady{},dackReady{},rxDcReady{},iqReady{},tssiReady{},dpkReady{},requiresReset{},ownershipReleased{};
     Channel iqChannel{};
 };
 // Backend owns validated I/O and the calibration lease. begin(kind) must quiesce
 // DMA/TX and coordinate firmware/BT; end(kind,success) must keep TX stopped on
 // failure. Neither is optional. The native adapter rejects absent callbacks.
 // The controller must allocate this state off the kernel stack: TSSI retains
-// per-channel measured coefficients. DPK and controller integration remain.
+// per-channel measured coefficients. Controller/channel integration remains.
 template<class Backend> class Initialization {
-    struct rtw89_dpk_info {u8 dpk_gs[2]{};};
-    struct rtw89_chan {rtw89_band band_type{};u8 band_width{},channel{};rtw89_subband subband_type{};};
+    struct rtw89_chan {rtw89_band band_type{};rtw89_bandwidth band_width{};u8 channel{};rtw89_subband subband_type{};};
     struct rtw89_hal {u8 cv{},antenna_rx{};};
+    // Same numerical EWMA parameters as core.h DECLARE_EWMA(thermal,4,4):
+    // four fractional bits, new sample weight 1/4. Owner serializes updates.
+    struct ThermalAverage {u32 fixed{};void add(u8 value){if(value)fixed=fixed?(3*fixed+u32(value)*16)/4:u32(value)*16;}};
+    static u8 ewma_thermal_read(const ThermalAverage *average){return u8(average->fixed/16);}
     struct Context {
         Backend &io;Result &result;rtw89_dack_info dack{};rtw89_dpk_info dpk{};
         rtw89_iqk_info iqk{};rtw89_chan channel{};bool restoreFailed[2]{},oneshotActive{};
         rtw89_tssi_info tssi{};rtw89_phy_efuse_gain efuse_gain{};bool calibrationConfigured{};
+        // Pinned 8852B has fem_setup=NULL; unlike 8852A it sets no EPA flags.
+        // Preserve that per-chip default: perform DPK, never invent a bypass.
+        rtw89_fem_info fem{};struct {ThermalAverage avg_thermal[2];} phystat{};
         bool dbcc_en=false,is_tssi_mode[2]{};rtw89_hal hal;
         uint64_t first{},previous{};unsigned operationBase{};bool started{};Space lastSpace{Space::none};
         u32 lastAddress{},lastMask{},lastValue{};u8 lastPath{};
@@ -47,6 +53,7 @@ template<class Backend> class Initialization {
     };
     static constexpr unsigned RTW89_DBG_RFK=0; // local diagnostic category
     static constexpr unsigned RTW89_DBG_TSSI=1;
+    static constexpr unsigned RTW89_DBG_RFK_TRACK=2;
     static bool fail(Context *d,Error e){
         auto &r=d->result;if(r.error==Error::none){r.error=e;r.space=d->lastSpace;r.address=d->lastAddress;
             r.mask=d->lastMask;r.value=d->lastValue;r.path=d->lastPath;r.requiresReset=r.operations!=0;}
@@ -114,7 +121,9 @@ template<class Backend> class Initialization {
             if(!check(d))return;if(d->oneshotActive){fail(d,Error::precondition);return;}
             if(!d->io.oneshot(kind,phyMap,true)){fail(d,Error::io);return;}d->oneshotActive=true;
         }else if(d->oneshotActive){
-            // Cleanup notification remains required after a failed register op.
+            // A fault may leave NCTL/KIP or RF partially programmed. Defer STOP
+            // to native end(), which verifies recovery before releasing it.
+            if(!check(d))return;
             if(!d->io.oneshot(kind,phyMap,false)){fail(d,Error::io);return;}d->oneshotActive=false;
         }
     }
@@ -158,6 +167,7 @@ template<class Backend> class Initialization {
         if(ok&&!context_.io.drain()){fail(&context_,Error::io);ok=false;}
         // Cleanup/notification is attempted even when normal I/O is latched off.
         result.ownershipReleased=context_.io.end(kind,ok);
+        if(result.ownershipReleased)context_.oneshotActive=false;
         if(!result.ownershipReleased){fail(&context_,Error::io);result.requiresReset=true;}
         return ok&&result.ownershipReleased;
     }
@@ -171,6 +181,8 @@ public:
     const rtw89_dack_info &dack()const{return context_.dack;}
     const rtw89_iqk_info &iqk()const{return context_.iqk;}
     const rtw89_tssi_info &tssi()const{return context_.tssi;}
+    const rtw89_dpk_info &dpk()const{return context_.dpk;}
+    u8 averageThermal(u8 path)const{return path<2?ewma_thermal_read(&context_.phystat.avg_thermal[path]):0;}
     // Bases are the signed BB gain values captured before channel gain writes.
     // Inputs must come from this device's decoded eFuse/PHY map, not defaults.
     bool configureCalibration(const network::BoardCalibration &board,const network::PhyCalibration &phy,
@@ -203,11 +215,16 @@ public:
     }
     bool calibrateIq(Channel channel){
         if(result.stage!=Stage::complete||result.error!=Error::none||!result.rxDcReady||!validChannel(channel))return false;
-        result.iqReady=false;result.tssiReady=false;
-        context_.channel={static_cast<rtw89_band>(channel.band),channel.width,channel.center,
+        result.iqReady=false;result.tssiReady=false;result.dpkReady=false;
+        context_.channel={static_cast<rtw89_band>(channel.band),static_cast<rtw89_bandwidth>(channel.width),channel.center,
             channel.band==0?RTW89_CH_2G:channel.center<=64?RTW89_CH_5G_BAND_1:channel.center<=144?RTW89_CH_5G_BAND_3:RTW89_CH_5G_BAND_4};
         context_.restoreFailed[0]=context_.restoreFailed[1]=false;context_.started=false;
         context_.operationBase=result.operations;
+        // RXDCK must run on every newly programmed channel, not just at boot.
+        result.rxDcReady=false;
+        if(!begin(Kind::rxDc,Stage::rxDc))return false;
+        _wait_rx_mode(&context_,RF_AB);_rx_dck(&context_,RTW89_PHY_0);
+        result.rxDcReady=end(Kind::rxDc);if(!result.rxDcReady)return false;
         if(!begin(Kind::iqk,Stage::iqk))return false;
         _wait_rx_mode(&context_,RF_AB);_iqk_init(&context_);_iqk(&context_,RTW89_PHY_0,false);
         if(check(&context_))for(unsigned p=0;p<2;++p){const auto &q=context_.iqk;
@@ -219,7 +236,7 @@ public:
     }
     bool calibrateTssi(){
         if(result.stage!=Stage::complete||result.error!=Error::none||!result.iqReady||!context_.calibrationConfigured)return false;
-        result.tssiReady=false;context_.started=false;context_.operationBase=result.operations;
+        result.tssiReady=false;result.dpkReady=false;context_.started=false;context_.operationBase=result.operations;
         if(!begin(Kind::tssi,Stage::tssi))return false;
         auto *d=&context_;const auto phy=RTW89_PHY_0;
         const auto phyMap=rtw89_btc_phymap(d,phy,RF_AB);
@@ -242,6 +259,32 @@ public:
         if(txStopped)rtw89_btc_ntfy_wl_rfk(d,phyMap,BTC_WRFKT_IQK,BTC_WRFK_ONESHOT_STOP);
         if(!end(Kind::tssi))return false;
         result.tssiReady=true;result.stage=Stage::complete;return true;
+    }
+    bool calibrateDpk(){
+        if(result.stage!=Stage::complete||result.error!=Error::none||!result.iqReady||!result.tssiReady)return false;
+        result.dpkReady=false;context_.started=false;context_.operationBase=result.operations;
+        if(!begin(Kind::dpk,Stage::dpk))return false;
+        auto *d=&context_;d->dpk.is_dpk_enable=true;d->dpk.is_dpk_reload_en=false;
+        for(unsigned p=0;p<2;++p)d->dpk.bp[p][0].path_ok=false;
+        _wait_rx_mode(d,RF_AB);_dpk(d,RTW89_PHY_0,false);
+        if(check(d))for(unsigned p=0;p<2;++p){const auto &b=d->dpk.bp[p][d->dpk.cur_idx[p]];
+            if(!b.path_ok||!b.ther_dpk||b.ch!=d->channel.channel||b.band!=d->channel.band_type||b.bw!=d->channel.band_width)
+                fail(d,Error::calibration);
+        }
+        if(!end(Kind::dpk))return false;
+        result.dpkReady=true;result.stage=Stage::complete;return true;
+    }
+    bool trackDpk(){
+        if(result.stage!=Stage::complete||result.error!=Error::none||!result.dpkReady)return false;
+        result.dpkReady=false;context_.started=false;context_.operationBase=result.operations;
+        if(!begin(Kind::track,Stage::track))return false;
+        auto *d=&context_;
+        // Reads real chip temperature; zero is absent data, as in phy.c.
+        for(u8 p=0;p<2&&check(d);++p){const auto sample=rtw8852b_get_thermal(d,p);
+            if(check(d))d->phystat.avg_thermal[p].add(sample);}
+        _dpk_track(d);
+        if(!end(Kind::track))return false;
+        result.dpkReady=true;result.stage=Stage::complete;return true;
     }
 };
 } }

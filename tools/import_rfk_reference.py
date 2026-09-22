@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import RTL8852B initial, IQ and TSSI calibration dependency closures."""
+"""Import RTL8852B initial/channel RF calibration dependency closures."""
 import hashlib,json,pathlib,re,subprocess,sys
 root=pathlib.Path(__file__).resolve().parents[1]
 source=pathlib.Path(sys.argv[1]).resolve()
@@ -31,16 +31,18 @@ roots+=['_tssi_disable','_tssi_rf_setting','_tssi_set_sys','_tssi_ini_txpwr_ctrl
         '_tssi_ini_txpwr_ctrl_bb_he_tb','_tssi_set_dck','_tssi_set_tmeter_tbl',
         '_tssi_set_dac_gain_tbl','_tssi_slope_cal_org','_tssi_alignment_default',
         '_tssi_set_tssi_slope','_tssi_alimentk','_tssi_enable','_tssi_set_efuse_to_de']
+roots+=['_dpk','_dpk_track','rtw8852b_get_thermal']
 for n in roots:visit(n)
 original={n:block(src,signature+n+r'\([^;]+?\n\{') for n in all_names if n in selected}
 original['rtw89_subband_to_gain_offset_band_of_ofdm']=block(texts['phy.h'],r'^enum rtw89_gain_offset rtw89_subband_to_gain_offset_band_of_ofdm\([^;]+?\n\{')
 table_names=sorted(set(re.findall(r'&(rtw8852b_\w+)_tbl','\n'.join(original.values()))))
 tables={n:block(texts['rtw8852b_rfk_table.c'],r'^static const struct rtw89_reg5_def '+n+r'\[\] = \{',True) for n in table_names}
-enums='\n'.join(block(texts['core.h'],r'^enum '+n+r' \{',True) for n in ['rtw89_rf_path','rtw89_rf_path_bit','rtw89_phy_idx','rtw89_sub_entity_idx','rtw89_band','rtw89_bandwidth','rtw89_subband','rtw89_gain_offset','rtw89_tssi_alimk_band'])
+enums='\n'.join(block(texts['core.h'],r'^enum '+n+r' \{',True) for n in ['rtw89_rf_path','rtw89_rf_path_bit','rtw89_phy_idx','rtw89_sub_entity_idx','rtw89_band','rtw89_bandwidth','rtw89_subband','rtw89_gain_offset','rtw89_tssi_alimk_band','rtw89_cv'])
 enums+='\n'+block(src,r'^enum rtw8852b_iqk_type \{',True)
+enums+='\n'+'\n'.join(block(src,r'^enum '+n+r' \{',True) for n in ['rtw8852b_dpk_id','dpk_agc_step'])
 enums+='\n'+block(texts['rtw8852b.h'],r'^enum rtw8852b_pmac_mode \{',True)
 enums+='\n'+'\n'.join(block(texts['coex.h'],r'^enum '+n+r' \{',True) for n in ['btc_wl_rfk_type','btc_wl_rfk_state'])
-structs='\n'.join(block(texts['core.h'],r'^struct '+n+r' \{',True) for n in ['rtw89_dack_info','rtw89_iqk_info','rtw89_tssi_info','rtw89_phy_efuse_gain'])
+structs='\n'.join(block(texts['core.h'],r'^struct '+n+r' \{',True) for n in ['rtw89_dack_info','rtw89_iqk_info','rtw89_tssi_info','rtw89_phy_efuse_gain','rtw89_dpk_bkup_para','rtw89_dpk_info','rtw89_fem_info'])
 structs+='\n'+block(texts['phy.h'],r'^struct rtw89_txpwr_track_cfg \{',True)
 structs+='\n'+'\n'.join(block(texts['rtw8852b.h'],r'^struct '+n+r' \{',True) for n in ['rtw8852b_bb_pmac_info','rtw8852b_bb_tssi_bak'])
 array_names=re.findall(r'^static const (?:u32|struct rtw89_reg3_def) (\w+)\[',src,re.M)
@@ -69,6 +71,7 @@ def adapt(t):
     t=re.sub(r'\bBIT\(','bit(',t);t=re.sub(r'\bGENMASK\(','mask(',t)
     t=re.sub(r'\bFIELD_GET\(','fieldGet(',t)
     t=re.sub(r'\bFIELD_PREP\(','fieldPrep(',t)
+    t=re.sub(r'\babs\(','absValue(',t);t=re.sub(r'\bphy_div\(','safeDivide(',t)
     t=t.replace('clamp_t(s32,','clampS32(').replace('S8_MIN','(-128)').replace('S8_MAX','127')
     t=t.replace('ktime_get_ns()', '(rtwdev->io.nowUs()*1000)')
     for old,new in [('TSSI_EXTRA_GROUP','tssiExtraGroup'),('IS_TSSI_EXTRA_GROUP','isTssiExtraGroup'),
@@ -77,12 +80,28 @@ def adapt(t):
     t=re.sub(r'\bARRAY_SIZE\(','arraySize(',t)
     t=re.sub(r'\btry\b','attemptLimit',t)
     t=re.sub(r'\budelay\(([^;]+)\)',r'delay(rtwdev,\1)',t)
+    t=re.sub(r'\bfsleep\(([^;]+)\)',r'delay(rtwdev,\1)',t)
     t=re.sub(r'\bmdelay\(([^;]+)\)',r'delay(rtwdev,1000*(\1))',t)
     t=re.sub(r'\bread_poll_timeout(?:_atomic)?\(','R16_RFK_POLL(',t)
     return t
 def adapt_function(name,text):
     t=adapt(text)
     if not t.startswith('static '):t='static '+t
+    if name=='rtw8852b_get_thermal':t=t.replace('enum rtw89_rf_path rf_path','u8 rf_path')
+    if name=='_dpk_sync_check':
+        t=re.sub(r'^#define DPK_SYNC_TH_\w+[^\n]*\n','',t,flags=re.M)
+    if name=='_dpk_set_offset':
+        t=t.replace('txagc - gain_offset < DPK_TXAGC_LOWER','txagc - gain_offset < s32(DPK_TXAGC_LOWER)')
+        t=t.replace('txagc - gain_offset > DPK_TXAGC_UPPER','txagc - gain_offset > s32(DPK_TXAGC_UPPER)')
+    if name=='_dpk_agc':
+        t=t.replace('} while (!goout && agc_cnt < 6 && limit-- > 0);','} while (check(rtwdev) && !goout && agc_cnt < 6 && limit-- > 0);')
+        t=t.replace('\treturn tmp_txagc;', '\treturn check(rtwdev) && goout ? tmp_txagc : 0xff;')
+    if name=='_dpk_track':
+        t=t.replace('s8 txagc_bb, txagc_bb_tp, ini_diff = 0, txagc_ofst;', 's8 txagc_bb, txagc_bb_tp, txagc_ofst;\n\ts16 ini_diff;')
+        t=t.replace('s8 delta_ther[2]', 's16 delta_ther[2]')
+        t=t.replace('kidx = dpk->cur_idx[path];', 'kidx = dpk->cur_idx[path];\n\t\tini_diff = 0;')
+        t=t.replace('cur_ther = ewma_thermal_read(&rtwdev->phystat.avg_thermal[path]);',
+                    'cur_ther = ewma_thermal_read(&rtwdev->phystat.avg_thermal[path]);\n\t\tif (!cur_ther) continue;')
     if name=='rtw8852b_start_pmac_tx':t=t.replace('= tx_info->mode;', '= static_cast<rtw8852b_pmac_mode>(tx_info->mode);')
     if name=='rtw8852b_bb_set_pmac_pkt_tx':t=t.replace('tx_info = {0};','tx_info = {};')
     if name=='rtw8852b_set_gain_offset':
@@ -124,9 +143,10 @@ header+='using u8=uint8_t;using u16=uint16_t;using u32=uint32_t;using s8=int8_t;
 header+='constexpr u32 bit(unsigned n){return u32(1)<<n;}\nconstexpr u32 mask(unsigned hi,unsigned lo){return (u32(0xffffffff)>>(31-hi))&(u32(0xffffffff)<<lo);}\n'
 header+='constexpr unsigned shift(u32 m){return (m&1)?0:1+shift(m>>1);}\nconstexpr u32 fieldGet(u32 m,u32 v){return (v&m)>>shift(m);}\n'
 header+='constexpr u32 fieldPrep(u32 m,u32 v){return (v<<shift(m))&m;}\nconstexpr s32 clampS32(s32 v,s32 low,s32 high){return v<low?low:v>high?high:v;}\n'
+header+='constexpr s32 absValue(s32 v){return v<0?-v:v;}\nconstexpr u32 safeDivide(u32 a,u32 b){return b?a/b:0;}\n'
 header+='constexpr u32 tssiExtraGroup(u32 n){return bit(31)|n;}\nconstexpr bool isTssiExtraGroup(u32 n){return n&bit(31);}\nconstexpr u32 tssiExtraIndex1(u32 n){return n&~bit(31);}\nconstexpr u32 tssiExtraIndex2(u32 n){return tssiExtraIndex1(n)+1;}\n'
 header+='inline u32 thermalWord(const s8 *p,unsigned i){u32 v=0;for(unsigned j=0;j<4;++j)v|=u32(u8(p[i+j]))<<(j*8);return v;}\n'
-header+='constexpr s32 sign_extend32(u32 v,unsigned sign){return (v&(u32(1)<<sign))?s32(v&((u32(1)<<sign)-1))-s32(u32(1)<<sign):s32(v);}\n'
+header+='constexpr s32 sign_extend32(u32 v,unsigned sign){return s32(int64_t(v&mask(sign,0))-((v&bit(sign))?(int64_t(1)<<(sign+1)):0));}\n'
 header+='template<class T,size_t N> constexpr size_t arraySize(const T (&)[N]){return N;}\n'
 header+=adapt(enums)+'\n'
 late=[n for n in ordered if 'ARRAY_SIZE' in macros[n]]
@@ -176,7 +196,10 @@ report={'repository':'https://github.com/lwfinger/rtw89','commit':commit,'licens
         'LOK retries retain coarse/fine and both VBUFFER command failures',
         'TSSI PMAC start records TX ownership; mandatory backend stop bypasses normal I/O fault latch',
         'TSSI report timeout latches failure; signed gain shifts use bounded multiplication',
-        'Thermal byte packing uses unsigned shifts; track configuration uses positional C++ initializer'],
+        'Thermal byte packing uses unsigned shifts; track configuration uses positional C++ initializer',
+        'DPK AGC exhausted search returns failure; signed TX gain bounds remain signed',
+        'Sign extension truncates bits above the declared sign bit, including positive samples',
+        'DPK tracking uses wide signed thermal delta, resets per-path difference and skips missing temperature'],
     'generated':{n:hashlib.sha256((dest/n).read_bytes()).hexdigest() for n in ['Rtw8852bRfkConstants.hpp','Rtw8852bRfkFunctions.inc']},
     'hardware_tested':False,'full_rfk_implemented':False}
 (dest/'rfk-reference-provenance.json').write_bytes((json.dumps(report,indent=2)+'\n').encode())

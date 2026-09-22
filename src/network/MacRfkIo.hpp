@@ -13,13 +13,17 @@ struct CalibrationControl {
     bool (*end)(void *,Kind,bool success){};
     // IQK needs a nested per-path oneshot notification in addition to its lease.
     bool (*oneshot)(void *,Kind,u8 phyMap,bool start){};
+    // On partially programmed calibration failure, stop/reset the calibration
+    // engines and RF hardware while retaining BT/TX ownership. Return true only
+    // after verifying quiescence/reset. This is not the ordinary release hook.
+    bool (*recover)(void *,Kind){};
 };
 // Device, mapping and callback owner are borrowed and must outlive this adapter
 // and any outstanding lease. All calls run on the controller's serialized lane.
 class MacRfkIo {
     IOPCIDevice *device_{};IOMemoryMap *mapping_{};
     network::MacRadioIo radioIo_;network::RadioAccess<network::MacRadioIo> radio_;
-    CalibrationControl control_;bool active_{},oneshotActive_{},txArmed_{};Kind kind_{};u8 oneshotMap_{};
+    CalibrationControl control_;bool active_{},oneshotActive_{},txArmed_{},modified_{};Kind kind_{};u8 oneshotMap_{};
     bool macRead(uint32_t,uint32_t &);bool accessible()const;
 public:
     MacRfkIo(IOPCIDevice *,IOMemoryMap *,CalibrationControl);

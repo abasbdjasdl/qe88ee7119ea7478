@@ -12,12 +12,14 @@ constexpr unsigned shift(u32 m){return (m&1)?0:1+shift(m>>1);}
 constexpr u32 fieldGet(u32 m,u32 v){return (v&m)>>shift(m);}
 constexpr u32 fieldPrep(u32 m,u32 v){return (v<<shift(m))&m;}
 constexpr s32 clampS32(s32 v,s32 low,s32 high){return v<low?low:v>high?high:v;}
+constexpr s32 absValue(s32 v){return v<0?-v:v;}
+constexpr u32 safeDivide(u32 a,u32 b){return b?a/b:0;}
 constexpr u32 tssiExtraGroup(u32 n){return bit(31)|n;}
 constexpr bool isTssiExtraGroup(u32 n){return n&bit(31);}
 constexpr u32 tssiExtraIndex1(u32 n){return n&~bit(31);}
 constexpr u32 tssiExtraIndex2(u32 n){return tssiExtraIndex1(n)+1;}
 inline u32 thermalWord(const s8 *p,unsigned i){u32 v=0;for(unsigned j=0;j<4;++j)v|=u32(u8(p[i+j]))<<(j*8);return v;}
-constexpr s32 sign_extend32(u32 v,unsigned sign){return (v&(u32(1)<<sign))?s32(v&((u32(1)<<sign)-1))-s32(u32(1)<<sign):s32(v);}
+constexpr s32 sign_extend32(u32 v,unsigned sign){return s32(int64_t(v&mask(sign,0))-((v&bit(sign))?(int64_t(1)<<(sign+1)):0));}
 template<class T,size_t N> constexpr size_t arraySize(const T (&)[N]){return N;}
 enum rtw89_rf_path {
 	RF_PATH_A = 0,
@@ -131,6 +133,16 @@ enum rtw89_tssi_alimk_band {
 	TSSI_ALIMK_5GH,
 	TSSI_ALIMK_MAX
 };
+enum rtw89_cv {
+	CHIP_CAV,
+	CHIP_CBV,
+	CHIP_CCV,
+	CHIP_CDV,
+	CHIP_CEV,
+	CHIP_CFV,
+	CHIP_CV_MAX,
+	CHIP_CV_INVALID = CHIP_CV_MAX,
+};
 enum rtw8852b_iqk_type {
 	ID_TXAGC = 0x0,
 	ID_FLOK_COARSE = 0x1,
@@ -146,6 +158,35 @@ enum rtw8852b_iqk_type {
 	ID_A_FLOK_FINE = 0xb,
 	ID_G_FLOK_FINE = 0xc,
 	ID_IQK_RESTORE = 0x10,
+};
+enum rtw8852b_dpk_id {
+	LBK_RXIQK	= 0x06,
+	SYNC		= 0x10,
+	MDPK_IDL	= 0x11,
+	MDPK_MPA	= 0x12,
+	GAIN_LOSS	= 0x13,
+	GAIN_CAL	= 0x14,
+	DPK_RXAGC	= 0x15,
+	KIP_PRESET	= 0x16,
+	KIP_RESTORE	= 0x17,
+	DPK_TXAGC	= 0x19,
+	D_KIP_PRESET	= 0x28,
+	D_TXAGC		= 0x29,
+	D_RXAGC		= 0x2a,
+	D_SYNC		= 0x2b,
+	D_GAIN_LOSS	= 0x2c,
+	D_MDPK_IDL	= 0x2d,
+	D_GAIN_NORM	= 0x2f,
+	D_KIP_THERMAL	= 0x30,
+	D_KIP_RESTORE	= 0x31
+};
+enum dpk_agc_step {
+	DPK_AGC_STEP_SYNC_DGAIN,
+	DPK_AGC_STEP_GAIN_ADJ,
+	DPK_AGC_STEP_GAIN_LOSS_IDX,
+	DPK_AGC_STEP_GL_GT_CRITERION,
+	DPK_AGC_STEP_GL_LT_CRITERION,
+	DPK_AGC_STEP_SET_TX_GAIN,
 };
 enum rtw8852b_pmac_mode {
 	NONE_TEST,
@@ -171,6 +212,10 @@ enum btc_wl_rfk_state {
 };
 constexpr u32 MASKDWORD = 0xffffffff;
 constexpr u32 RFREG_MASK = 0xfffff;
+constexpr u32 RR_RSV1 = 0x05;
+constexpr u32 RR_RSV1_RST = bit(0);
+constexpr u32 RR_BBDC = 0x10005;
+constexpr u32 RR_BBDC_SEL = bit(0);
 constexpr u32 MASKBYTE0 = 0xff;
 constexpr u32 R_NCTL_RPT = 0x8008;
 constexpr u32 B_NCTL_RPT_FLG = bit(26);
@@ -181,11 +226,9 @@ constexpr u32 RR_DCK = 0x92;
 constexpr u32 RR_DCK_LV = bit(0);
 constexpr u32 RTW8852B_RXDCK_VER = 0x1;
 constexpr u32 RF_PATH_NUM_8852B = 2;
-constexpr u32 RR_RSV1 = 0x05;
 constexpr u32 RR_DCK_FINE = bit(1);
 constexpr u32 R_P0_TSSI_TRK = 0x5818;
 constexpr u32 B_P0_TSSI_TRK_EN = bit(30);
-constexpr u32 RR_RSV1_RST = bit(0);
 constexpr u32 RR_MOD = 0x00;
 constexpr u32 RR_MOD_MASK = mask(19, 16);
 constexpr u32 RR_MOD_V_RX = 0x3;
@@ -382,17 +425,109 @@ constexpr u32 B_IQK_RES_K = bit(28);
 constexpr u32 R_IQRSN = 0x8220;
 constexpr u32 B_IQRSN_K1 = bit(28);
 constexpr u32 B_IQRSN_K2 = bit(16);
-constexpr u32 RR_BBDC = 0x10005;
-constexpr u32 RR_BBDC_SEL = bit(0);
 constexpr u32 R_COEF_SEL = 0x8104;
 constexpr u32 B_COEF_SEL_IQC = bit(0);
 constexpr u32 B_CFIR_LUT_G3 = bit(3);
 constexpr u32 RTW8852B_IQK_SS = 2;
 constexpr u32 RF_PATH_MAX = 4;
+constexpr u32 RTW8852B_DPK_KIP_REG_NUM = 2;
+constexpr u32 R_LDL_NORM = 0x80A0;
+constexpr u32 B_LDL_NORM_OP = mask(1, 0);
+constexpr u32 R_DPD_CH0A = 0x81BC;
+constexpr u32 MASKBYTE3 = 0xff000000;
+constexpr u32 R_KIP_RPT1 = 0x80D4;
+constexpr u32 MASKLWORD = 0x0000ffff;
+constexpr u32 RR_RXBB2 = 0x8f;
+constexpr u32 RR_EN_TIA_IDA = mask(11, 10);
+constexpr u32 R_P0_CFCH_BW1 = 0xC0D8;
+constexpr u32 B_P0_CFCH_EX = bit(13);
+constexpr u32 R_PATH1_BW_SEL_V1 = 0xC1D8;
+constexpr u32 B_PATH1_BW_SEL_EX = bit(13);
+constexpr u32 R_DPD_COM = 0x81C8;
+constexpr u32 B_DPD_COM_OF = bit(15);
+constexpr u32 RFREG_MASKRXBB = 0x003e0;
+constexpr u32 R_MDPK_RX_DCK = 0x8074;
+constexpr u32 B_MDPK_RX_DCK_EN = bit(31);
+constexpr u32 RFREG_MASKMODE = 0xf0000;
+constexpr u32 RR_RXK_PLLEN = bit(5);
+constexpr u32 RR_TXIQK = 0x98;
+constexpr u32 RR_TXIQK_ATT1 = mask(6, 0);
+constexpr u32 RR_RXKPLL_POW = bit(19);
+constexpr u32 R_KPATH_CFG = 0x80D0;
+constexpr u32 B_KPATH_CFG_ED = mask(21, 20);
+constexpr u32 R_LOAD_COEF = 0x81DC;
+constexpr u32 B_LOAD_COEF_DI = bit(1);
+constexpr u32 RR_TM = 0x42;
+constexpr u32 RR_TM_TRI = bit(19);
+constexpr u32 RR_TM_VAL = mask(6, 1);
+constexpr u32 RR_RXBB_FATT = mask(7, 0);
+constexpr u32 RR_LUTDBG = 0xdf;
+constexpr u32 RR_LUTDBG_TIA = bit(12);
+constexpr u32 RR_TIA = 0x9e;
+constexpr u32 RR_TIA_N6 = bit(8);
+constexpr u32 RR_RAA2_SWATT = mask(15, 9);
+constexpr u32 RR_RXA_LNA = 0x8b;
+constexpr u32 RR_IQGEN = 0x97;
+constexpr u32 RR_RCKD = 0xde;
+constexpr u32 RR_RCKD_BW = bit(2);
+constexpr u32 RR_BTC = 0x1a;
+constexpr u32 RR_BTC_TXBB = mask(14, 12);
+constexpr u32 RR_BTC_RXBB = mask(11, 10);
+constexpr u32 B_RXIQC_BYPASS2 = bit(2);
+constexpr u32 B_RXIQC_BYPASS = bit(0);
+constexpr u32 R_TPG_MOD = 0x806C;
+constexpr u32 B_TPG_MOD_F = mask(2, 1);
+constexpr u32 R_DPD_CH0 = 0x81AC;
+constexpr u32 DPK_SYNC_TH_DC_I = 200;
+constexpr u32 DPK_SYNC_TH_DC_Q = 200;
+constexpr u32 DPK_SYNC_TH_CORR = 170;
+constexpr u32 B_KIP_RPT1_SEL = mask(21, 16);
+constexpr u32 R_RPT_COM = 0x80FC;
+constexpr u32 B_PRT_COM_CORI = mask(7, 0);
+constexpr u32 B_PRT_COM_CORV = mask(15, 8);
+constexpr u32 B_PRT_COM_DCI = mask(27, 16);
+constexpr u32 B_PRT_COM_DCQ = mask(11, 0);
+constexpr u32 R_DPK_CFG2 = 0x80BC;
+constexpr u32 B_DPK_CFG2_ST = bit(14);
+constexpr u32 B_PRT_COM_GL = mask(7, 4);
+constexpr u32 RR_TXAGC = 0x10001;
+constexpr u32 R_KIP_MOD = 0x8078;
+constexpr u32 B_KIP_MOD = mask(19, 0);
+constexpr u32 B_KIP_RPT1_SEL_V1 = mask(19, 16);
+constexpr u32 B_PRT_COM_RXBB_V1 = mask(4, 0);
+constexpr u32 DPK_TXAGC_LOWER = 0x2e;
+constexpr u32 DPK_TXAGC_UPPER = 0x3f;
+constexpr u32 MASKBYTE2 = 0xff0000;
+constexpr u32 R_DPK_CFG3 = 0x80C0;
+constexpr u32 MASKHWORD = 0xffff0000;
+constexpr u32 B_LDL_NORM_PN = mask(12, 8);
+constexpr u32 R_MDPK_SYNC = 0x8070;
+constexpr u32 B_MDPK_SYNC_MAN = mask(31, 28);
+constexpr u32 B_COEF_SEL_MDPD = bit(8);
+constexpr u32 R_TXAGC_RFK = 0x81C4;
+constexpr u32 R_DPD_BND = 0x81B4;
+constexpr u32 B_LOAD_COEF_MDPD = bit(16);
+constexpr u32 B_DPD_ORDER_V1 = mask(26, 25);
+constexpr u32 R_DPD_V1 = 0x81a0;
+constexpr u32 B_MDPK_SYNC_SEL = bit(31);
+constexpr u32 RTW89_DPK_BKUP_NUM = 2;
+constexpr u32 RTW8852B_DPK_RF_PATH = 2;
+constexpr u32 RTW8852B_DPK_VER = 0x0d;
+constexpr u32 RTW8852B_RF_REL_VERSION = 34;
+constexpr u32 R_TXAGC_BB = 0x1C60;
+constexpr u32 RR_TXA = 0x5d;
+constexpr u32 RR_TXA_TRK = mask(19, 14);
+constexpr u32 R_TXAGC_TP = 0x1C04;
+constexpr u32 B_TXAGC_TP = mask(2, 0);
+constexpr u32 R_P0_TXDPD = 0x58D4;
+constexpr u32 B_P0_TXDPD = mask(31, 28);
+constexpr u32 R_DPK_TRK = 0x80f0;
+constexpr u32 B_DPK_TRK_DIS = bit(31);
+constexpr u32 B_DPD_BND_0 = mask(8, 0);
+constexpr u32 B_DPD_BND_1 = mask(24, 16);
 constexpr u32 R_DPD_BF = 0x44a0;
 constexpr u32 B_DPD_BF_OFDM = mask(16, 12);
 constexpr u32 B_DPD_BF_SCA = mask(6, 0);
-constexpr u32 R_DPD_CH0A = 0x81BC;
 constexpr u32 B_DPD_CFG = mask(22, 0);
 constexpr u32 RR_TXPOW = 0x7f;
 constexpr u32 RR_TXPOW_TXG = bit(1);
@@ -447,7 +582,6 @@ constexpr u32 R_P0_TSSI_ALIM4 = 0x5640;
 constexpr u32 R_TSSI_PA_K8 = 0x5644;
 constexpr u32 RTW8852B_TSSI_PATH_NR = 2;
 constexpr u32 R_TX_COUNTER = 0x1A40;
-constexpr u32 MASKLWORD = 0x0000ffff;
 constexpr u32 B_TSSI_CWRPT_RDY = bit(16);
 constexpr u32 B_TSSI_CWRPT = mask(8, 0);
 constexpr u32 B_P0_TSSI_AVG = mask(15, 12);
@@ -565,6 +699,7 @@ constexpr u32 TSSI_MCS_CH_GROUP_NUM = (TSSI_MCS_2G_CH_GROUP_NUM + TSSI_MCS_5G_CH
 constexpr u32 TSSI_MCS_6G_CH_GROUP_NUM = 32;
 constexpr u32 TSSI_MAX_CH_NUM = 67;
 constexpr u32 TSSI_ALIMK_VALUE_NUM = 8;
+constexpr u32 RTW89_DPK_RF_PATH = 2;
 constexpr u32 R_AX_WCPU_FW_CTRL = 0x01E0;
 constexpr u32 B_AX_WCPU_FWDL_STS_MASK = mask(7, 5);
 constexpr u32 R_AX_CMAC_FUNC_EN = 0xC000;
@@ -644,6 +779,36 @@ struct rtw89_phy_efuse_gain {
 	s8 offset_base[RTW89_PHY_MAX]; /* S(8, 4) */
 	s8 rssi_base[RTW89_PHY_MAX]; /* S(8, 4) */
 	s8 comp[RF_PATH_MAX][RTW89_SUBBAND_NR]; /* S(8, 0) */
+};
+struct rtw89_dpk_bkup_para {
+	enum rtw89_band band;
+	enum rtw89_bandwidth bw;
+	u8 ch;
+	bool path_ok;
+	u8 mdpd_en;
+	u8 txagc_dpk;
+	u8 ther_dpk;
+	u8 gs;
+	u16 pwsf;
+};
+struct rtw89_dpk_info {
+	bool is_dpk_enable;
+	bool is_dpk_reload_en;
+	u8 dpk_gs[RTW89_PHY_MAX];
+	u16 dc_i[RTW89_DPK_RF_PATH][RTW89_DPK_BKUP_NUM];
+	u16 dc_q[RTW89_DPK_RF_PATH][RTW89_DPK_BKUP_NUM];
+	u8 corr_val[RTW89_DPK_RF_PATH][RTW89_DPK_BKUP_NUM];
+	u8 corr_idx[RTW89_DPK_RF_PATH][RTW89_DPK_BKUP_NUM];
+	u8 cur_idx[RTW89_DPK_RF_PATH];
+	u8 cur_k_set;
+	struct rtw89_dpk_bkup_para bp[RTW89_DPK_RF_PATH][RTW89_DPK_BKUP_NUM];
+};
+struct rtw89_fem_info {
+	bool elna_2g;
+	bool elna_5g;
+	bool epa_2g;
+	bool epa_5g;
+	bool epa_6g;
 };
 struct rtw89_txpwr_track_cfg {
 	const s8 (*delta_swingidx_6gb_n)[DELTA_SWINGIDX_SIZE];
@@ -1063,6 +1228,64 @@ static const rtw89_reg5_def rtw8852b_dack_s1_3_defs[]={{1,0,0xc104,bit(0),0x0},
 {1,0,0x32a0,bit(15),0x0},
 {1,0,0x32a0,0x7000,0x7}};
 static const rtw89_rfk_tbl rtw8852b_dack_s1_3_defs_tbl={rtw8852b_dack_s1_3_defs,sizeof(rtw8852b_dack_s1_3_defs)/sizeof(rtw8852b_dack_s1_3_defs[0])};
+static const rtw89_reg5_def rtw8852b_dpk_afe_defs[]={{1,0,0x20fc,0xffff0000,0x0303},
+{1,0,0x12b8,bit(30),0x1},
+{1,0,0x32b8,bit(30),0x1},
+{1,0,0x030c,0xff000000,0x13},
+{1,0,0x032c,0xffff0000,0x0041},
+{1,0,0x12b8,bit(28),0x1},
+{1,0,0x58c8,bit(24),0x1},
+{1,0,0x78c8,bit(24),0x1},
+{1,0,0x5864,0xc0000000,0x3},
+{1,0,0x7864,0xc0000000,0x3},
+{1,0,0x2008,0x01FFFFFF,0x1ffffff},
+{1,0,0x0c1c,bit(2),0x1},
+{1,0,0x0700,bit(27),0x1},
+{1,0,0x0c70,0x000003FF,0x3ff},
+{1,0,0x0c60,0x00000003,0x3},
+{1,0,0x0c6c,bit(0),0x1},
+{1,0,0x58ac,bit(27),0x1},
+{1,0,0x78ac,bit(27),0x1},
+{1,0,0x0c3c,bit(9),0x1},
+{1,0,0x2344,bit(31),0x1},
+{1,0,0x4490,bit(31),0x1},
+{1,0,0x12a0,0x000ff000,0xbf},
+{1,0,0x32a0,0x000f0000,0xb},
+{1,0,0x0700,0x07000000,0x5},
+{1,0,0x20fc,0xffff0000,0x3333},
+{1,0,0x580c,bit(15),0x1},
+{1,0,0x5800,0x0000ffff,0x0000},
+{1,0,0x780c,bit(15),0x1},
+{1,0,0x7800,0x0000ffff,0x0000}};
+static const rtw89_rfk_tbl rtw8852b_dpk_afe_defs_tbl={rtw8852b_dpk_afe_defs,sizeof(rtw8852b_dpk_afe_defs)/sizeof(rtw8852b_dpk_afe_defs[0])};
+static const rtw89_reg5_def rtw8852b_dpk_afe_restore_defs[]={{1,0,0x20fc,0xffff0000,0x0303},
+{1,0,0x12b8,bit(30),0x0},
+{1,0,0x32b8,bit(30),0x0},
+{1,0,0x5864,0xc0000000,0x0},
+{1,0,0x7864,0xc0000000,0x0},
+{1,0,0x2008,0x01FFFFFF,0x0},
+{1,0,0x0c1c,bit(2),0x0},
+{1,0,0x0700,bit(27),0x0},
+{1,0,0x0c70,0x000003FF,0x63},
+{1,0,0x12a0,0x000FF000,0x00},
+{1,0,0x32a0,0x000FF000,0x00},
+{1,0,0x0700,0x07000000,0x0},
+{1,0,0x5864,bit(29),0x0},
+{1,0,0x7864,bit(29),0x0},
+{1,0,0x20fc,0xffff0000,0x0000},
+{1,0,0x58c8,bit(24),0x0},
+{1,0,0x78c8,bit(24),0x0},
+{1,0,0x0c3c,bit(9),0x0},
+{1,0,0x580c,bit(15),0x0},
+{1,0,0x58e4,0x18000000,0x1},
+{1,0,0x58e4,0x18000000,0x2},
+{1,0,0x780c,bit(15),0x0},
+{1,0,0x78e4,0x18000000,0x1},
+{1,0,0x78e4,0x18000000,0x2}};
+static const rtw89_rfk_tbl rtw8852b_dpk_afe_restore_defs_tbl={rtw8852b_dpk_afe_restore_defs,sizeof(rtw8852b_dpk_afe_restore_defs)/sizeof(rtw8852b_dpk_afe_restore_defs[0])};
+static const rtw89_reg5_def rtw8852b_dpk_kip_defs[]={{1,0,0x8008,0xffffffff,0x00000000},
+{1,0,0x8088,0xffffffff,0x80000000}};
+static const rtw89_rfk_tbl rtw8852b_dpk_kip_defs_tbl={rtw8852b_dpk_kip_defs,sizeof(rtw8852b_dpk_kip_defs)/sizeof(rtw8852b_dpk_kip_defs[0])};
 static const rtw89_reg5_def rtw8852b_tssi_align_a_2g_all_defs[]={{1,0,0x5604,0x80000000,0x1},
 {1,0,0x5600,0x3fffffff,0x3f2d2721},
 {1,0,0x5604,0x003fffff,0x010101},

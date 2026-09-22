@@ -220,8 +220,9 @@ CI checks regeneration and compiles the native adapter with the protocol stack.
 These are model/compile checks, with no physical MAC/RFK or network evidence.
 
 `rfk::Initialization` imports the original dependency closure for initial DPD
-backoff, both-path RCK, DRCK/ADDCK/DACK, RXDCK, channel IQK and TSSI: 91 functions,
-48 RFK command tables, 43 arrays and 410 referenced constants. It retains per-path ADC/DAC calibration
+backoff, both-path RCK, DRCK/ADDCK/DACK, RXDCK, channel IQK/TSSI/DPK and thermal
+tracking: 134 functions, 51 RFK command tables, 43 arrays and 504 referenced
+constants. It retains per-path ADC/DAC calibration
 values, MSBK arrays and original success-path restoration. Unlike the upstream
 warning-only timeout paths, a timeout latches an error, suppresses subsequent
 normal I/O and cannot expose `dack_done` as valid. Partially programmed hardware
@@ -232,7 +233,7 @@ frozen clocks. All calibration tables retain the original operation order.
 `MacRfkIo` connects this engine to native `RadioAccess<MacRadioIo>` and the
 single MAC PHYREG write required by AFE setup. Borrowed device/map and control
 callback owner must remain alive while a lease is outstanding. Every stage
-requires explicit controller calibration begin/end callbacks; absent callbacks
+requires explicit controller calibration begin/end/recover callbacks; absent callbacks
 are rejected. Those callbacks must coordinate firmware/BT and acknowledge the
 firmware scheduler pause. They are **not implemented by this component**.
 Once a lease is acquired, the adapter independently verifies firmware state 7,
@@ -242,16 +243,24 @@ not a blind write to CTN_TXEN. The driver must program BB/RF/NCTL tables and
 device-specific calibration data before invoking this engine. On failure,
 end callbacks still run, must leave TX disabled, and may report incomplete
 cleanup; the borrowed owner cannot be destroyed while its lease remains active.
+The adapter records possible hardware modification before issuing a write.
+After partial failure, `recover` must verify hardware reset/quiescence while
+TX/BT ownership is retained, before an outstanding oneshot STOP or parent
+release. A failed recovery keeps the lease; successful recovery is not repeated
+if a subsequent bookkeeping release needs retry. This callback is a mandatory
+controller contract, not a reset implemented by clearing a completion bit.
 
 Host tests verify calibration result arrays, RF state and DPD backoff values,
 all 1,070 I/O failures, every delay failure, all begin/end/drain failures,
 RCK/DRCK/ADDCK/DACK timeouts, cancellation and clock anomalies. These are register
-models, not real calibration measurements. Channel DPK, RF tracking,
+models, not real calibration measurements. Scan-specific RFK hooks,
 firmware/BT control callbacks and controller lifecycle remain unimplemented;
 initial calibration success is not full RFK or network readiness.
 
 `calibrateIq()` executes both IQK paths for 2.4 GHz 20/40 MHz and 5 GHz
-20/40/80 MHz after initial calibration. The caller must already have programmed
+20/40/80 MHz after initial calibration. It repeats RXDCK on each programmed
+channel before starting IQK, with a separate required calibration lease.
+The caller must already have programmed
 the requested center channel and bandwidth; this API does not tune the radio.
 It saves/restores the upstream BB/RF register sets, selects the two coefficient
 banks across channel changes and records TX/RX CFIR and LOK results. Geometry
@@ -264,12 +273,13 @@ three-attempt retry, including reports ignored upstream. Terminal LOK failure,
 any TX/RX group failure and the restore command's error prevent `iqReady`.
 Transport faults suppress subsequent normal I/O; this is not a hardware rollback.
 Per-path coexistence oneshot notifications are mandatory native callbacks,
-with STOP attempted even after failure/cancellation; parent lease cleanup retries
-an outstanding STOP before releasing control. Controller BT policy is still
+with faulted STOP deferred to parent cleanup so hardware recovery precedes the
+notification. Parent cleanup retries an outstanding STOP before releasing
+control. Controller BT policy is still
 missing, so this component cannot yet run as an independent network driver.
 
 IQK model tests cover both bands/all supported widths, restoration of all saved
-BB/RF values, 979 read/write failures, 64 delay failures, command failures,
+BB/RF values, 1,001 read/write failures, 66 delay failures, command failures,
 LOK out-of-range measurements, all four oneshot notification failures,
 parent lease failures, cancellation, bounded timeout/clock anomalies, invalid
 channels and 512 successive calibrations. Native code also compiles for the
@@ -313,6 +323,32 @@ stop failure. A separate test compiles the actual MacRfkIo/MacRadioIo sources
 against explicitly modeled IOKit/MMIO to verify cancellation cleanup, invalid
 reads/readback, ignored stop writes, absent PCI memory access, and retained
 leases. Both suites are host evidence, not real RF or radio power measurements.
+
+`calibrateDpk()` requires current-channel IQK/TSSI, and executes both DPK paths
+with the pinned driver's AFE/KIP/BB/RF backup and restore, RXDCK, AGC, loopback
+IQK, IDL/MPA and coefficient programming. Each NCTL command must pass both
+completion stages; missing completion, bad correlation/DC, exhausted AGC search
+or absent baseline thermal measurement prevents `dpkReady`. Reaching a valid
+TXAGC bound is a source-defined converged result, distinct from exhausting the
+search. The 8852B source has no FEM setup callback and sets no EPA flags, so this
+port performs DPK rather than inventing an external-amplifier bypass.
+
+`trackDpk()` reads the chip's actual per-path thermal registers, maintains the
+same four-fractional-bit/quarter-weight average as the pinned driver, and applies
+the DPD power-scale update. Missing initial samples cause no compensation write.
+Thermal deltas use wide signed arithmetic for the six-bit sensor range; the
+initial power difference is reset per path to avoid cross-path contamination.
+A channel change invalidates DPK/TSSI readiness. The top-level controller still
+must schedule tracking, tune the radio and implement firmware/BT coordination.
+
+DPK model checks include all 540 normal I/O and 22 delay failure positions,
+both completion timeouts, 2G/5G bandwidth-dependent programming, DC/correlation,
+gain bounds/search exhaustion, absent thermal readings and lease/cancel/clock
+faults. Tracking checks cover 26 I/O failures, cancellation, different path
+temperatures, averaged samples, zero samples and both extremes of the sensor
+range. Native tests exercise required recovery, retained ownership on reset
+failure and retry without a second reset. These are modeled device responses;
+no RF linearization, radio emission or real-chip calibration is established.
 
 `firmware::Mailbox` now implements the AX register-message channel used for
 firmware-acknowledged scheduler pause/resume. It writes four H2C words, increments

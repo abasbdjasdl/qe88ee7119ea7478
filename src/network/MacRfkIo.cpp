@@ -19,7 +19,7 @@ bool MacRfkIo::macRead(uint32_t a,uint32_t &v){
     __atomic_thread_fence(__ATOMIC_SEQ_CST);return v!=0xffffffff&&v!=0xdeadbeef;
 }
 bool MacRfkIo::begin(Kind kind){
-    if(active_||!accessible()||!control_.owner||!control_.begin||!control_.end)return false;
+    if(active_||!accessible()||!control_.owner||!control_.begin||!control_.end||!control_.recover)return false;
     if((kind==Kind::iqk||kind==Kind::tssi)&&!control_.oneshot)return false;
     if(!control_.begin(control_.owner,kind))return false;
     active_=true;kind_=kind;u32 fw=0,cmac=0,sys=0,tx=0;
@@ -37,9 +37,15 @@ bool MacRfkIo::end(Kind kind,bool success){
     if(!active_||kind!=kind_)return false;
     // Must remain callable after cancellation or a failed MMIO transaction.
     if(txArmed_&&!stopCalibrationTx())return false;
+    if(!success&&modified_){
+        // A bounded poll failure cannot prove a stopped NCTL/KIP/RF engine.
+        // Retain ownership until the controller has verified reset/quiescence.
+        if(!control_.recover(control_.owner,kind))return false;
+        modified_=false;
+    }
     if(oneshotActive_&&!oneshot(kind,oneshotMap_,false))return false;
     if(!control_.end(control_.owner,kind,success))return false;
-    active_=false;return true;
+    active_=false;modified_=false;return true;
 }
 bool MacRfkIo::oneshot(Kind kind,u8 phyMap,bool start){
     if(!active_||kind!=kind_||!control_.oneshot)return false;
@@ -75,11 +81,14 @@ bool MacRfkIo::stopCalibrationTx(){
     txArmed_=false;return true;
 }
 bool MacRfkIo::readRf(u8 p,u32 a,u32 m,u32 &v){v=0;return active_&&accessible()&&radio_.readRf(p,a,m,v);}
-bool MacRfkIo::writeRf(u8 p,u32 a,u32 m,u32 v){return active_&&accessible()&&radio_.writeRf(p,a,m,v);}
+bool MacRfkIo::writeRf(u8 p,u32 a,u32 m,u32 v){
+    if(!active_||!accessible())return false;modified_=true;return radio_.writeRf(p,a,m,v);}
 bool MacRfkIo::readBb(u32 a,u32 &v){v=0;return active_&&accessible()&&radio_.readBaseband(a,v);}
-bool MacRfkIo::writeBb(u32 a,u32 v){return active_&&accessible()&&radio_.writeBaseband(a,v);}
+bool MacRfkIo::writeBb(u32 a,u32 v){
+    if(!active_||!accessible())return false;modified_=true;return radio_.writeBaseband(a,v);}
 bool MacRfkIo::writeMac(u32 a,u32 v){
     if(!active_||!accessible()||a!=R_AX_PHYREG_SET||v!=0xf)return false;
+    modified_=true;
     OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),a,v);
     __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
 }

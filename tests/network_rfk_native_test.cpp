@@ -7,11 +7,12 @@
 #include <initializer_list>
 namespace r=rtl8852be::rfk;
 struct Owner {
-    unsigned beginCount{},endCount{},shotCount{};bool failEnd{},failShot{};
+    unsigned beginCount{},endCount{},shotCount{},recoverCount{};bool failEnd{},failShot{},failRecover{};
     static bool begin(void *o,r::Kind){++static_cast<Owner *>(o)->beginCount;return true;}
     static bool end(void *o,r::Kind,bool){auto &x=*static_cast<Owner *>(o);++x.endCount;return !x.failEnd;}
     static bool shot(void *o,r::Kind,uint8_t,bool){auto &x=*static_cast<Owner *>(o);++x.shotCount;return !x.failShot;}
-    r::CalibrationControl control(){return {this,begin,end,shot};}
+    static bool recover(void *o,r::Kind){auto &x=*static_cast<Owner *>(o);++x.recoverCount;return !x.failRecover;}
+    r::CalibrationControl control(){return {this,begin,end,shot,recover};}
 };
 struct Fixture {
     IOPCIDevice device;IOMemoryMap map;Owner owner;r::MacRfkIo io;
@@ -21,7 +22,7 @@ struct Fixture {
         map.set(r::R_AX_SYS_FUNC_EN&~3u,(r::B_AX_FEN_BBRSTB|r::B_AX_FEN_BB_GLB_RSTN)<<16);
     }
     void arm(){assert(io.begin(r::Kind::tssi));assert(io.oneshot(r::Kind::tssi,0x53,true));assert(io.armCalibrationTx());
-        map.set(0x10000+r::R_PMAC_TX_PRD,0x56780000|r::B_PMAC_CTX_EN|r::B_PMAC_PTX_EN);fakeRfk::accesses=0;}
+        assert(io.writeBb(r::R_PMAC_TX_PRD,0x56780000|r::B_PMAC_CTX_EN|r::B_PMAC_PTX_EN));fakeRfk::accesses=0;}
 };
 int main(){
     {Fixture f;assert(!f.io.armCalibrationTx());assert(f.io.stopCalibrationTx()&&!fakeRfk::accesses);f.arm();
@@ -45,5 +46,15 @@ int main(){
     {Fixture f;assert(f.io.begin(r::Kind::iqk));assert(!f.io.armCalibrationTx());assert(f.io.end(r::Kind::iqk,true));}
     {Fixture f;auto ctl=f.owner.control();ctl.oneshot=nullptr;r::MacRfkIo io(&f.device,&f.map,ctl);
         assert(!io.begin(r::Kind::tssi)&&!f.owner.beginCount);}
-    puts("PASS: native MacRfkIo PMAC stop after cancellation, both enable bits, read/write/readback failures, device loss and retained calibration/coexistence ownership; modeled MMIO");
+    {Fixture f;auto ctl=f.owner.control();ctl.recover=nullptr;r::MacRfkIo io(&f.device,&f.map,ctl);
+        assert(!io.begin(r::Kind::dpk)&&!f.owner.beginCount);}
+    {Fixture f;assert(f.io.begin(r::Kind::dpk));assert(f.io.writeBb(r::R_NCTL_CFG,0x1019));
+        f.io.cancel();f.owner.failRecover=true;assert(!f.io.end(r::Kind::dpk,false));
+        assert(f.io.leaseActive()&&f.owner.recoverCount==1&&!f.owner.endCount);
+        f.owner.failRecover=false;f.owner.failEnd=true;assert(!f.io.end(r::Kind::dpk,false));
+        assert(f.owner.recoverCount==2);f.owner.failEnd=false;assert(f.io.end(r::Kind::dpk,false)&&f.owner.recoverCount==2);}
+    {Fixture f;f.arm();f.owner.failRecover=true;assert(!f.io.end(r::Kind::tssi,false));
+        assert(!f.io.calibrationTxArmed()&&f.io.leaseActive()&&f.owner.shotCount==1&&!f.owner.endCount);
+        f.owner.failRecover=false;assert(f.io.end(r::Kind::tssi,false)&&f.owner.shotCount==2);}
+    puts("PASS: native MacRfkIo PMAC stop after cancellation, read/write/readback failures, device loss, mandatory recovery before releasing modified calibration/coexistence ownership; modeled MMIO");
 }
