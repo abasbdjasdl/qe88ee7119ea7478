@@ -1,20 +1,26 @@
-# RTL8852BE diagnostic driver
+# RTL8852BE experimental macOS driver
 
-This is an experimental diagnostic service, not a working Wi-Fi driver.
+This repository contains the earlier diagnostic service and a new integrated
+experimental network driver. Real Wi-Fi operation is not yet hardware-verified.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Network port under development (not deployed)
+## Integrated networking candidate: 0.1.0 (not deployed)
 
-The existing itlwm/OpenBSD protocol and software-crypto stack is now built as a
-separate reusable archive. A packet bridge handles management-first TX,
-encapsulation/encryption and bounded Realtek RX delivery. Actual rtw89 descriptor
-routines are imported with pinned provenance. New components stage data and
-firmware DMA, track TX release ownership, reassemble RX segments, configure
-stopped PCI rings and bind protocol timers/workloops. These components do not yet have
-a complete Realtek radio/DMA backend or controller lifecycle, and do not provide
-network connectivity. See [network-port.md](docs/network-port.md).
+`RTL8852BENetwork.kext` links the concrete PCI controller, persistent firmware
+boot, MAC/PHY/RFK initialization, DMA/MSI queues, station tables, scan/association
+and the pinned itlwm/OpenBSD WPA2 stack. The initial profile is one 2.4 GHz
+station on channels 1–11, 20 MHz, legacy rates, open or WPA2-CCMP, and an Ethernet
+interface for macOS IPv4/ARP/DHCP. It does not support concurrent Bluetooth,
+5 GHz, WPA3, multicast/IPv6 or sleep/resume.
 
-## Current candidate: 0.0.13 (HCI gate ordering before BDRAM reset)
+The first integrated build, `db988b9`, passed cloud compilation, KEXT linking and
+38 component test executables. Exact source/binary hashes and unchanged embedded
+vendor firmware were independently checked. This does not prove kernel loading,
+RF operation, association or Internet access. Public bundles have no SSID/key.
+See [network-driver.md](docs/network-driver.md) for the implementation and limits,
+and [network-capture.md](docs/network-capture.md) for the staged read-only collector.
+
+## Earlier diagnostic candidate: 0.0.13 (HCI gate ordering before BDRAM reset)
 
 0.0.12 stopped during queue reset, with no packet submitted and successful
 cleanup. 0.0.13 corrects the internal HCI gate order and adds persistent poll

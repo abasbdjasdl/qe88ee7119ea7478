@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the pinned itlwm protocol stack as a reusable archive, not a driver."""
+"""Build the pinned protocol stack and integrated experimental network kext."""
 import hashlib,json,os,pathlib,plistlib,struct,subprocess,sys
 root=pathlib.Path(__file__).resolve().parents[1]
 source=pathlib.Path(sys.argv[1]).resolve()
