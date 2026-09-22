@@ -127,6 +127,11 @@ public:
         result.busMasterOff=d.uploadBusMaster(false)&&(d.command()&6)==2;
         if(!result.idle||!result.busMasterOff)return false;
         if(snapshot){
+            // WCPU is now running and may have changed the interrupt masks
+            // since download entry. Re-establish the caller's masked handoff
+            // after DMA idle/BM-off; never assume the entry writes persisted.
+            for(unsigned i=10;i<=12;++i){const bool masked=w(addresses[i],0);ok=masked&&ok;}
+            for(unsigned i=10;i<=12;++i)ok=equal(addresses[i],0xffffffff,0)&&ok;
             // Indices have no prior outstanding ownership (preflight required
             // zero). Restore addresses only after idle and bus-master-off proof.
             const bool clear=w(0x1014,0x400)&&equal(0x1080,0x0fff0fff,0);ok=clear&&ok;
@@ -135,7 +140,7 @@ public:
             const bool init=w(0x1000,saved[0]);ok=init&&ok;
             for(unsigned i=0;i<=9;++i)ok=equal(addresses[i],0xffffffff,saved[i])&&ok;
             ok=(d.read16(0x1038)==savedCount)&&ok;
-            // IRQ masks remain zero until the caller stops WCPU and powers off.
+            // Caller decides whether to initialize runtime or stop WCPU.
         }
         result.restored=ok;return ok;
     }

@@ -11,6 +11,7 @@ struct Device {
     std::map<uint32_t,uint32_t> regs{{0x1000,0xc15000},{0x1010,0xfff00},{0x1e0,0x23}};
     uint16_t cmd=2;uint64_t time=0;unsigned writes=0,fail=0,barriers=0,doorbells=0,releases=0;
     bool safe=true,stuck=false,resetStuck=false,noHeader=false,noFirmware=false,busyAfter=false,denyOff=false,partialEnable=false,hciOffAtReset=false;
+    bool firmwareUnmasks=false,maskWriteFails=false,maskStuck=false;
     uint16_t command(){return cmd;}bool interruptsSafe(){return safe;}
     uint64_t nowUs(){return time;}void pauseUs(unsigned n){if(!stuck)time+=n;}
     uint32_t read32(uint32_t a){if(a==0x101c&&busyAfter&&doorbells)return 0x40000;return regs[a];}
@@ -19,6 +20,11 @@ struct Device {
     bool uploadBusMaster(bool on){if(on){cmd=0x406;return !partialEnable;}if(denyOff)return false;cmd=2;return true;}
     bool uploadWrite32(uint32_t a,uint32_t v){
         assert(t::uploadAddress32(a));++writes;if(writes==fail)return false;
+        if(a==0x1a0&&doorbells==164&&v==0){
+            assert(!(cmd&4));
+            if(maskWriteFails)return false;
+            if(maskStuck)return true;
+        }
         if(cmd&4)assert(a==0x1000||a==0x1010||a==0x8380||a==0x160||a==0x164);
         regs[a]=v;
         if(a==0x1000&&(v&8)){
@@ -38,7 +44,7 @@ struct Device {
             assert(!regs[0x1a0]&&!regs[0x10b0]&&!regs[0x13b0]);
             ++doorbells;regs[a]=uint32_t(v)|(uint32_t(v)<<16);
             if(v==1&&!noHeader)regs[0x1e0]=0x27;
-            if(v==164&&!noFirmware)regs[0x1e0]=0xe0;
+            if(v==164&&!noFirmware){regs[0x1e0]=0xe0;if(firmwareUnmasks)regs[0x1a0]=0x200000;}
         }else regs[a]=v;
         return true;
     }
@@ -54,6 +60,14 @@ int main(int argc,char **argv){
     assert(r.second.resetHci==3&&!(r.second.resetControl&8)&&!r.second.pollFailureReason);
     assert(d.cmd==2&&d.barriers==164&&!d.regs[0x1160]&&!d.regs[0x1038]&&d.releases==1);
     const auto writes=d.writes;
+    d=Device{};d.firmwareUnmasks=true;r=run(d);
+    assert(r.first.status==t::TransferStatus::complete&&r.second.restored&&d.regs[0x1a0]==0&&d.releases==1);
+    for(unsigned mode=0;mode<2;++mode){d=Device{};d.firmwareUnmasks=true;
+        d.maskWriteFails=mode==0;d.maskStuck=mode==1;r=run(d);
+        assert(r.first.status==t::TransferStatus::quiesceFailed&&!r.second.restored);
+        assert(r.first.retainBuffers&&!r.first.buffersReleased&&!d.releases&&d.cmd==2);
+        assert(r.second.failureAddress==0x1a0&&r.second.failureActual==0x200000);
+    }
     for(unsigned i=1;i<=writes;++i){d=Device{};d.fail=i;r=run(d);assert(r.first.status!=t::TransferStatus::complete);assert(!(d.cmd&4));}
     d=Device{};d.safe=false;r=run(d);assert(r.first.status==t::TransferStatus::startFailed&&!d.doorbells&&!d.writes);
     d=Device{};d.regs[0x1160]=4096;r=run(d);assert(r.first.status==t::TransferStatus::startFailed&&!d.doorbells);
