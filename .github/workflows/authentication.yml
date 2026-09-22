@@ -1,0 +1,27 @@
+name: Test userspace authentication component
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['src/auth/**', 'tests/auth_*', 'tools/build_authentication.py', '.github/workflows/authentication.yml']
+permissions:
+  contents: read
+jobs:
+  authentication:
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Fetch pinned upstream authentication implementation
+        run: |
+          git init build-hostap
+          git -C build-hostap remote add origin https://git.w1.fi/hostap.git
+          git -C build-hostap fetch --depth 1 origin 24c033de87759e3f8818507a60d873899658a7cf
+          git -C build-hostap checkout --detach FETCH_HEAD
+      - name: Build and run offline SAE exchange tests
+        run: python3 tools/build_authentication.py build-hostap "$(brew --prefix openssl@3)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: authentication-${{ github.sha }}
+          path: build/authentication
