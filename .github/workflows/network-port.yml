@@ -155,4 +155,5 @@ jobs:
             build/network-stack/*.log
             build/network-stack/*LICENSE
             build/network-stack/*.tar.gz
+            build/network-stack/r16-wireless-control
           retention-days: 7
