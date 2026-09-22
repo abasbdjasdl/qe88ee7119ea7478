@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build the pinned protocol stack and integrated experimental network kext."""
 import hashlib,json,os,pathlib,plistlib,struct,subprocess,sys
+from network_source_overrides import without_tkip_key_logging
 root=pathlib.Path(__file__).resolve().parents[1]
 source=pathlib.Path(sys.argv[1]).resolve()
 sdk=pathlib.Path(os.environ['MAC_KERNEL_SDK']).resolve()
@@ -20,12 +21,18 @@ for i,p in enumerate(files):
     output=dest/f'{i:03d}-{p.stem}.o'
     print('compile',p.relative_to(source),flush=True)
     log=dest/(output.stem+'.diagnostics')
-    result=subprocess.run(['xcrun','clang++',*flags,'-x','c++','-c',str(p),'-o',str(output)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+    compiled_source=p
+    if p.name=='ieee80211_crypto_tkip.c':
+        compiled_source=dest/'ieee80211_crypto_tkip-no-key-log.c'
+        compiled_source.write_text(without_tkip_key_logging(p.read_text()))
+    result=subprocess.run(['xcrun','clang++',*flags,'-x','c++','-c',str(compiled_source),'-o',str(output)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
     log.write_text(result.stdout)
     if result.returncode:
         print(result.stdout[-12000:]);result.check_returncode()
     objects.append(output)
-    manifest.append({'path':p.relative_to(source).as_posix(),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+    manifest.append({'path':p.relative_to(source).as_posix(),'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
+                     'compiled_source_sha256':hashlib.sha256(compiled_source.read_bytes()).hexdigest(),
+                     'override':'remove two raw TKIP key log calls' if compiled_source!=p else None})
 for bridge in sorted((root/'src/network').glob('*.cpp')):
     bridge_obj=dest/(bridge.stem+'.o')
     subprocess.run(['xcrun','clang++',*flags,'-c',str(bridge),'-o',str(bridge_obj)],check=True)
@@ -71,7 +78,8 @@ assert any('R16RTL8852BE' in s for s in defined),'Concrete personality not linke
 subprocess.run(['xcrun','nm','-uj',str(binary)],stdout=(dest/'kext-undefined-symbols.txt').open('w'),check=True)
 shutil.make_archive(str(dest/'RTL8852BENetwork-unsigned'), 'gztar',root_dir=dest,base_dir=bundle.name)
 report={'repository':'https://github.com/OpenIntelWireless/itlwm','commit':commit,'sources':manifest,
-        'upstream_overrides':{'itl80211/openbsd/net80211/CTimeout.cpp':'src/network/Net80211Timers.cpp'},
+        'upstream_overrides':{'itl80211/openbsd/net80211/CTimeout.cpp':'src/network/Net80211Timers.cpp',
+                              'itl80211/openbsd/net80211/ieee80211_crypto_tkip.c':'tools/network_source_overrides.py: remove raw key logging only'},
         'local_headers':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((root/'src/network').glob('*.hpp'))},
         'local_includes':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((root/'src/network').glob('*.inc'))},
         'firmware_sha256':info['FirmwareSHA256'],'non_network_headers':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((root/'src').glob('*.hpp'))},
