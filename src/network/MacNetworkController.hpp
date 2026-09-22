@@ -62,6 +62,8 @@ class R16NetworkController : public IOEthernetController {
     static IOReturn outputGated(OSObject*,void*,void*,void*,void*);
     static void timer(OSObject*,IOTimerEventSource*);
     void releaseResources();
+    unsigned startupStage_{};
+    void recordStartup(IOService *,unsigned,bool failed=false);
 protected:
     // Override in the hardware personality. Null causes a visible start failure.
     virtual rtl8852be::network::MacNetworkBootService *createBootService(){return nullptr;}

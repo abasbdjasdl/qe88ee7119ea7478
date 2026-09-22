@@ -271,25 +271,36 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(ieee80211_add_ess(&ic,&join))return false;ic.ic_flags|=IEEE80211_F_AUTO_JOIN;credentials=true;return true;
     }
     bool startHardware(){
+        owner.recordStartup(owner.pci_,30);
         if(!boot->prepare(identity))return false;prepared=true;
-        if(!attachProtocol()||!loadCredentials())return false;
+        owner.recordStartup(owner.pci_,31);if(!attachProtocol())return false;
+        owner.recordStartup(owner.pci_,32);if(!loadCredentials())return false;
+        owner.recordStartup(owner.pci_,33);
         static const uint8_t channels[6]={0,1,2,3,8,9};
         RingMemory memory[9]{};
         for(unsigned i=0;i<6;++i){if(tx[i].attach(&ic,channels[i]))return false;
             memory[i]={tx[i].ringMapping().physical,64};completion[channels[i]]=&tx[i].completions();}
+        owner.recordStartup(owner.pci_,34);
         if(firmware.attach())return false;
         memory[6]={firmware.ringMapping().physical,64};memory[7]={rxq.ringMapping().physical,64};memory[8]={rpq.ringMapping().physical,64};
+        owner.recordStartup(owner.pci_,35);
         queues=new NativeQueueService(runtime,txPointers,firmware,rxq,rpq,{this,receiveData,receiveReports});
         transport=new MacCommandTransport(*owner.loop_,runtime,firmware);
         if(!queues||!transport)return false;
+        owner.recordStartup(owner.pci_,36);
         commands=new NativeFirmwareCommands(*transport,identity.epoch);if(!commands)return false;
         events=new MacFirmwareEventBinding(*commands,identity.epoch,this,notification);if(!events)return false;
         // From the first address publication onward any failure retains DMA until stop proves idle.
+        owner.recordStartup(owner.pci_,37);
         visible=true;for(auto &q:tx)if(!q.markDeviceVisible())return false;
         if(!firmware.markDeviceVisible()||!rxq.markDeviceVisible()||!rpq.markDeviceVisible())return false;
+        owner.recordStartup(owner.pci_,38);
         PciRingSetup<MacPciRingIo> setup(ringIo);if(!setup.configure(memory))return false;
+        owner.recordStartup(owner.pci_,39);
         runtimeAttempted=true;if(!runtime.start(memory)||!interrupt->start(&runtime,interruptService,interruptFault,this))return false;
+        owner.recordStartup(owner.pci_,40);
         bootStarted=true;if(!boot->start(*commands,*this))return false;
+        owner.recordStartup(owner.pci_,41);
         return owner.timer_->setTimeoutMS(10)==kIOReturnSuccess;
     }
     bool dataDrained()const{
@@ -376,37 +387,66 @@ IOReturn R16NetworkController::stopGated(OSObject *o,void*,void*,void*,void*){
     auto *s=static_cast<R16NetworkController*>(o)->state_;return !s||s->shutdown()?kIOReturnSuccess:kIOReturnBusy;
 }
 void R16NetworkController::timer(OSObject *o,IOTimerEventSource*){auto *s=static_cast<R16NetworkController*>(o)->state_;if(s)s->poll();}
+void R16NetworkController::recordStartup(IOService *provider,unsigned stage,bool failed){
+    startupStage_=stage;
+    // The PCI provider outlives a failed/detached controller. Only constant
+    // identifiers and numeric progress are persisted, never SSID or key data.
+    if(provider){
+        provider->setProperty("R16NetworkTestId","NETWORK-START-02");
+        provider->setProperty("R16NetworkStage",uint64_t(stage),32);
+        provider->setProperty("R16NetworkStartFailed",failed);
+    }
+    IOLog("RTL8852BE startup stage=%u failed=%u\n",stage,unsigned(failed));
+}
 bool R16NetworkController::start(IOService *provider){
-    if(!IOEthernetController::start(provider))return false;superStarted_=true;
+    recordStartup(provider,1);
+    if(!IOEthernetController::start(provider)){recordStartup(provider,1,true);return false;}superStarted_=true;
+    recordStartup(provider,2);
     pci_=OSDynamicCast(IOPCIDevice,provider);
     if(!pci_||pci_->configRead16(kIOPCIConfigVendorID)!=0x10ec||pci_->configRead16(kIOPCIConfigDeviceID)!=0xb852)goto failed;
     pci_->retain();providerRetained_=true;
+    recordStartup(provider,3);
     if(!pci_->open(this))goto failed;providerOpened_=true;
     pci_->setMemoryEnable(true);pci_->setBusMasterEnable(false);
+    recordStartup(provider,4);
     bar_=pci_->mapDeviceMemoryWithRegister(kIOPCIConfigBaseAddress2);
     if(!bar_||bar_->getLength()<0x10000||!createWorkLoop())goto failed;
+    recordStartup(provider,5);
     gate_=IOCommandGate::commandGate(this);timer_=IOTimerEventSource::timerEventSource(this,timer);
     if(!gate_||!timer_)goto failed;
+    recordStartup(provider,6);
     if(loop_->addEventSource(gate_)!=kIOReturnSuccess||loop_->addEventSource(timer_)!=kIOReturnSuccess)goto failed;
     {
+        recordStartup(provider,7);
         auto *boot=createBootService();if(!boot){setProperty("R16Failure","concrete boot service missing");goto failed;}
+        recordStartup(provider,8);
         state_=new State(*this,boot);if(!state_){delete boot;goto failed;}
+        recordStartup(provider,9);
         if(!boot->allocate(*pci_,*bar_,*loop_))goto failed;
-        for(auto &q:state_->tx)if(!q.allocate(pci_,loop_))goto failed;
-        if(!state_->firmware.allocate(pci_,loop_)||!state_->rxq.allocate(pci_,loop_)||!state_->rpq.allocate(pci_,loop_))goto failed;
+        for(unsigned i=0;i<6;++i){recordStartup(provider,10+i);if(!state_->tx[i].allocate(pci_,loop_))goto failed;}
+        recordStartup(provider,16);if(!state_->firmware.allocate(pci_,loop_))goto failed;
+        recordStartup(provider,17);if(!state_->rxq.allocate(pci_,loop_))goto failed;
+        recordStartup(provider,18);if(!state_->rpq.allocate(pci_,loop_))goto failed;
+        recordStartup(provider,19);
         state_->interrupt=new R16PciInterrupts;if(!state_->interrupt)goto failed;
         int msi=-1;for(int index=0;index<32;++index){int kind=0;
             if(pci_->getInterruptType(index,&kind)!=kIOReturnSuccess)break;
             if(kind&kIOInterruptTypePCIMessaged){msi=index;break;}}
+        recordStartup(provider,20);
         if(msi<0||!state_->interrupt->attach(pci_,loop_,msi))goto failed;state_->interruptAttached=true;
+        recordStartup(provider,21);
         if(gate_->runAction(startGated)!=kIOReturnSuccess)goto failed;
+        recordStartup(provider,50);
         auto *dict=OSDictionary::withCapacity(1);auto *medium=IONetworkMedium::medium(kIOMediumEthernetAuto,0);
         bool published=dict&&medium&&IONetworkMedium::addMedium(dict,medium)&&publishMediumDictionary(dict)&&setCurrentMedium(medium)&&setSelectedMedium(medium);
         if(medium)medium->release();if(dict)dict->release();if(!published)goto failed;
+        recordStartup(provider,51);
         if(!attachInterface(reinterpret_cast<IONetworkInterface**>(&interface_),false))goto failed;
     }
-    IOEthernetController::setLinkStatus(kIONetworkLinkValid);registerService();interface_->registerService();return true;
+    IOEthernetController::setLinkStatus(kIONetworkLinkValid);registerService();interface_->registerService();
+    recordStartup(provider,52);return true;
 failed:
+    recordStartup(provider,startupStage_,true);
     releaseResources();if(superStarted_){IOEthernetController::stop(provider);superStarted_=false;}return false;
 }
 bool R16NetworkController::configureInterface(IONetworkInterface *netif){

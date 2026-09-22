@@ -27,6 +27,8 @@ jobs:
           git -C build-rtw89 remote add origin https://github.com/lwfinger/rtw89.git
           git -C build-rtw89 fetch --depth 1 origin d1fced1b8a741dc9f92b47c69489c24385945f6e
           git -C build-rtw89 checkout --detach FETCH_HEAD
+      - name: Check actual macOS registry capture commands
+        run: python3 tools/test_network_capture_macos.py
       - name: Test Realtek descriptors, PCI queues and firmware packets
         shell: bash
         run: |

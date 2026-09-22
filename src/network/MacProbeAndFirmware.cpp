@@ -57,6 +57,8 @@ bool MacProbeAndFirmware::fail(ProbeFirmwareError error){
             unsigned(result_.failedStage),unsigned(error),static_cast<unsigned long long>(result_.epoch),
             unsigned(result_.cut),state_?state_->currentCycle:0);
         if(state_){
+            state_->device.setProperty("R16ProbeStage",uint64_t(result_.failedStage),32);
+            state_->device.setProperty("R16ProbeError",uint64_t(error),32);
             const auto &mac=state_->mac.result;
             IOLog("RTL8852BE: probe MAC stage=%u error=%u address=0x%x wanted=0x%x actual=0x%x\n",
                 unsigned(mac.stage),unsigned(mac.error),mac.address,mac.expected,mac.actual);
@@ -64,6 +66,13 @@ bool MacProbeAndFirmware::fail(ProbeFirmwareError error){
                 const auto &prep=cycle->boot.result;const auto &fw=cycle->download.result;
                 const auto &pci=cycle->link.result;const auto &downloadPci=cycle->download.pciResult;
                 const auto &power=cycle->power.result.on;
+                state_->device.setProperty("R16ProbePciError",uint64_t(pci.error),32);
+                state_->device.setProperty("R16ProbePowerError",uint64_t(power.error),32);
+                state_->device.setProperty("R16ProbeDownloadStatus",uint64_t(fw.status),32);
+                state_->device.setProperty("R16ProbePollAddress",uint64_t(downloadPci.pollFailureAddress),32);
+                state_->device.setProperty("R16ProbePollMask",uint64_t(downloadPci.pollFailureMask),32);
+                state_->device.setProperty("R16ProbePollWanted",uint64_t(downloadPci.pollFailureExpected),32);
+                state_->device.setProperty("R16ProbePollActual",uint64_t(downloadPci.pollFailureActual),32);
                 IOLog("RTL8852BE: probe cycle preparation stage=%u error=%u address=0x%x wanted=0x%x actual=0x%x "
                     "fw=%u operation=%u phase=%u failedPhase=%u lastControl=0x%x lastIndex=0x%x retained=%u "
                     "pciError=%u pciAddress=0x%x pciValue=0x%x powerError=%u powerAddress=0x%x\n",
