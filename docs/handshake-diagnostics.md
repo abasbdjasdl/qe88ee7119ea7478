@@ -57,3 +57,22 @@ values do not describe every prior packet.
 The native packet bridge is exercised with synthetic EAPOL and a fake mbuf
 implementation for bytes, FCS removal, lengths, crypto filtering and cleanup.
 This does not execute the real macOS kernel or the net80211 input state machine.
+
+## 0.1.21 contiguous receive allocation
+
+Hardware0.1.20 observed EapolBridgeOk121/Failed0, stage13, last packet length131
+and first length60, FC0=8/FC1=2/fragment0/protocolRUN, EAPOL-Key type3/body95.
+The last packet increments only is_rx_nombuf (DropMask512). The input PAE code
+requests a99-byte key header after decapsulation. XNU m_allocpacket_internal
+may split small unrestricted allocations; m_pullup has plain-mbuf size limits.
+
+RX now requests maxchunks=1 and verifies first and packet lengths after copy.
+No fallback delivers fragmented buffers. Allocation failure still drops safely.
+A60-byte first-segment model reproduces the previous bridge test failure; the
+fixed native bridge passes with131-byte contiguous data, plus28/1514/2346 sizes.
+This model is source-informed; actual hardware handshake remains to be tested.
+Stage10 now means contiguous-length validation rather than header pullup.
+
+References (Apple source, accessed2026-09-22):
+https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/uipc_mbuf.c
+https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kpi_mbuf.c

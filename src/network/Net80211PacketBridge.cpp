@@ -75,12 +75,16 @@ int deliverRealtekRx(ieee80211com *ic,const uint8_t *dma,size_t bytes,size_t des
     if(!channel||!ic->ic_channels[channel].ic_freq)return EINVAL;
     const size_t frameBytes=rx.length-4; // rtw89 advertises RX_INCLUDES_FCS
     mbuf_t frame=nullptr;
+    // Unrestricted small allocations can produce a 60-byte first segment.
+    // net80211's EAPOL header pullup then exceeds XNU's plain-mbuf capacity.
+    // Request one segment so software decapsulation/crypto sees contiguous data.
+    unsigned maxChunks=1;
     if(trace)trace->stage=8;
-    if(mbuf_allocpacket(MBUF_DONTWAIT,frameBytes,nullptr,&frame)!=0)return ENOBUFS;
+    if(mbuf_allocpacket(MBUF_DONTWAIT,frameBytes,&maxChunks,&frame)!=0)return ENOBUFS;
     if(trace)trace->stage=9;
     if(mbuf_copyback(frame,0,frameBytes,rx.payload,MBUF_DONTWAIT)!=0){mbuf_freem(frame);return ENOBUFS;}
     if(trace)trace->stage=10;
-    if(mbuf_len(frame)<sizeof(ieee80211_frame)&&mbuf_pullup(&frame,sizeof(ieee80211_frame))!=0)return ENOBUFS;
+    if(maxChunks!=1||mbuf_len(frame)!=frameBytes||mbuf_pkthdr_len(frame)!=frameBytes){mbuf_freem(frame);return EINVAL;}
     auto *header=static_cast<ieee80211_frame *>(mbuf_data(frame));
     auto *node=ieee80211_find_rxnode(ic,header);
     if(trace)trace->stage=11;
