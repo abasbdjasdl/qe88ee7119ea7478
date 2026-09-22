@@ -61,6 +61,7 @@ enum class Stage {idle,hardware,monitor,slots,driverInit,driverControl,policy,co
 struct Result {
     Error error{Error::none};Stage stage{Stage::idle};uint32_t address{},value{};
     unsigned operations{},polls{},commands{},acknowledged{};
+    uint32_t rfPath{},rfAddress{},rfExpected{};
     bool modified{},requiresRecovery{},hardwareProgrammed{},policyAcknowledged{},scoreboardWritten{};
 };
 
@@ -135,6 +136,7 @@ template<class Io> class Initialization {
     }
     bool wrf(uint8_t path,uint32_t a,uint32_t v,bool verify){
         if(!check())return false;++result.operations;result.modified=true;
+        result.rfPath=path;result.rfAddress=a;result.rfExpected=v;
         if(!io_.writeRf(path,a,0xfffff,v))return fail(Error::io,a,v);
         if(!check())return false;
         if(verify){uint32_t got=0;++result.operations;

@@ -17,6 +17,8 @@ class MacBtInitializationIo {
     static void barrier();
 public:
     MacBtInitializationIo(IOPCIDevice *,IOMemoryMap *,IOWorkLoop *,network::FirmwareCommandLink);
+    const network::RadioAccessTrace &radioTrace()const{return radio_.trace();}
+    network::RadioIoStatus radioStatus()const{return radio_.status();}
     bool valid()const{return device_&&mapping_&&loop_&&commands_.valid()&&radioIo_.valid();}
     bool inGate()const{return valid()&&loop_->inGate();}
     bool cancelled()const{return stopped_;}void cancel(){stopped_=true;radioIo_.cancel();}

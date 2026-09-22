@@ -8,15 +8,20 @@ enum class RadioIoStatus {ok,invalid,ioError,timeout,cancelled};
 // IO uses absolute BAR2 offsets and boolean read32(offset,out), write32,
 // delayUs and cancelled methods. Owning workloop serializes all operations.
 // Power/clock enable and PHY initialization order remain controller duties.
+struct RadioAccessTrace {uint32_t readAddress{},readValue{},writeAddress{},writeValue{},rfWriteCommand{};};
 template<class Io> class RadioAccess {
+    RadioAccessTrace trace_{};
     Io &io_;RadioIoStatus status_{RadioIoStatus::ok};
     bool ready(){if(io_.cancelled()){status_=RadioIoStatus::cancelled;return false;}return true;}
     bool read(uint32_t relative,uint32_t &v){
         if(!ready())return false;
-        if(!io_.read32(0x10000+relative,v)){status_=RadioIoStatus::ioError;return false;}return true;
+        trace_.readAddress=0x10000+relative;trace_.readValue=0;
+        if(!io_.read32(0x10000+relative,v)){status_=RadioIoStatus::ioError;return false;}trace_.readValue=v;return true;
     }
     bool write(uint32_t relative,uint32_t v){
         if(!ready())return false;
+        trace_.writeAddress=0x10000+relative;trace_.writeValue=v;
+        if(relative==0x370)trace_.rfWriteCommand=v;
         if(!io_.write32(0x10000+relative,v)){status_=RadioIoStatus::ioError;return false;}return true;
     }
     bool delay(unsigned us){if(!ready())return false;if(!io_.delayUs(us)){status_=RadioIoStatus::ioError;return false;}return true;}
@@ -45,6 +50,7 @@ template<class Io> class RadioAccess {
 public:
     explicit RadioAccess(Io &io):io_(io){}
     RadioIoStatus status()const{return status_;}
+    const RadioAccessTrace &trace()const{return trace_;}
     bool readRf(uint8_t path,uint32_t address,uint32_t mask,uint32_t &value){
         value=0;if(!validate(path,address,mask))return false;uint32_t raw=0;
         if(address&0x10000){

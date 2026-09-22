@@ -163,6 +163,18 @@ struct MacRadioBoot::State {
             snapshotComplete=device.setProperty("R16ChannelError",uint64_t(channel.result.error),64)&&snapshotComplete;
             snapshotComplete=device.setProperty("R16ChannelAddress",uint64_t(channel.result.address),64)&&snapshotComplete;
             snapshotComplete=device.setProperty("R16RadioIoStatus",uint64_t(radio.ioStatus()),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtInitValue",uint64_t(btInit.result.value),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtInitRfPath",uint64_t(btInit.result.rfPath),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtInitRfAddress",uint64_t(btInit.result.rfAddress),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtInitRfExpected",uint64_t(btInit.result.rfExpected),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtInitOperations",uint64_t(btInit.result.operations),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtInitPolls",uint64_t(btInit.result.polls),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtInitRadioStatus",uint64_t(btInitIo.radioStatus()),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtRfReadAddress",uint64_t(btInitIo.radioTrace().readAddress),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtRfReadValue",uint64_t(btInitIo.radioTrace().readValue),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtRfWriteAddress",uint64_t(btInitIo.radioTrace().writeAddress),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtRfWriteValue",uint64_t(btInitIo.radioTrace().writeValue),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtRfWriteCommand",uint64_t(btInitIo.radioTrace().rfWriteCommand),64)&&snapshotComplete;
             device.setProperty("R16RadioSnapshotComplete",uint64_t(snapshotComplete),64);
             IOLog("RTL8852BE radio failure: phase=%s stage=%u step=%u error=%u cmd=%u used=%u "
                   "btinit=%u/%u@%08x btlease=%u/%u@%08x held=%u consumed=%u ended=%u native=%u "

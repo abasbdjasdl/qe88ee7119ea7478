@@ -186,6 +186,10 @@ static void faults(unsigned operations){
     assert(lateLte.init.result.error==i::Error::lteTimeout&&lateLte.io.lteReads==1);
     Fixture overall;overall.io.jumpAt=1;overall.io.jumpUs=2000000;assert(!overall.begin());
     assert(overall.init.result.error==i::Error::timeout&&overall.io.writes.empty());
+    {Fixture f;f.io.ignoreRfSel=true;
+        assert(!f.begin()&&f.init.result.error==i::Error::readback);
+        assert(f.init.result.address==2&&f.init.result.value==0x33333);
+        assert(f.init.result.rfPath==0&&f.init.result.rfAddress==2&&f.init.result.rfExpected==0);}
     for(unsigned which=0;which<3;++which){Fixture f;f.io.ignoreRfSel=which==0;f.io.ignoreRfWe=which==1;f.io.ignoreLte=which==2;
         assert(!f.begin()&&f.init.result.error==i::Error::readback&&!f.shadow.valid&&!f.policy.valid);}
     for(const auto ignored:std::vector<Device::Write>{{0x40,0,1},{0xda20,0,1},{0xda35,0,1},{0xda40,0,1},
@@ -266,6 +270,9 @@ static void nativeSmoke(){
         assert(!f.io.writeRf(2,0x33,0xfffff,2)&&!f.io.writeRf(0,0x33,0xfffff,3));
         assert(!f.io.writeRf(0,0x3f,0xfffff,0)&&!f.io.writeRf(0,2,0xff,0));
         f.map.set(0x1174c,0x04020000);assert(f.io.readRf(0,0xef,0xfffff,word)&&word==0x20000);
+        assert(f.io.radioTrace().readAddress==0x1174c&&f.io.radioTrace().readValue==0x04020000);
+        assert(f.io.radioTrace().writeAddress==0x10378&&(f.io.radioTrace().writeValue&0x7ff)==0xef);
+        assert(f.io.radioTrace().rfWriteCommand==0x13300002);
         assert(!f.io.readRf(0,0x3f,0xfffff,word));
         assert(!f.io.delayUs(1001));
     }
