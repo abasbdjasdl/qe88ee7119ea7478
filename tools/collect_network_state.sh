@@ -174,8 +174,34 @@ if [ -n "$url" ]; then
     else
         printf '\n[explicit_optional_url_check_bound_to_target]\n' >&3
         bounded 12 /usr/bin/curl --interface "$target" --connect-timeout 4 --max-time 8 \
-            --silent --head --output /dev/null --write-out 'http_code=%{http_code}\n' -- "$url" >&3 2>/dev/null
+            --noproxy '*' --silent --head --output /dev/null --write-out 'http_code=%{http_code}\nprimary_dns_seconds=%{time_namelookup}\nprimary_connect_seconds=%{time_connect}\nprimary_tls_seconds=%{time_appconnect}\nprimary_total_seconds=%{time_total}\n' -- "$url" >&3 2>/dev/null
         printf 'curl_exit=%s\n' "$?" >&3
+
+        # Separate named probes never overwrite the primary response evidence.
+        # IPv4 direct-address TLS separates DNS from transport; certificate checks stay on.
+        probe() {
+            probe_id=$1; probe_url=$2
+            printf '\n[probe_%s]\n' "$probe_id" >&3
+            bounded 17 /usr/bin/curl -4 --noproxy '*' --interface "$target" \
+                --connect-timeout 6 --max-time 14 --silent --head --output /dev/null \
+                --write-out "${probe_id}_http_code=%{http_code}\n${probe_id}_dns_seconds=%{time_namelookup}\n${probe_id}_connect_seconds=%{time_connect}\n${probe_id}_tls_seconds=%{time_appconnect}\n${probe_id}_total_seconds=%{time_total}\n${probe_id}_remote_ip=%{remote_ip}\n" \
+                -- "$probe_url" >&3 2>/dev/null
+            printf '%s_curl_exit=%s\n' "$probe_id" "$?" >&3
+        }
+        gateway=$(bounded 3 /usr/sbin/ipconfig getoption "$target" router 2>/dev/null | /usr/bin/awk 'NR==1{print $1}')
+        # Only an IPv4 literal obtained from this interface may form a gateway URL.
+        if printf '%s\n' "$gateway" | /usr/bin/awk -F. 'NF!=4{exit 1}{for(i=1;i<=4;i++)if($i!~/^[0-9]+$/||$i>255)exit 1}' ; then
+            probe gateway "http://$gateway/"
+        fi
+        probe apple https://www.apple.com/
+        probe direct_tls https://1.1.1.1/
+        printf '\n[post_probe_driver_counters]\n' >&3
+        for key in R16LiveStation R16LiveProtocol R16LiveFaulted R16LiveTraffic R16LiveTxSubmitted R16LiveRxWireless R16TracePortValid R16TraceTxPrepareErrors R16TraceTxLastError R16TraceRxBridgeError R16TraceEapolKey R16TraceEapolBadMic R16TraceDeauth R16TraceDisassoc R16TraceRxUnauth R16TraceRxDecap R16TraceCcmpDecrypt R16TraceCcmpReplay; do
+            v=$(provider_value "0.$key") || v=unknown
+            case "$v" in true|false|unknown) ;; ''|*[!0-9]*) v=invalid;; esac
+            printf 'post_%s=%s\n' "$key" "$v" >&3
+        done
+
     fi
 fi
 printf 'capture_complete=yes\nreboot_owner=caller\n' >&3
