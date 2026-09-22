@@ -4,6 +4,7 @@
 #include <IOKit/pci/IOPCIDevice.h>
 #include <IOKit/IOCommandGate.h>
 #include <IOKit/IOTimerEventSource.h>
+#include <IOKit/IOLocks.h>
 #include "MacFirmwareCommands.hpp"
 #include "StationController.hpp"
 #include "StationIoCore.hpp"
@@ -58,6 +59,10 @@ class R16NetworkController : public IOEthernetController {
     IOWorkLoop *loop_{};IOCommandGate *gate_{};IOTimerEventSource *timer_{};
     IOPCIDevice *pci_{};IOMemoryMap *bar_{};IOEthernetInterface *interface_{};
     bool providerOpened_{},providerRetained_{},superStarted_{},retainedFault_{};
+    IOLock *controlLock_{};
+    bool controlStopping_{true};
+    IOReturn runControlAction(IOCommandGate::Action,void* = nullptr);
+    void blockControlRequests();
     static IOReturn startGated(OSObject*,void*,void*,void*,void*);
     static IOReturn stopGated(OSObject*,void*,void*,void*,void*);
     static IOReturn enableGated(OSObject*,void*,void*,void*,void*);
@@ -72,6 +77,7 @@ protected:
     // Override in the hardware personality. Null causes a visible start failure.
     virtual rtl8852be::network::MacNetworkBootService *createBootService(){return nullptr;}
 public:
+    IOReturn newUserClient(task_t,void*,UInt32,OSDictionary*,IOUserClient**) override;
     bool start(IOService*) override;
     void stop(IOService*) override;
     void free() override;

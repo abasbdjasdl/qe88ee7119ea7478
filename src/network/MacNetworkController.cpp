@@ -632,6 +632,7 @@ void R16NetworkController::recordStartup(IOService *provider,unsigned stage,bool
 bool R16NetworkController::start(IOService *provider){
     recordStartup(provider,1);
     if(!IOEthernetController::start(provider)){recordStartup(provider,1,true);return false;}superStarted_=true;
+    controlLock_=IOLockAlloc();if(!controlLock_)goto failed;
     recordStartup(provider,2);
     pci_=OSDynamicCast(IOPCIDevice,provider);
     if(!pci_||pci_->configRead16(kIOPCIConfigVendorID)!=0x10ec||pci_->configRead16(kIOPCIConfigDeviceID)!=0xb852)goto failed;
@@ -674,6 +675,7 @@ bool R16NetworkController::start(IOService *provider){
         recordStartup(provider,51);
         if(!attachInterface(reinterpret_cast<IONetworkInterface**>(&interface_),true))goto failed;
     }
+    IOLockLock(controlLock_);controlStopping_=false;IOLockUnlock(controlLock_);
     IOEthernetController::setLinkStatus(kIONetworkLinkValid);registerService();interface_->registerService();
     recordStartup(provider,52);return true;
 failed:
@@ -717,9 +719,9 @@ IOReturn R16NetworkController::selectionGated(OSObject *o,void *request,void*,vo
     return s?s->queueSelection(static_cast<const selection::Join*>(request)):kIOReturnNotReady;
 }
 IOReturn R16NetworkController::selectWirelessNetwork(const selection::Join &request){
-    return gate_?gate_->runAction(selectionGated,const_cast<selection::Join*>(&request)):kIOReturnNotReady;
+    return runControlAction(selectionGated,const_cast<selection::Join*>(&request));
 }
-IOReturn R16NetworkController::disconnectWirelessNetwork(){return gate_?gate_->runAction(selectionGated):kIOReturnNotReady;}
+IOReturn R16NetworkController::disconnectWirelessNetwork(){return runControlAction(selectionGated);}
 IOReturn R16NetworkController::wirelessStatusGated(OSObject *o,void *output,void*,void*,void*){
     auto *self=static_cast<R16NetworkController*>(o);
     if(!output)return kIOReturnBadArgument;
@@ -727,7 +729,18 @@ IOReturn R16NetworkController::wirelessStatusGated(OSObject *o,void *output,void
 }
 IOReturn R16NetworkController::copyWirelessStatus(wireless::Snapshot &out){
     memset(&out,0,sizeof(out));
-    return gate_?gate_->runAction(wirelessStatusGated,&out):kIOReturnNotReady;
+    return runControlAction(wirelessStatusGated,&out);
+}
+IOReturn R16NetworkController::runControlAction(IOCommandGate::Action action,void *argument){
+    // External control callers must not hold the hardware workloop gate: lock
+    // order is controlLock -> command gate, including stop's request drain.
+    if(!controlLock_||!loop_||loop_->inGate())return kIOReturnNotReady;
+    IOLockLock(controlLock_);
+    const auto result=!controlStopping_&&gate_?gate_->runAction(action,argument):kIOReturnNotReady;
+    IOLockUnlock(controlLock_);return result;
+}
+void R16NetworkController::blockControlRequests(){
+    if(controlLock_){IOLockLock(controlLock_);controlStopping_=true;IOLockUnlock(controlLock_);}
 }
 IOReturn R16NetworkController::outputGated(OSObject *o,void *p,void *out,void*,void*){
     auto &owner=*static_cast<R16NetworkController*>(o);auto *s=owner.state_;auto m=static_cast<mbuf_t>(p);
@@ -746,6 +759,9 @@ bool R16NetworkController::setLinkStatus(UInt32 status,const IONetworkMedium *me
     return IOEthernetController::setLinkStatus(status,medium,speed,data);
 }
 void R16NetworkController::releaseResources(){
+    // Drain in-flight control calls before dismantling gate/state; reject new
+    // calls even if a userspace client retains the stopped provider object.
+    blockControlRequests();
     if(state_&&gate_&&gate_->runAction(stopGated)!=kIOReturnSuccess){
         // Preserve the entire borrowed object graph, not only physical pages.
         if(!retainedFault_){retainedFault_=true;retain();}
@@ -760,4 +776,4 @@ void R16NetworkController::releaseResources(){
     if(providerRetained_){pci_->release();providerRetained_=false;}pci_=nullptr;
 }
 void R16NetworkController::stop(IOService *provider){releaseResources();if(superStarted_){IOEthernetController::stop(provider);superStarted_=false;}}
-void R16NetworkController::free(){releaseResources();if(retainedFault_)return;if(loop_){loop_->release();loop_=nullptr;}IOEthernetController::free();}
+void R16NetworkController::free(){releaseResources();if(retainedFault_)return;if(loop_){loop_->release();loop_=nullptr;}if(controlLock_){IOLockFree(controlLock_);controlLock_=nullptr;}IOEthernetController::free();}
