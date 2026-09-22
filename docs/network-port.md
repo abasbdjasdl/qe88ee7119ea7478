@@ -531,8 +531,11 @@ slices. Lease loss blocks further programming and successful release until
 verified recovery, while narrow PMAC stop remains callable. Tests cover expiry
 inside a 50 ms sleep, inside an indirect RF poll and after an MMIO write. The
 coordinator's `MacBtRfkIo` now supplies native restricted MMIO and the shared
-command client. Controller ownership, actual binding to the RFK lease callback,
-initial coex policy and physical reset recovery remain.
+command client. The [initial coexistence setup](bt-initialization.md) supplies
+the hardware PTA/RF setup and acknowledged firmware baseline policy; it publishes
+the directional scoreboard shadow only after all five command acknowledgements.
+Controller ownership, actual binding to the RFK lease callback, dynamic policy
+and physical reset recovery remain.
 
 RFK initial RCK/DACK/RXDCK and channel RXDCK/IQK now have separate callable
 phases. This permits the controller to return to the workloop for policy ACKs
@@ -544,9 +547,24 @@ synchronous wrappers. The asynchronous owner itself is still required.
 
 The [station controller](station-controller.md) implements asynchronous role,
 join, scan, association and disconnect ordering. Real firmware ACKs and backend
-completion tokens are mandatory. CMAC/CAM actions, net80211 authentication and
-controlled-port callbacks, and device lifecycle bindings remain to be supplied;
-the state machine does not supply fake successful hardware actions.
+completion tokens are mandatory. [Station tables](station-tables.md) now supply
+CMAC/address/BSSID CAM encoding and shared-bus acknowledged programming, including
+native CH12 instantiation. Controller action binding, CAM allocation, net80211
+authentication and controlled-port callbacks, and device lifecycle bindings
+remain to be supplied; the state machine does not supply fake successful
+hardware actions.
+
+The [chip power sequence](device-power.md) now imports the complete RTL8852B
+on/off functions, including calibration-dependent voltage adjustments and the
+initial RFE 5 shutdown branch. Its native adapter enforces device/gate/BAR/PCI
+conditions. This still needs to be composed with firmware loading, calibration,
+DMA lifecycle and host callback draining in the actual controller. Observed MAC
+power-off alone cannot be used to release DMA or reset a firmware command epoch.
+
+Fire-and-forget firmware clients now omit completion callbacks. The shared bus
+rejects a caller requesting completion without requesting an ACK before reserving
+a sequence, preventing a rejected request from later timing out the whole bus.
+Periodic Receive ACK housekeeping remains active for those no-callback clients.
 
 The workflow now exercises DAV physical faults and cleanup, atomic calibration
 publication, BT arbitration/ACK faults, and station lifecycle faults using ASan

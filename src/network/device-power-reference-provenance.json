@@ -1,0 +1,28 @@
+{
+  "repository": "https://github.com/lwfinger/rtw89",
+  "commit": "d1fced1b8a741dc9f92b47c69489c24385945f6e",
+  "license": "BSD-3-Clause option",
+  "sources": {
+    "rtw8852b.c": "be0fbd13013d64835742c089f5c66963e4154cf1d78723dd7b88f2c5e28df3c2",
+    "mac.c": "e3882df844813af81121d9de2c1f63a8eabc6041d807bbc55b09607c672151b5",
+    "mac.h": "7857ff22da7beef10738a66b8f1d33fbd34279f97a7a0fe02c9ef22d6aef5cf0",
+    "core.h": "ec8c6d32fe8f86620ed23190b26d8f4aaa11238fb195bba4c4e66ee01d5e2366",
+    "reg.h": "9609382125b396708d52f2d64a4e8a1e7abb080690ea2776308323834b725d03"
+  },
+  "original_functions": {
+    "rtw8852b_pwr_sps_ana": "4f0be5aec032b4dfdbdb28b23006742735b425c00060cd8c0a618c96dfd27c78",
+    "rtw8852b_pwr_on_func": "9d893c37d4310cb9be2dd8f7564bc49b02739b87f33560482f9e8e7cb9a08ddc",
+    "rtw8852b_pwr_off_func": "46ad9e1eecb22daa75eef86bd04f8accc7cb690ff9c1572b4f08a11cf12e1de0"
+  },
+  "adaptations": [
+    "typed Context and Efuse",
+    "bounded failure-latching poll/delay helpers",
+    "explicit probeDone lifecycle input",
+    "namespaced constexpr register definitions"
+  ],
+  "generated": {
+    "Rtw8852bDevicePowerConstants.hpp": "18df99a707a798dd21f081a08df331a4195d49ba95ae7f4b3a0bf4f5ae74604d",
+    "Rtw8852bDevicePowerFunctions.inc": "3e01308fc8c8b2709a602250d9b2aef49c20de99362a773767b42fef6e208725"
+  },
+  "hardware_tested": false
+}

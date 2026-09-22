@@ -94,6 +94,10 @@ public:
                 CommandReceiver receiver,uint64_t token,uint64_t timeoutUs,uint8_t &sequence){
         sequence=0;
         if(publishing_||id.category>3||id.commandClass>63||(!payload&&length)||length>sizeof(packet_)-8)return false;
+        // An incidental periodic Receive ACK is transport housekeeping, not a
+        // caller-requested completion contract. Reject before reserving so a
+        // malformed request cannot leave a record that later faults every user.
+        if(receiver.event&&!receiveAck&&!doneAck)return false;
         if(!reserve(receiver,token,timeoutUs,sequence))return false;
         size_t encoded=0;
         if(!encodeH2c(id,sequence,receiveAck,doneAck,payload,length,packet_,sizeof(packet_),encoded))return false;
@@ -128,7 +132,7 @@ template<class Transport> class FirmwareCommandClient {
     static bool available(void *p){return static_cast<FirmwareCommandClient *>(p)->commands_.service();}
     static bool submit(void *p,CommandId id,bool done,const uint8_t *data,size_t length,uint8_t &sequence){
         auto &c=*static_cast<FirmwareCommandClient *>(p);
-        return c.commands_.submit(id,false,done,data,length,c.receiver_,c.token_,c.timeout_,sequence);
+        return c.commands_.submit(id,false,done,data,length,done?c.receiver_:CommandReceiver{},c.token_,c.timeout_,sequence);
     }
     static void invalidate(void *p){static_cast<FirmwareCommandClient *>(p)->commands_.invalidate();}
 public:

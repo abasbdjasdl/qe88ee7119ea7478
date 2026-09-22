@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tests/network_irq_fakes/**', 'tests/network_rfk_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', 'tools/import_mac_reference.py', 'tools/import_rfk_reference.py', 'tools/import_channel_reference.py', 'tools/import_power_reference.py', '.github/workflows/network-port.yml']
+    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tests/network_irq_fakes/**', 'tests/network_rfk_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', 'tools/import_mac_reference.py', 'tools/import_rfk_reference.py', 'tools/import_channel_reference.py', 'tools/import_power_reference.py', 'tools/import_device_power_reference.py', 'tools/import_station_tables_reference.py', '.github/workflows/network-port.yml']
 permissions:
   contents: read
 jobs:
@@ -38,6 +38,12 @@ jobs:
           git diff --exit-code -- src/network/Rtw8852bMacConstants.hpp src/network/Rtw8852bMacFunctions.inc src/network/mac-reference-provenance.json
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_mac_init_test.cpp -o build/network_mac_init_test
           ./build/network_mac_init_test | tee build/network-stack/mac-init-tests.txt
+          python3 tools/import_device_power_reference.py build-rtw89
+          git diff --exit-code -- src/network/Rtw8852bDevicePowerConstants.hpp src/network/Rtw8852bDevicePowerFunctions.inc src/network/device-power-reference-provenance.json
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_device_power_test.cpp -o build/network_device_power_test
+          ./build/network_device_power_test | tee build/network-stack/device-power-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_device_power_native_test.cpp -o build/network_device_power_native_test
+          ./build/network_device_power_native_test | tee build/network-stack/device-power-native-tests.txt
           python3 tools/import_rfk_reference.py build-rtw89
           git diff --exit-code -- src/network/Rtw8852bRfkConstants.hpp src/network/Rtw8852bRfkFunctions.inc src/network/rfk-reference-provenance.json
           python3 tools/import_channel_reference.py build-rtw89
@@ -78,6 +84,14 @@ jobs:
           ./build/network_bt_native_test | tee build/network-stack/bt-native-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_station_controller_test.cpp -o build/network_station_controller_test
           ./build/network_station_controller_test | tee build/network-stack/station-controller-tests.txt
+          python3 tools/import_station_tables_reference.py build-rtw89
+          git diff --exit-code -- src/network/Rtw8852bStationTableFields.hpp src/network/station-tables-reference-provenance.json
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_station_tables_test.cpp -o build/network_station_tables_test
+          ./build/network_station_tables_test | tee build/network-stack/station-tables-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_bt_initialization_test.cpp -o build/network_bt_initialization_test
+          ./build/network_bt_initialization_test | tee build/network-stack/bt-initialization-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -DBT_INITIALIZATION_NATIVE_TEST -I tests/network_rfk_fakes tests/network_bt_initialization_test.cpp src/network/Rtw8852bRadioTables.cpp -o build/network_bt_initialization_native_test
+          ./build/network_bt_initialization_native_test | tee build/network-stack/bt-initialization-native-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_dma_fakes tests/network_dma_test.cpp -o build/network_dma_test
           ./build/network_dma_test | tee build/network-stack/dma-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_rx_dma_test.cpp -o build/network_rx_dma_test
@@ -100,7 +114,7 @@ jobs:
           set -o pipefail
           python3 tools/build_network_stack.py build-itlwm 2>&1 | tee build/network-stack/build.log
           tar -czf build/network-stack/itlwm-stack-source.tar.gz -C build-itlwm itl80211 include itlwm/PrivateSPI.pch LICENSE
-          tar -czf build/network-stack/port-source.tar.gz src/network tools/build_network_stack.py tools/check_network_reference.py tools/import_network_reference.py tools/import_radio_reference.py tools/import_mac_reference.py tools/import_rfk_reference.py tools/import_channel_reference.py tools/import_power_reference.py tests/network_* LICENSE
+          tar -czf build/network-stack/port-source.tar.gz src/network tools/build_network_stack.py tools/check_network_reference.py tools/import_network_reference.py tools/import_radio_reference.py tools/import_mac_reference.py tools/import_rfk_reference.py tools/import_channel_reference.py tools/import_power_reference.py tools/import_device_power_reference.py tools/import_station_tables_reference.py tests/network_* LICENSE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

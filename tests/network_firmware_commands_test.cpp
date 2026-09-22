@@ -105,8 +105,42 @@ int main(){
         assert(bus.submit(role,false,true,nullptr,0,{},0,100,seq));Ack ack(role,seq);assert(bus.accept(ack.event,1)==n::CommandEvent::completed);
         assert(bus.submit({2,8,0},false,false,nullptr,0,{},0,100,seq)&&seq==1&&bus.record(seq).state==n::CommandState::complete);
         t.time+=1000;assert(bus.service());}
+    {Transport t;Bus bus(t,1);Owner o;o.bus=&bus;
+        n::FirmwareCommandClient<Transport> client(bus,o.receiver(),23,100);auto link=client.link();
+        for(unsigned i=0;i<5;++i){uint8_t sequence=77;
+            // No ACK + receiver is invalid even at sequences 0/4, where the
+            // wire encoder would add an incidental periodic Receive ACK.
+            assert(!bus.submit(policy,false,false,nullptr,0,o.receiver(),99,100,sequence));
+            assert(!sequence&&bus.allocated()==i&&t.calls==i&&!bus.faulted());
+            t.time+=200;assert(bus.service()); // rejected call left no timed reservation
+            const bool done=i==2||i==3;
+            assert(link.submit(link.owner,policy,done,nullptr,0,sequence)&&sequence==i);
+            assert(bus.record(sequence).receiver.owner==(done?&o:nullptr));
+            Ack completed(policy,sequence),received(policy,sequence,false);
+            if(done){
+                assert(bus.accept(received.event,1)==n::CommandEvent::unrelated);
+                assert(bus.accept(completed.event,1)==n::CommandEvent::completed);
+                assert(o.callbacks==i-1&&o.token==23&&o.ack.done);
+            }else{
+                const auto callbacks=o.callbacks;
+                assert(bus.accept(completed.event,1)==n::CommandEvent::unrelated);
+                if(i%4==0){
+                    assert(bus.record(sequence).state==n::CommandState::pending);
+                    assert(bus.accept(received.event,1)==n::CommandEvent::completed);
+                }else assert(bus.accept(received.event,1)==n::CommandEvent::unrelated);
+                assert(o.callbacks==callbacks); // transport RACK never reaches owner
+            }
+            assert(bus.record(sequence).state==n::CommandState::complete);
+        }
+        t.time+=1000;assert(bus.service()&&bus.allocated()==5&&t.calls==5&&o.callbacks==2);}
+    {Transport t;Bus bus(t,1);Owner o;n::FirmwareCommandClient<Transport> client(bus,o.receiver(),1,100);
+        auto link=client.link();uint8_t sequence;
+        assert(link.submit(link.owner,policy,false,nullptr,0,sequence)&&sequence==0);
+        t.time+=100;assert(!link.available(link.owner)&&bus.error()==n::CommandError::timeout&&!o.callbacks);
+        // Unanswered periodic RACK remains a real transport timeout.
+    }
     {Transport t;Bus bus(t,1);t.owner=&bus;t.during=[](void *p){auto &b=*static_cast<Bus *>(p);Ack ack(role,0);
             assert(b.accept(ack.event,1)==n::CommandEvent::fault);};uint8_t seq;
         assert(!bus.submit(role,false,true,nullptr,0,{},0,100,seq)&&bus.error()==n::CommandError::receiver);}
-    puts("PASS: shared firmware sequences, separate receipt/done ACK routing, callback-chained submissions, stale epochs/duplicates, deadlines, rejection, transport faults and bounds; no DMA ownership inferred from ACK");
+    puts("PASS: shared firmware sequences, separate receipt/done ACK routing, callback-chained submissions, fire-and-forget client sequences 0/1/4, invalid ACK contract without reservation, stale epochs/duplicates, deadlines, rejection, transport faults and bounds; no DMA ownership inferred from ACK");
 }

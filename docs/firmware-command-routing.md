@@ -18,10 +18,16 @@ reset method that makes a possibly stale wire sequence safe again.
 - Producers use the same `reserve`/`publish` or `submit` path, including radio
   commands without requested ACKs. Reserved sequences cannot be published twice.
   Existing role/join encoders can encode their allocated sequence then publish.
-- Each reservation has an owner callback, opaque operation token and absolute
+- Each reservation has an optional owner callback, opaque operation token and absolute
   deadline. It expires even if submission never happens. Payload/header bounds,
   reserved bits and exact length are checked before DMA submission. The native
   queue copies the staging buffer before returning.
+- A no-ACK `FirmwareCommandClient` submission uses an empty callback. `submit`
+  rejects callback requests without an explicit Receive/Done ACK before reserving
+  any sequence; an incidental periodic Receive ACK does not change that API
+  contract. The bus still tracks those periodic Receive ACKs internally for
+  fire-and-forget clients. This prevents a rejected command from leaving a
+  reservation that later times out every client on the shared bus.
 - Receive ACK only records receipt when Done ACK was requested. Done ACK must
   match both command ID and allocated sequence before dispatch to that command's
   owner. Duplicate, unmatched and old RX-epoch ACKs cannot complete a new command.
