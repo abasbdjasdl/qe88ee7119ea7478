@@ -24,6 +24,22 @@ inline bool initWriteAddress(u32 address){
     for(auto ch:channels)if(address==rtw8852b_page_regs.ach_page_ctrl+ch*4)return true;
     for(auto a:macInitRegisters)if(a==address)return true;return false;
 }
+// Pure DMAC IMR registers with an upstream clear-then-set sequence. Do not add
+// mixed IMR/ISR (potential W1C) or set-only registers here. Reserved bits are
+// preserved, while every implemented bit touched by that sequence is verified.
+inline u32 reportImrMask(u32 address){
+    const auto &imr=rtw8852b_imr_info;
+    switch(address){
+    case R_AX_WDRLS_ERR_IMR:return B_AX_WDRLS_IMR_EN_CLR|imr.wdrls_imr_set;
+    case R_AX_WDE_ERR_IMR:return imr.wde_imr_clr|imr.wde_imr_set;
+    case R_AX_PLE_ERR_IMR:return imr.ple_imr_clr|imr.ple_imr_set;
+    case R_AX_HOST_DISPATCHER_ERR_IMR:return imr.host_disp_imr_clr|imr.host_disp_imr_set;
+    case R_AX_CPU_DISPATCHER_ERR_IMR:return imr.cpu_disp_imr_clr|imr.cpu_disp_imr_set;
+    case R_AX_OTHER_DISPATCHER_ERR_IMR:return imr.other_disp_imr_clr|imr.other_disp_imr_set;
+    case R_AX_CPUIO_ERR_IMR:return B_AX_CPUIO_IMR_CLR|B_AX_CPUIO_IMR_SET;
+    default:return 0;
+    }
+}
 // Real reference system/packet/CMAC operations, with failure-latching I/O.
 // D exposes command(), read8/16/32(address, out), write8/16/32(address,value),
 // nowUs(), delayUs(us), cancelled(). Shutdown/power cycling is controller-owned:
@@ -56,7 +72,7 @@ template<class D> class MacInitialization {
         ++d->result.reads;if(!initAddress(a)||!d->io.read16(a,v))fail(d,InitError::read,a);d->lastAddress=a;d->lastValue=v;return v;}
     static u32 rtw89_read32(Context *d,u32 a){u32 v=0;if(!check(d))return 0;
         ++d->result.reads;if(!initAddress(a)||!d->io.read32(a,v)||
-            (v==0xffffffff&&a!=R_AX_DMAC_ERR_IMR&&a!=R_AX_CMAC_ERR_IMR&&a!=R_AX_CK_EN&&a!=R_AX_WDRLS_ERR_IMR)||v==0xdeadbeef){
+            (v==0xffffffff&&a!=R_AX_DMAC_ERR_IMR&&a!=R_AX_CMAC_ERR_IMR&&a!=R_AX_CK_EN&&!reportImrMask(a))||v==0xdeadbeef){
             fail(d,InitError::read,a,0,v);}
         d->lastAddress=a;d->lastValue=v;return v;}
     static void rtw89_write8(Context *d,u32 a,u8 v){if(!check(d))return;++d->result.writes;
@@ -65,12 +81,13 @@ template<class D> class MacInitialization {
         if(!initWriteAddress(a)||!d->io.write16(a,v))fail(d,InitError::write,a,v);}
     static void rtw89_write32(Context *d,u32 a,u32 v){if(!check(d))return;++d->result.writes;
         if(!initWriteAddress(a)||!d->io.write32(a,v)){fail(d,InitError::write,a,v);return;}
-        // Accept an all-ones initial WDRLS mask only with proof that the
+        // Accept an all-ones initial pure IMR only with proof that the
         // upstream clear/set operation changes the implemented enable bits.
         // A disconnected/stuck-all-ones read must not pass the clear step.
-        if(a==R_AX_WDRLS_ERR_IMR){const auto got=rtw89_read32(d,a);
-            if(check(d)&&((got^v)&B_AX_WDRLS_IMR_EN_CLR))
-                fail(d,InitError::precondition,a,v&B_AX_WDRLS_IMR_EN_CLR,got);}
+        const auto mask=reportImrMask(a);
+        if(mask){const auto got=rtw89_read32(d,a);
+            if(check(d)&&((got^v)&mask))
+                fail(d,InitError::precondition,a,v&mask,got);}
     }
     static u32 rtw89_read32_mask(Context *d,u32 a,u32 m){return (rtw89_read32(d,a)&m)>>shift(m);}
     static void rtw89_write32_mask(Context *d,u32 a,u32 m,u32 v){const auto old=rtw89_read32(d,a);rtw89_write32(d,a,u32_replace_bits(old,v,m));}

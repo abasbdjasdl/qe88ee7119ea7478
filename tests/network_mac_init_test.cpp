@@ -78,6 +78,34 @@ int main(){
         assert(!run(f,result)&&result.error==m::InitError::precondition&&result.address==m::R_AX_WDRLS_ERR_IMR);}
     {Device f;f.put(m::R_AX_WDRLS_ERR_IMR,0xdeadbeef,4);
         assert(!run(f,result)&&result.error==m::InitError::read&&result.address==m::R_AX_WDRLS_ERR_IMR);}
+    // Warm-start all-ones masks: clear/set must prove each register writable,
+    // preserve reserved bits, and leave PCI interrupts and DMA disabled.
+    struct ImrCase{unsigned address,clear,set;};
+    const ImrCase imrs[]={
+        {m::R_AX_WDRLS_ERR_IMR,m::B_AX_WDRLS_IMR_EN_CLR,m::B_AX_WDRLS_IMR_SET},
+        {m::R_AX_WDE_ERR_IMR,m::B_AX_WDE_IMR_CLR,m::B_AX_WDE_IMR_SET},
+        {m::R_AX_PLE_ERR_IMR,m::B_AX_PLE_IMR_CLR,m::B_AX_PLE_IMR_SET},
+        {m::R_AX_HOST_DISPATCHER_ERR_IMR,m::B_AX_HOST_DISP_IMR_CLR,m::B_AX_HOST_DISP_IMR_SET},
+        {m::R_AX_CPU_DISPATCHER_ERR_IMR,m::B_AX_CPU_DISP_IMR_CLR,m::B_AX_CPU_DISP_IMR_SET},
+        {m::R_AX_OTHER_DISPATCHER_ERR_IMR,m::B_AX_OTHER_DISP_IMR_CLR,0},
+        {m::R_AX_CPUIO_ERR_IMR,m::B_AX_CPUIO_IMR_CLR,m::B_AX_CPUIO_IMR_SET}};
+    {Device f;for(const auto &imr:imrs)f.put(imr.address,0xffffffff,4);
+        assert(run(f,result));
+        for(const auto &imr:imrs)assert(f.get(imr.address)==((0xffffffffu&~imr.clear)|imr.set));
+        assert(f.get(0x1a0)==0&&f.get(0x10b0)==0&&f.get(0x13b0)==0&&f.cmd==2);}
+    for(const auto &imr:imrs){
+        {Device f;f.put(imr.address,0xffffffff,4);f.ignoreWrite=imr.address;
+            assert(!run(f,result)&&result.error==m::InitError::precondition&&result.address==imr.address&&!result.trxReady);
+            assert(f.get(0x1a0)==0&&f.get(0x10b0)==0&&f.get(0x13b0)==0&&f.cmd==2);}
+        if(imr.set){Device f;f.ignoreWrite=imr.address;
+            assert(!run(f,result)&&result.error==m::InitError::precondition&&result.address==imr.address&&!result.trxReady);}
+        {Device f;f.put(imr.address,0xdeadbeef,4);
+            assert(!run(f,result)&&result.error==m::InitError::read&&result.address==imr.address);}
+    }
+    // Never extend this exception to a set-only or mixed mask/status register.
+    for(auto reg:{m::R_AX_PKTIN_ERR_IMR,m::R_AX_TXPKTCTL_ERR_IMR_ISR,m::R_AX_BBRPT_CHINFO_ERR_IMR_ISR}){
+        assert(!m::reportImrMask(reg));Device f;f.put(reg,0xffffffff,4);
+        assert(!run(f,result)&&result.error==m::InitError::read&&result.address==reg);}
     {Device f;f.cancel=true;assert(!run(f,result)&&!f.operations);}
     {Device f;f.cmd=6;assert(!run(f,result)&&!f.operations);}
     {Device f;m::MacInitialization<Device> init(f);assert(!init.enableSystem()&&!init.initializeDmac()&&!init.initializeCmac()&&!init.finishTrx()&&!f.operations);
