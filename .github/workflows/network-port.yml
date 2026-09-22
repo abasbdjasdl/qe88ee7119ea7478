@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tests/network_irq_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', 'tools/import_mac_reference.py', 'tools/import_rfk_reference.py', '.github/workflows/network-port.yml']
+    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tests/network_irq_fakes/**', 'tests/network_rfk_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', 'tools/import_mac_reference.py', 'tools/import_rfk_reference.py', '.github/workflows/network-port.yml']
 permissions:
   contents: read
 jobs:
@@ -42,6 +42,8 @@ jobs:
           git diff --exit-code -- src/network/Rtw8852bRfkConstants.hpp src/network/Rtw8852bRfkFunctions.inc src/network/rfk-reference-provenance.json
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_rfk_test.cpp -o build/network_rfk_test
           ./build/network_rfk_test | tee build/network-stack/rfk-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_rfk_native_test.cpp src/network/Rtw8852bRadioTables.cpp -o build/network_rfk_native_test
+          ./build/network_rfk_native_test | tee build/network-stack/rfk-native-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_runtime_test.cpp -o build/network_runtime_test
           ./build/network_runtime_test | tee build/network-stack/runtime-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_irq_fakes tests/network_interrupts_test.cpp -o build/network_interrupts_test

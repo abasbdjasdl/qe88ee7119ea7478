@@ -19,7 +19,7 @@ struct CalibrationControl {
 class MacRfkIo {
     IOPCIDevice *device_{};IOMemoryMap *mapping_{};
     network::MacRadioIo radioIo_;network::RadioAccess<network::MacRadioIo> radio_;
-    CalibrationControl control_;bool active_{},oneshotActive_{};Kind kind_{};u8 oneshotMap_{};
+    CalibrationControl control_;bool active_{},oneshotActive_{},txArmed_{};Kind kind_{};u8 oneshotMap_{};
     bool macRead(uint32_t,uint32_t &);bool accessible()const;
 public:
     MacRfkIo(IOPCIDevice *,IOMemoryMap *,CalibrationControl);
@@ -29,6 +29,7 @@ public:
     uint64_t nowUs();bool delayUs(unsigned);
     bool begin(Kind);bool end(Kind,bool);bool drain();
     bool oneshot(Kind,u8 phyMap,bool start);
+    bool armCalibrationTx();bool stopCalibrationTx();bool calibrationTxArmed()const{return txArmed_;}
     bool readRf(u8,u32,u32,u32 &);bool writeRf(u8,u32,u32,u32);
     bool readBb(u32,u32 &);bool writeBb(u32,u32);bool writeMac(u32,u32);
 };

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 #pragma once
 #include "Rtw8852bRfkConstants.hpp"
+#include "EfuseCalibration.hpp"
 namespace rtl8852be { namespace rfk {
 enum class Error {none,precondition,io,timeout,clock,cancelled,calibration};
-enum class Stage {idle,rck,dack,rxDc,complete,iqk};
-enum class Kind {rck,dack,rxDc,iqk};
+enum class Stage {idle,rck,dack,rxDc,complete,iqk,tssi};
+enum class Kind {rck,dack,rxDc,iqk,tssi};
 enum class Space {none,mac,baseband,radio};
 // Center channel and hardware bandwidth encoding (20/40/80 = 0/1/2).
 // This checks chip geometry only; the controller must enforce regulatory rules.
@@ -23,25 +24,29 @@ inline bool validChannel(Channel c){
 struct Result {
     Error error{Error::none};Stage stage{Stage::idle};Space space{Space::none};
     u32 address{},mask{},value{};u8 path{};unsigned operations{},polls{},messages{};
-    bool rckReady{},dackReady{},rxDcReady{},iqReady{},requiresReset{},ownershipReleased{};
+    bool rckReady{},dackReady{},rxDcReady{},iqReady{},tssiReady{},requiresReset{},ownershipReleased{};
     Channel iqChannel{};
 };
 // Backend owns validated I/O and the calibration lease. begin(kind) must quiesce
 // DMA/TX and coordinate firmware/BT; end(kind,success) must keep TX stopped on
 // failure. Neither is optional. The native adapter rejects absent callbacks.
-// Performs initial RCK/DACK/RXDCK and channel IQK; TSSI/DPK still remain.
+// The controller must allocate this state off the kernel stack: TSSI retains
+// per-channel measured coefficients. DPK and controller integration remain.
 template<class Backend> class Initialization {
     struct rtw89_dpk_info {u8 dpk_gs[2]{};};
-    struct rtw89_chan {u8 band_type{},band_width{},channel{};};
+    struct rtw89_chan {rtw89_band band_type{};u8 band_width{},channel{};rtw89_subband subband_type{};};
+    struct rtw89_hal {u8 cv{},antenna_rx{};};
     struct Context {
         Backend &io;Result &result;rtw89_dack_info dack{};rtw89_dpk_info dpk{};
         rtw89_iqk_info iqk{};rtw89_chan channel{};bool restoreFailed[2]{},oneshotActive{};
-        bool dbcc_en=false,is_tssi_mode[2]{};struct {u8 cv;} hal;
+        rtw89_tssi_info tssi{};rtw89_phy_efuse_gain efuse_gain{};bool calibrationConfigured{};
+        bool dbcc_en=false,is_tssi_mode[2]{};rtw89_hal hal;
         uint64_t first{},previous{};unsigned operationBase{};bool started{};Space lastSpace{Space::none};
         u32 lastAddress{},lastMask{},lastValue{};u8 lastPath{};
-        Context(Backend &i,Result &r,u8 cut):io(i),result(r),hal{cut}{}
+        Context(Backend &i,Result &r,u8 cut):io(i),result(r),hal{cut,0}{}
     };
     static constexpr unsigned RTW89_DBG_RFK=0; // local diagnostic category
+    static constexpr unsigned RTW89_DBG_TSSI=1;
     static bool fail(Context *d,Error e){
         auto &r=d->result;if(r.error==Error::none){r.error=e;r.space=d->lastSpace;r.address=d->lastAddress;
             r.mask=d->lastMask;r.value=d->lastValue;r.path=d->lastPath;r.requiresReset=r.operations!=0;}
@@ -79,6 +84,13 @@ template<class Backend> class Initialization {
         if(!op(d,Space::baseband,a,m,v))return;
         if(!d->io.writeBb(a,(old&~m)|((v<<shift(m))&m)))fail(d,Error::io);
     }
+    static void rtw89_phy_write32(Context *d,u32 a,u32 v){rtw89_phy_write32_mask(d,a,0xffffffff,v);}
+    static void rtw89_phy_write32_set(Context *d,u32 a,u32 m){rtw89_phy_write32_mask(d,a,m,m>>shift(m));}
+    static void rtw89_phy_write32_clr(Context *d,u32 a,u32 m){rtw89_phy_write32_mask(d,a,m,0);}
+    static void rtw89_phy_write32_idx(Context *d,u32 a,u32 m,u32 v,rtw89_phy_idx p){
+        if(p!=RTW89_PHY_0){fail(d,Error::precondition);return;}rtw89_phy_write32_mask(d,a,m,v);}
+    static u32 rtw89_phy_read32_idx(Context *d,u32 a,u32 m,rtw89_phy_idx p){
+        if(p!=RTW89_PHY_0){fail(d,Error::precondition);return 0;}return rtw89_phy_read32_mask(d,a,m);}
     static void rtw89_write32(Context *d,u32 a,u32 v){
         if(!op(d,Space::mac,a,0xffffffff,v))return;
         if(!d->io.writeMac(a,v))fail(d,Error::io);
@@ -97,12 +109,13 @@ template<class Backend> class Initialization {
     static void rtw89_btc_ntfy_wl_rfk(Context *d,u8 phyMap,btc_wl_rfk_type type,btc_wl_rfk_state state){
         if(type!=BTC_WRFKT_IQK||(state!=BTC_WRFK_ONESHOT_START&&state!=BTC_WRFK_ONESHOT_STOP)){
             fail(d,Error::precondition);return;}
+        const auto kind=d->result.stage==Stage::tssi?Kind::tssi:Kind::iqk;
         if(state==BTC_WRFK_ONESHOT_START){
             if(!check(d))return;if(d->oneshotActive){fail(d,Error::precondition);return;}
-            if(!d->io.oneshot(Kind::iqk,phyMap,true)){fail(d,Error::io);return;}d->oneshotActive=true;
+            if(!d->io.oneshot(kind,phyMap,true)){fail(d,Error::io);return;}d->oneshotActive=true;
         }else if(d->oneshotActive){
             // Cleanup notification remains required after a failed register op.
-            if(!d->io.oneshot(Kind::iqk,phyMap,false)){fail(d,Error::io);return;}d->oneshotActive=false;
+            if(!d->io.oneshot(kind,phyMap,false)){fail(d,Error::io);return;}d->oneshotActive=false;
         }
     }
     static void rtw89_rfk_parser(Context *d,const rtw89_rfk_tbl *table){
@@ -157,6 +170,21 @@ public:
     Initialization(const Initialization &)=delete;Initialization &operator=(const Initialization &)=delete;
     const rtw89_dack_info &dack()const{return context_.dack;}
     const rtw89_iqk_info &iqk()const{return context_.iqk;}
+    const rtw89_tssi_info &tssi()const{return context_.tssi;}
+    // Bases are the signed BB gain values captured before channel gain writes.
+    // Inputs must come from this device's decoded eFuse/PHY map, not defaults.
+    bool configureCalibration(const network::BoardCalibration &board,const network::PhyCalibration &phy,
+                              s8 offsetBase,s8 rssiBase,u8 antennaRx){
+        if(result.stage!=Stage::idle||context_.calibrationConfigured||!board.identityValid||antennaRx>3)return false;
+        auto &g=context_.efuse_gain;g.offset_valid=board.gainOffsetValid;g.comp_valid=phy.gainCompValid;
+        g.offset_base[0]=offsetBase;g.rssi_base[0]=rssiBase;context_.hal.antenna_rx=antennaRx;
+        for(unsigned p=0;p<2;++p){context_.tssi.thermal[p]=board.thermal[p];
+            for(unsigned i=0;i<6;++i)context_.tssi.tssi_cck[p][i]=board.tssiCck[p][i];
+            for(unsigned i=0;i<19;++i)context_.tssi.tssi_mcs[p][i]=board.tssiMcs[p][i];
+            for(unsigned i=0;i<8;++i)context_.tssi.tssi_trim[p][i]=phy.tssiTrim[p][i];
+            for(unsigned i=0;i<5;++i){g.offset[p][i]=board.gainOffset[p][i];g.comp[p][i]=phy.gainComp[p][i];}}
+        context_.calibrationConfigured=true;return true;
+    }
     u8 dpdBackoff()const{return context_.dpk.dpk_gs[0];}
     bool initialize(){
         if(result.stage!=Stage::idle||!begin(Kind::rck,Stage::rck))return false;
@@ -175,7 +203,9 @@ public:
     }
     bool calibrateIq(Channel channel){
         if(result.stage!=Stage::complete||result.error!=Error::none||!result.rxDcReady||!validChannel(channel))return false;
-        result.iqReady=false;context_.channel={channel.band,channel.width,channel.center};
+        result.iqReady=false;result.tssiReady=false;
+        context_.channel={static_cast<rtw89_band>(channel.band),channel.width,channel.center,
+            channel.band==0?RTW89_CH_2G:channel.center<=64?RTW89_CH_5G_BAND_1:channel.center<=144?RTW89_CH_5G_BAND_3:RTW89_CH_5G_BAND_4};
         context_.restoreFailed[0]=context_.restoreFailed[1]=false;context_.started=false;
         context_.operationBase=result.operations;
         if(!begin(Kind::iqk,Stage::iqk))return false;
@@ -186,6 +216,32 @@ public:
         }
         if(!end(Kind::iqk))return false;
         result.iqChannel=channel;result.iqReady=true;result.stage=Stage::complete;return true;
+    }
+    bool calibrateTssi(){
+        if(result.stage!=Stage::complete||result.error!=Error::none||!result.iqReady||!context_.calibrationConfigured)return false;
+        result.tssiReady=false;context_.started=false;context_.operationBase=result.operations;
+        if(!begin(Kind::tssi,Stage::tssi))return false;
+        auto *d=&context_;const auto phy=RTW89_PHY_0;
+        const auto phyMap=rtw89_btc_phymap(d,phy,RF_AB);
+        rtw89_btc_ntfy_wl_rfk(d,phyMap,BTC_WRFKT_IQK,BTC_WRFK_ONESHOT_START);
+        _tssi_disable(d,phy);
+        for(u8 p=0;p<2&&check(d);++p){
+            _tssi_rf_setting(d,phy,p);_tssi_set_sys(d,phy,p);_tssi_ini_txpwr_ctrl_bb(d,phy,p);
+            _tssi_ini_txpwr_ctrl_bb_he_tb(d,phy,p);_tssi_set_dck(d,phy,p);_tssi_set_tmeter_tbl(d,phy,p);
+            _tssi_set_dac_gain_tbl(d,phy,p);_tssi_slope_cal_org(d,phy,p);_tssi_alignment_default(d,phy,p,true);
+            _tssi_set_tssi_slope(d,phy,p);_wait_rx_mode(d,RF_AB);_tssi_alimentk(d,phy,p);
+        }
+        // Scheduler TX stays paused for the entire parent lease. Cleanup must
+        // run before coexistence STOP even when normal I/O has been suppressed.
+        const bool txStopped=d->io.stopCalibrationTx();if(!txStopped)fail(d,Error::io);
+        if(check(d)){_tssi_enable(d,phy);_tssi_set_efuse_to_de(d,phy);}
+        const auto idx=_tssi_ch_to_idx(d,d->channel.channel);
+        if(check(d)&&(!d->tssi.check_backup_aligmk[0][idx]||!d->tssi.check_backup_aligmk[1][idx]))fail(d,Error::calibration);
+        // A failed PMAC stop cannot release coexistence ownership. Native end
+        // retries stop first and retains both leases if that also fails.
+        if(txStopped)rtw89_btc_ntfy_wl_rfk(d,phyMap,BTC_WRFKT_IQK,BTC_WRFK_ONESHOT_STOP);
+        if(!end(Kind::tssi))return false;
+        result.tssiReady=true;result.stage=Stage::complete;return true;
     }
 };
 } }

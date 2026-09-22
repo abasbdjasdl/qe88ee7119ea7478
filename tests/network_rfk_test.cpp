@@ -12,6 +12,10 @@ struct Backend {
     uint64_t clock=100;std::vector<bool> endSuccess;
     unsigned oneshots{},failOneshot{},failCommand{},failCommandIndex{};bool shotActive{};
     std::vector<bool> shotStarts;std::vector<unsigned> shotMaps,commands;
+    unsigned arms{},stops{},failArm{},failStop{},noCwPath=2;
+    bool txArmed{},stopAlwaysFails{};r::Kind kind{};
+    unsigned cwRequests[2]{},cwWait[2]{},pmacStarts{},pmacStops{};
+    int alignmentDefault[2][3]{};
     Backend(){
         bb[r::R_DRCK_RS]=r::B_DRCK_RS_DONE|(9u<<15);
         bb[r::R_ADDCKR0]=(0x123u<<10)|0x155;bb[r::R_ADDCKR1]=(0x234u<<10)|0x2ab;
@@ -37,6 +41,7 @@ struct Backend {
     }
     bool readBb(unsigned a,unsigned &v){
         if(!step())return false;v=bb[a];
+        for(unsigned p=0;p<2;++p)if(a==r::_tssi_cw_rpt_addr[p]&&cwWait[p]){--cwWait[p];v&=~r::B_TSSI_CWRPT_RDY;}
         const unsigned results[]={r::R_DACK_S0P2,r::R_DACK_S0P3,r::R_DACK10S,r::R_DACK11S};
         const unsigned selects[]={r::R_DCOF0,r::R_DCOF8,r::R_DACK10,r::R_DACK11};
         for(unsigned i=0;i<4;++i)if(a==results[i])v|=(0x20u+i*0x10+((bb[selects[i]]>>1)&15))<<24;
@@ -46,19 +51,36 @@ struct Backend {
         if(!step()){failedWrite=true;return false;}bb[a]=v;
         if(a==r::R_NCTL_CFG){commands.push_back(v);bb[0xbff8]=0x55;
             bb[r::R_NCTL_RPT]=((failCommand&&v==failCommand)||commands.size()==failCommandIndex)?r::B_NCTL_RPT_FLG:0;}
+        if(a==r::R_PMAC_TX_CTRL&&(v&r::B_PMAC_TXEN_DIS)){
+            assert(txArmed);++pmacStarts;const unsigned path=r::fieldGet(r::B_TXPATH_SEL_MSK,bb[r::R_TXPATH_SEL])==2?1:0;
+            const bool second=cwRequests[path]++%2;
+            if(!second)for(unsigned i=0;i<3;++i)alignmentDefault[path][i]=r::sign_extend32(
+                r::fieldGet(r::_tssi_cw_default_mask[i+1],bb[r::_tssi_cw_default_addr[path][i+1]]),8);
+            const unsigned cw=second?140:200;
+            cwWait[path]=2;
+            bb[r::_tssi_cw_rpt_addr[path]]=r::fieldPrep(r::B_TSSI_CWRPT,cw)|(path==noCwPath?0:r::B_TSSI_CWRPT_RDY);
+            bb[r::R_TX_COUNTER]+=100;
+        }
         return true;
     }
     bool writeMac(unsigned a,unsigned v){if(!step()){failedWrite=true;return false;}mac[a]=v;return true;}
     bool cancelled(){return cancel;}
     uint64_t nowUs(){return backwards&&delayCalls?--clock:clock;}
     bool delayUs(unsigned us){assert(active);++delayCalls;if(!frozen)clock+=us;return delayCalls!=failDelay;}
-    bool begin(r::Kind){assert(!active);++begins;if(begins==failBegin)return false;active=true;return true;}
+    bool begin(r::Kind k){assert(!active);++begins;if(begins==failBegin)return false;active=true;kind=k;return true;}
     bool end(r::Kind,bool success){assert(active);++ends;endSuccess.push_back(success);if(ends==failEnd)return false;
+        if(txArmed&&!stopCalibrationTx())return false;
         shotActive=false;active=false;return true;}
     bool oneshot(r::Kind k,uint8_t map,bool start){
-        assert(active&&k==r::Kind::iqk);++oneshots;shotStarts.push_back(start);shotMaps.push_back(map);
+        assert(active&&k==kind&&(k==r::Kind::iqk||k==r::Kind::tssi));
+        if(!start)assert(!txArmed);++oneshots;shotStarts.push_back(start);shotMaps.push_back(map);
         assert(start!=shotActive);if(oneshots==failOneshot)return false;shotActive=start;return true;
     }
+    bool armCalibrationTx(){assert(active&&kind==r::Kind::tssi&&shotActive&&!txArmed);
+        if(++arms==failArm)return false;txArmed=true;return true;}
+    bool stopCalibrationTx(){if(!txArmed)return true;++stops;if(stops==failStop||stopAlwaysFails)return false;
+        assert(active&&kind==r::Kind::tssi);bb[r::R_PMAC_TX_PRD]&=~(r::B_PMAC_CTX_EN|r::B_PMAC_PTX_EN);
+        txArmed=false;++pmacStops;return true;}
     bool drain(){assert(active);return ++drains!=failDrain;}
 };
 bool run(Backend &b,r::Result &result){r::Initialization<Backend> cal(b,1);bool ok=cal.initialize();result=cal.result;return ok;}
@@ -130,6 +152,76 @@ void testIq(){
     }
     printf("PASS: dual-path IQK 2G/5G 20/40/80 model, %u I/O failures, %u delays, all command failures, restored registers and repeated channels (max %u ops); not hardware IQK\n",count,delays,maxOps);
 }
+void configure(r::Initialization<Backend> &c){
+    rtl8852be::network::BoardCalibration board;rtl8852be::network::PhyCalibration phy;
+    board.identityValid=true;board.gainOffsetValid=true;phy.gainCompValid=true;
+    for(unsigned p=0;p<2;++p){board.thermal[p]=30+p;
+        for(unsigned i=0;i<6;++i)board.tssiCck[p][i]=int(i)-3+int(p);
+        for(unsigned i=0;i<19;++i)board.tssiMcs[p][i]=int(i)-9+int(p);
+        for(unsigned i=0;i<8;++i)phy.tssiTrim[p][i]=int(i)-4+int(p);
+        for(unsigned i=0;i<5;++i){board.gainOffset[p][i]=int(i)-3;phy.gainComp[p][i]=int(p)-2;}}
+    assert(c.configureCalibration(board,phy,-17,23,2));
+    assert(!c.configureCalibration(board,phy,-17,23,2));
+}
+void prepareTssi(Backend &b,r::Initialization<Backend> &c,r::Channel channel={1,2,42}){
+    configure(c);assert(c.initialize());assert(c.calibrateIq(channel));
+    b.bb[r::R_TXPATH_SEL]=r::fieldPrep(r::B_TXPATH_SEL_MSK,3);
+    b.bb[r::R_CHBW_MOD_V1]=r::fieldPrep(r::B_ANT_RX_SEG0,3);
+    b.bb[r::R_TXPWR]=r::fieldPrep(r::B_TXPWR_MSK,unsigned(-12));
+}
+void testTssi(){
+    Backend golden;r::Initialization<Backend> g(golden,1);prepareTssi(golden,g);
+    const auto base=golden.operations,delayBase=golden.delayCalls;
+    assert(g.calibrateTssi());const auto count=golden.operations-base,delays=golden.delayCalls-delayBase;
+    assert(g.result.tssiReady&&!golden.active&&!golden.txArmed&&golden.arms==4&&golden.pmacStarts==4&&golden.pmacStops==4);
+    assert(r::fieldGet(r::B_TXPATH_SEL_MSK,golden.bb[r::R_TXPATH_SEL])==3);
+    assert(r::fieldGet(r::B_ANT_RX_SEG0,golden.bb[r::R_CHBW_MOD_V1])==3);
+    assert(r::sign_extend32(r::fieldGet(r::B_TXPWR_MSK,golden.bb[r::R_TXPWR]),8)==-12);
+    for(unsigned p=0;p<2;++p){assert(g.tssi().alignment_done[p][r::TSSI_ALIMK_5GL]);
+        assert(g.tssi().check_backup_aligmk[p][17]); // ch42 -> (42-36)/2 +14
+        const int expected=(int(5)-9+int(p)+int(6)-9+int(p))/2+(2-4+int(p));
+        assert(r::sign_extend32(r::fieldGet(r::_TSSI_DE_MASK,golden.bb[r::_tssi_de_mcs_80m[p]]),9)==expected);
+        assert(r::fieldGet(p?r::B_P1_TSSI_EN:r::B_P0_TSSI_EN,golden.bb[p?r::R_P1_TSSI_AVG:r::R_P0_TSSI_AVG])==1);
+        const unsigned masks[]={r::B_P1_TSSI_ALIM11,r::B_P1_TSSI_ALIM12,r::B_P1_TSSI_ALIM13};
+        for(unsigned i=0;i<3;++i)assert(r::sign_extend32(r::fieldGet(masks[i],golden.bb[r::R_P0_TSSI_ALIM1+(p<<13)]),8)==golden.alignmentDefault[p][i]+4);
+    }
+    assert(g.calibrateTssi()&&golden.arms==4); // use measured same-channel alignment
+    for(unsigned i=1;i<=count;++i){Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);b.failAt=b.operations+i;
+        assert(!c.calibrateTssi()&&c.result.error==r::Error::io&&b.operations==b.failAt);
+        assert(!c.result.tssiReady&&!b.active&&!b.txArmed&&!b.shotActive&&!b.endSuccess.back());}
+    for(unsigned i=1;i<=delays;++i){Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);b.failDelay=b.delayCalls+i;
+        assert(!c.calibrateTssi()&&c.result.error==r::Error::io&&!b.active&&!b.txArmed);}
+    for(unsigned i=1;i<=4;++i){Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);b.failArm=i;
+        assert(!c.calibrateTssi()&&c.result.error==r::Error::io&&!b.active&&!b.txArmed);
+        Backend s;r::Initialization<Backend> sc(s,1);prepareTssi(s,sc);s.failStop=i;
+        assert(!sc.calibrateTssi()&&sc.result.error==r::Error::io&&!s.active&&!s.txArmed);}
+    {Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);b.stopAlwaysFails=true;
+        assert(!c.calibrateTssi()&&c.result.requiresReset&&b.active&&b.txArmed&&b.shotActive&&!c.result.ownershipReleased);}
+    for(unsigned p=0;p<2;++p)for(bool frozen:{false,true}){Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);
+        b.noCwPath=p;b.frozen=frozen;assert(!c.calibrateTssi()&&c.result.error==r::Error::timeout&&!b.txArmed&&!b.active);}
+    for(unsigned i:{1u,count/2,count}){Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);b.cancelAt=b.operations+i;
+        assert(!c.calibrateTssi()&&c.result.error==r::Error::cancelled&&!b.txArmed&&!b.active);}
+    for(unsigned i=1;i<=2;++i){Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);b.failOneshot=b.oneshots+i;
+        assert(!c.calibrateTssi()&&c.result.error==r::Error::io&&!b.txArmed&&!b.active);}
+    {Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);b.failBegin=b.begins+1;
+        assert(!c.calibrateTssi()&&c.result.requiresReset&&!b.active);}
+    {Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);b.failEnd=b.ends+1;
+        assert(!c.calibrateTssi()&&c.result.requiresReset&&b.active&&!c.result.ownershipReleased);}
+    {Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);b.failDrain=b.drains+1;
+        assert(!c.calibrateTssi()&&c.result.error==r::Error::io&&!b.active&&!b.endSuccess.back());}
+    {Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);b.backwards=true;
+        assert(!c.calibrateTssi()&&c.result.error==r::Error::clock&&!b.active&&!b.txArmed);}
+    {Backend b;r::Initialization<Backend> c(b,1);assert(!c.calibrateTssi()&&b.operations==0);
+        assert(c.initialize()&&c.calibrateIq({1,2,42}));const auto n=b.operations;assert(!c.calibrateTssi()&&b.operations==n);}
+    // Cover all thermal subbands and missing thermal calibration.
+    for(auto ch:{r::Channel{0,0,1},r::Channel{0,1,11},r::Channel{1,0,100},r::Channel{1,1,151},r::Channel{1,2,171}}){
+        Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c,ch);assert(c.calibrateTssi()&&!b.txArmed);}
+    {Backend b;r::Initialization<Backend> c(b,1);rtl8852be::network::BoardCalibration board;
+        rtl8852be::network::PhyCalibration phy;board.identityValid=true;board.thermal[0]=board.thermal[1]=0xff;
+        assert(c.configureCalibration(board,phy,0,0,0));assert(c.initialize()&&c.calibrateIq({0,0,6})&&c.calibrateTssi());
+        for(unsigned i=0;i<64;i+=4)assert(b.bb[r::R_P0_TSSI_BASE+i]==0&&b.bb[r::R_TSSI_THOF+i]==0);}
+    printf("PASS: TSSI dual-path measured alignment model, thermal/eFuse/gain, %u I/O and %u delay failures, PMAC cleanup after faults/cancel/timeout and lease retention; not measured RF power\n",count,delays);
+}
 int main(){
     Backend b;r::Initialization<Backend> cal(b,1);assert(cal.initialize());const auto count=b.operations;
     assert(cal.result.stage==r::Stage::complete&&cal.result.rckReady&&cal.result.dackReady&&cal.result.rxDcReady);
@@ -172,4 +264,5 @@ int main(){
         assert((f.bb[0x81bc]&0x7fffff)==0x7f7f7f&&(f.bb[0x82bc]&0x7fffff)==0x7f7f7f);}
     printf("PASS: initial RTL8852B RCK/DACK/RXDCK model, %u I/O failures, calibration tables/state, bounded timeouts and mandatory leases; not hardware RFK\n",count);
     testIq();
+    testTssi();
 }

@@ -220,8 +220,8 @@ CI checks regeneration and compiles the native adapter with the protocol stack.
 These are model/compile checks, with no physical MAC/RFK or network evidence.
 
 `rfk::Initialization` imports the original dependency closure for initial DPD
-backoff, both-path RCK, DRCK/ADDCK/DACK, RXDCK and channel IQK: 50 functions,
-13 RFK command tables, 18 IQK arrays and 242 referenced constants. It retains per-path ADC/DAC calibration
+backoff, both-path RCK, DRCK/ADDCK/DACK, RXDCK, channel IQK and TSSI: 91 functions,
+48 RFK command tables, 43 arrays and 410 referenced constants. It retains per-path ADC/DAC calibration
 values, MSBK arrays and original success-path restoration. Unlike the upstream
 warning-only timeout paths, a timeout latches an error, suppresses subsequent
 normal I/O and cannot expose `dack_done` as valid. Partially programmed hardware
@@ -246,7 +246,7 @@ cleanup; the borrowed owner cannot be destroyed while its lease remains active.
 Host tests verify calibration result arrays, RF state and DPD backoff values,
 all 1,070 I/O failures, every delay failure, all begin/end/drain failures,
 RCK/DRCK/ADDCK/DACK timeouts, cancellation and clock anomalies. These are register
-models, not real calibration measurements. Channel TSSI/DPK, RF tracking,
+models, not real calibration measurements. Channel DPK, RF tracking,
 firmware/BT control callbacks and controller lifecycle remain unimplemented;
 initial calibration success is not full RFK or network readiness.
 
@@ -275,6 +275,44 @@ parent lease failures, cancellation, bounded timeout/clock anomalies, invalid
 channels and 512 successive calibrations. Native code also compiles for the
 x86_64 macOS kernel. These tests supply synthetic register responses, not
 measured RF calibration or over-the-air results.
+
+`calibrateTssi()` implements both-path RF/system/BB power setup, HE-TB setup,
+DCK, thermal compensation, DAC/slope setup, measured two-point alignment,
+tracking enable and per-channel eFuse/trim DE values. It requires successful IQK
+for the currently programmed channel and immutable device calibration supplied
+before initialization. `configureCalibration()` consumes decoded board/PHY
+calibration plus signed BB offset/RSSI bases captured before channel gain writes,
+and the selected RX antenna. The controller must validate the source data and
+channel/power permissions; it must not invent these inputs. The large per-channel
+coefficient state belongs on the heap, not the kernel stack.
+
+The TSSI dependency closure includes actual RTL8852B PMAC PLCP programming,
+TX/RX path selection, gain-offset application, BT-sharing register settings,
+power/packet programming and register restoration from rtw8852b.c. Thermal
+swing tables and the tracking configuration come from the pinned chip tables.
+Both CW reports drive alignment offsets and cache entries. Missing reports are
+errors; a default table is not treated as a measured alignment. Cached alignment
+is reused only for that channel and the same immutable device data. C++ signed
+gain shifts and thermal byte packing use defined arithmetic with matching bits.
+
+Scheduler TX stays paused for the whole TSSI lease, including both paths. Before
+PMAC programming, `armCalibrationTx()` records potential emission. The native
+`stopCalibrationTx()` independently clears both packet/continuous emission bits
+with BAR2 read-modify-write and readback; this restricted cleanup works even
+after cancellation or a calibration I/O failure. Unknown/failed stop retains
+ownership and prevents coexistence STOP. Parent cleanup retries emission stop
+before releasing either lease. Other failed register restoration still requires
+a power cycle. This is a component contract, not an implemented controller/BT
+policy or a complete network kext.
+
+TSSI tests exercise 2,016 normal I/O failure positions, eight successful-path
+delay failures, both paths/all thermal subbands, signed eFuse/gain values,
+two-point output arithmetic, cached reuse, missing thermal data, report timeouts,
+clock/cancel/parent/oneshot failures, all four arm/stop failures and persistent
+stop failure. A separate test compiles the actual MacRfkIo/MacRadioIo sources
+against explicitly modeled IOKit/MMIO to verify cancellation cleanup, invalid
+reads/readback, ignored stop writes, absent PCI memory access, and retained
+leases. Both suites are host evidence, not real RF or radio power measurements.
 
 `firmware::Mailbox` now implements the AX register-message channel used for
 firmware-acknowledged scheduler pause/resume. It writes four H2C words, increments
