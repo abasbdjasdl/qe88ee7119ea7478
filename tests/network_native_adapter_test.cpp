@@ -33,6 +33,11 @@ extern "C" int R16NativeAdapterTest(){
     a.ad_auth_upper=APPLE80211_AUTHTYPE_WPA2;
     CHECK(nativewifi::associate(backend,&a)==kIOReturnUnsupported&&backend.submitted==1);
     CHECK(nativewifi::disassociate(backend)==kIOReturnSuccess&&backend.disconnected==1);
+    a.ad_auth_upper=APPLE80211_AUTHTYPE_WPA_PSK;
+    CHECK(nativewifi::decodeAssociation(&a,out)==kIOReturnSuccess&&out.security==selection::Security::wpaPsk&&
+        out.pairwise==selection::Cipher::tkip&&out.group==selection::Cipher::tkip);
+    a.ad_auth_upper=APPLE80211_AUTHTYPE_WPA3_SAE;
+    CHECK(nativewifi::decodeAssociation(&a,out)==kIOReturnUnsupported&&out.pmkLength==0);
     wireless::Snapshot s;apple80211_ssid_data ssid;memset(&ssid,0xaa,sizeof(ssid));
     CHECK(nativewifi::ssid(s,&ssid)==kIOReturnNotReady&&ssid.ssid_len==0&&ssid.ssid_bytes[0]==0);
     s.currentValid=true;s.link=wireless::Link::connected;s.current.ssidLength=32;s.current.ssid[31]=255;

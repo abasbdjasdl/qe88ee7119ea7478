@@ -15,10 +15,13 @@ inline IOReturn decodeAssociation(const apple80211_assoc_data *in,selection::Joi
         if(in->ad_key.key_len||in->ad_rsn_ie_len||in->ad_key.key_cipher_type!=APPLE80211_CIPHER_NONE)
             return kIOReturnUnsupported;
         out.security=selection::Security::open;
-    }else if(in->ad_auth_upper==APPLE80211_AUTHTYPE_WPA2_PSK){
+    }else if(in->ad_auth_upper==APPLE80211_AUTHTYPE_WPA2_PSK||in->ad_auth_upper==APPLE80211_AUTHTYPE_WPA_PSK){
+        const bool wpa1=in->ad_auth_upper==APPLE80211_AUTHTYPE_WPA_PSK;
+        selection::PersonalCiphers ciphers;
         if(in->ad_key.key_cipher_type!=APPLE80211_CIPHER_PMK||in->ad_key.key_len!=32||
-           !selection::wpa2PskRsn(in->ad_rsn_ie,in->ad_rsn_ie_len))return kIOReturnUnsupported;
-        out.security=selection::Security::wpa2Psk;out.pmkLength=32;
+           !selection::personalIE(in->ad_rsn_ie,in->ad_rsn_ie_len,wpa1,ciphers))return kIOReturnUnsupported;
+        out.security=wpa1?selection::Security::wpaPsk:selection::Security::wpa2Psk;out.pmkLength=32;
+        out.pairwise=ciphers.pairwise;out.group=ciphers.group;
         memcpy(out.pmk,in->ad_key.key,32);
     }else return kIOReturnUnsupported;
     out.ssidLength=in->ad_ssid_len;memcpy(out.ssid,in->ad_ssid,out.ssidLength);

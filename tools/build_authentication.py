@@ -24,8 +24,9 @@ for i,p in enumerate(sources):
 binary=out/'sae-exchange-test'
 subprocess.run(['xcrun','clang','-fsanitize=address,undefined','-Wl,-dead_strip',*map(str,objects),
                 '-L'+str(openssl/'lib'),'-lcrypto','-framework','CoreServices','-o',str(binary)],check=True)
-result=subprocess.run([str(binary)],check=True,capture_output=True,text=True)
-(out/'test-result.txt').write_text(result.stdout+result.stderr);print(result.stdout)
+result=subprocess.run([str(binary)],capture_output=True,text=True)
+(out/'test-result.txt').write_text(result.stdout+result.stderr);print(result.stdout+result.stderr,flush=True)
+result.check_returncode()
 (out/'provenance.json').write_text(json.dumps({
     'hostap_repository':'https://git.w1.fi/hostap.git','hostap_revision':revision,
     'scope':'Offline userspace SAE group19 only. No driver transport/PMF/association integration or hardware validation.',

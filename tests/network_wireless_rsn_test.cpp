@@ -13,5 +13,14 @@ int main(){
     ie[19]=2;ie[13]=2;assert(!wpa2PskRsn(ie,sizeof(ie))); // TKIP.
     ie[13]=4;ie[8]=2;assert(!wpa2PskRsn(ie,sizeof(ie))); // Truncated suite list.
     assert(wpa2PskRsn(nullptr,0));assert(!wpa2PskRsn(nullptr,22));
+    using namespace rtl8852be::network::selection;
+    PersonalCiphers profile;ie[8]=1;ie[13]=2;
+    assert(personalIE(ie,sizeof(ie),false,profile)&&profile.pairwise==Cipher::tkip&&profile.group==Cipher::ccmp);
+    uint8_t wpa[]={221,22,0,0x50,0xf2,1,1,0,0,0x50,0xf2,2,1,0,0,0x50,0xf2,2,1,0,0,0x50,0xf2,2};
+    assert(personalIE(wpa,sizeof(wpa),true,profile)&&profile.pairwise==Cipher::tkip&&profile.group==Cipher::tkip);
+    assert(!personalIE(wpa,sizeof(wpa),false,profile));
+    assert(!personalIE(ie,sizeof(ie),true,profile));
+    wpa[23]=1;assert(!personalIE(wpa,sizeof(wpa),true,profile));
+    for(size_t n=1;n<sizeof(wpa);++n)assert(!personalIE(wpa,n,true,profile));
     puts("RSN adapter: truncation and unsupported authentication rejected");
 }
