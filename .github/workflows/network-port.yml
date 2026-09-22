@@ -32,6 +32,8 @@ jobs:
         run: |
           mkdir -p build/network-stack
           python3 tools/check_network_reference.py build-rtw89 | tee build/network-stack/wire-reference-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_mailbox_test.cpp -o build/network_mailbox_test
+          ./build/network_mailbox_test | tee build/network-stack/mailbox-tests.txt
           python3 tools/import_mac_reference.py build-rtw89
           git diff --exit-code -- src/network/Rtw8852bMacConstants.hpp src/network/Rtw8852bMacFunctions.inc src/network/mac-reference-provenance.json
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_mac_init_test.cpp -o build/network_mac_init_test

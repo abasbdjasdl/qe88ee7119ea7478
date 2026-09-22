@@ -250,6 +250,38 @@ models, not real calibration measurements. Channel IQK/TSSI/DPK, RF tracking,
 firmware/BT control callbacks and controller lifecycle remain unimplemented;
 initial calibration success is not full RFK or network readiness.
 
+`firmware::Mailbox` now implements the AX register-message channel used for
+firmware-acknowledged scheduler pause/resume. It writes four H2C words, increments
+the low host-counter nibble, triggers firmware, captures all four C2H words,
+acknowledges the response and increments the high counter nibble. Counter updates
+read the existing byte so the other nibble is preserved. Request function/length
+fields and padding are encoded explicitly; response lengths outside 1..4 words
+are rejected. Response ACK/sequence metadata is retained, not interpreted as an
+undocumented request correlation guarantee. A scheduler operation requires the
+TX_PAUSE_RPT response type and matching CTN_TXEN readback. Pause saves the prior
+SCC mask; resume requires the same mailbox's successful pause and zero current
+mask. Generic requests cannot bypass scheduler ownership with command ID 5.
+
+All access requires the owner's workloop gate. Pending replies are preserved
+before a new send: `staleReply` is a nonfatal refusal, allowing an explicit
+`receivePending()` before retry. No request was written in that case. Other
+I/O/protocol/timeout failures latch the mailbox until a new firmware epoch;
+there is no retry that could consume a late reply from the failed transaction.
+Captured unexpected replies remain in the result for controller diagnostics.
+The H2C wait is bounded to 5 ms and the C2H wait to 1 second, with finite polling
+and clock checks. This startup/control path blocks its calling workloop while
+waiting for firmware MMIO; it is not an interrupt-filter API.
+
+`MacMailboxIo` supplies actual BAR2 access, validates 10ec:b852 and the mapping,
+and permits only mailbox words/control/counter writes; it cannot directly write
+CTN_TXEN. The controller must own one mailbox per device and keep all borrowed
+objects alive. Host tests cover 42 pause/resume I/O failure points, all payload
+sizes and 256 counter starts, stale/malformed/unexpected responses, missing
+firmware processing, frozen/backward clocks, cancellation and gate/reentry.
+The reference checker verifies registers, counter masks, command IDs and bit
+layouts against pinned rtw89. The transport is not yet wired to RFK begin/end:
+firmware/BT coexistence handling and the controller are still required.
+
 1. Complete and preserve the RTL8852B power/MAC/PHY/RF/efuse/calibration sequence;
    the diagnostic subset currently shuts the chip down after probing. Physical
    DAV eFuse reads, applying gain state to channel registers, full BB reset/TX power
