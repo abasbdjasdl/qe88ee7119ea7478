@@ -4,6 +4,8 @@
 OSDefineMetaClassAndStructors(R16PciInterrupts,OSObject)
 bool R16PciInterrupts::attach(IOPCIDevice *device,IOWorkLoop *loop,int index){
     if(loop_||!device||!loop||index<0)return false;
+    const auto command=device->configRead16(kIOPCIConfigCommand);
+    if(command==0xffff||(command&6)!=2)return false;
     int type=0;if(device->getInterruptType(index,&type)!=kIOReturnSuccess||!(type&kIOInterruptTypePCIMessaged))return false;
     loop_=loop;loop_->retain();
     irq_=IOInterruptEventSource::interruptEventSource(this,interrupt,device,index);
@@ -12,10 +14,16 @@ bool R16PciInterrupts::attach(IOPCIDevice *device,IOWorkLoop *loop,int index){
     irq_->disable();
     if(loop_->addEventSource(irq_)!=kIOReturnSuccess)goto failed;irqAdded_=true;
     if(loop_->addEventSource(timer_)!=kIOReturnSuccess)goto failed;timerAdded_=true;
+    // IOPCIFamily MSI registration may set BusLead along with InterruptDisable.
+    // This is pre-runtime attachment: no descriptors are published yet. Restore
+    // BM-off before power preparation; runtime.start owns the later BM enable.
+    device->setBusMasterEnable(false);
+    if((device->configRead16(kIOPCIConfigCommand)&6)!=2)goto failed;
     return true;
 failed:
     if(timer_){timer_->release();timer_=nullptr;}
     if(irq_){if(irqAdded_)loop_->removeEventSource(irq_);irq_->release();irq_=nullptr;}
+    device->setBusMasterEnable(false);
     irqAdded_=false;loop_->release();loop_=nullptr;return false;
 }
 bool R16PciInterrupts::start(Runtime *runtime,Service service,Fault fault,void *context){

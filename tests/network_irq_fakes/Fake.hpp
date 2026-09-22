@@ -9,6 +9,7 @@
 #include <cassert>
 using IOReturn=int;
 constexpr int kIOReturnSuccess=0,kIOInterruptTypePCIMessaged=4;
+constexpr unsigned kIOPCIConfigCommand=4;
 struct OSObject {
     unsigned refs=1;virtual ~OSObject()=default;
     void retain(){++refs;}void release(){assert(refs);if(!--refs)free();}
@@ -21,6 +22,9 @@ struct IOMemoryMap {};struct IOMemoryDescriptor {};
 struct IOPCIDevice {
     int interruptType=kIOInterruptTypePCIMessaged,typeResult=0;
     uint16_t cmd=2;std::map<uint32_t,uint32_t> regs;
+    bool ignoreBusMasterDisable=false;
+    uint16_t configRead16(unsigned a){assert(a==4);return cmd;}
+    void setBusMasterEnable(bool b){if(b)cmd|=4;else if(!ignoreBusMasterDisable)cmd&=~4;}
     IOReturn getInterruptType(int,int *type){*type=interruptType;return typeResult;}
 };
 struct IOWorkLoop;
@@ -31,8 +35,9 @@ struct IOEventSource:OSObject {
 namespace irqfake {static int allocation=0,failAllocation=0,armError=0,live=0;}
 struct IOInterruptEventSource:IOEventSource {
     using Action=void (*)(OSObject *,IOInterruptEventSource *,int);Action action{};
-    static IOInterruptEventSource *interruptEventSource(OSObject *o,Action a,IOPCIDevice *,int){
+    static IOInterruptEventSource *interruptEventSource(OSObject *o,Action a,IOPCIDevice *d,int){
         if(++irqfake::allocation==irqfake::failAllocation)return nullptr;
+        d->cmd|=0x404; // Model native MSI's BusLead + legacy InterruptDisable.
         auto *s=new IOInterruptEventSource;s->owner=o;s->action=a;++irqfake::live;return s;
     }
     ~IOInterruptEventSource(){--irqfake::live;}

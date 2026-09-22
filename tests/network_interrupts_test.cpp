@@ -35,6 +35,12 @@ void setup(IOPCIDevice &d,n::RingMemory (&r)[9]){
     for(unsigned i=0;i<9;++i){r[i]={0x100000+i*4096,64};d.regs[n::ringRegisters[i].low]=uint32_t(r[i].address);d.regs[n::ringRegisters[i].count]=64;}
 }
 int main(){
+    {IOPCIDevice d;IOWorkLoop l;auto *p=new R16PciInterrupts;
+     assert(p->attach(&d,&l,0)&&d.cmd==0x402);assert(p->detach());p->release();}
+    {IOPCIDevice d;IOWorkLoop l;auto *p=new R16PciInterrupts;d.ignoreBusMasterDisable=true;
+     assert(!p->attach(&d,&l,0)&&l.sources.empty());p->release();}
+    {IOPCIDevice d;IOWorkLoop l;auto *p=new R16PciInterrupts;d.cmd=0x406;
+     assert(!p->attach(&d,&l,0)&&d.cmd==0x406);p->release();}
     for(unsigned failure=1;failure<=4;++failure){
         IOPCIDevice d;IOWorkLoop l;auto *p=new R16PciInterrupts;
         irqfake::allocation=0;irqfake::failAllocation=failure<=2?int(failure):0;l.failAdd=failure>2?failure-2:0;
