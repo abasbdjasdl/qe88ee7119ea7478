@@ -25,7 +25,7 @@ bt::RfkType coexistenceKind(rfk::Kind kind){
 }
 }
 struct MacRadioBoot::State {
-    IOWorkLoop &loop;const CalibrationSnapshot &calibration;const firmware::CapabilitySnapshot &caps;
+    IOWorkLoop &loop;IOPCIDevice &device;const CalibrationSnapshot &calibration;const firmware::CapabilitySnapshot &caps;
     const firmware::Plan &plan;NativeFirmwareCommands &commands;firmware::Mailbox<firmware::MacMailboxIo> &mailbox;
     bool stopped{},failedState{},closureProven{},schedulerKnown{},leaseConsumed{},leaseEnded{},failureLogged{};uint16_t schedulerMask{};
     const char *phase{"allocated"};
@@ -90,7 +90,7 @@ struct MacRadioBoot::State {
     State(IOPCIDevice &d,IOMemoryMap &m,IOWorkLoop &w,const CalibrationSnapshot &c,
           const firmware::CapabilitySnapshot &cap,const firmware::Plan &f,NativeFirmwareCommands &cmd,
           firmware::Mailbox<firmware::MacMailboxIo> &mail):
-        loop(w),calibration(c),caps(cap),plan(f),commands(cmd),mailbox(mail),
+        loop(w),device(d),calibration(c),caps(cap),plan(f),commands(cmd),mailbox(mail),
         radioIo(&d,&m,{this,tableGuard}),access(radioIo),radio(radioIo),
         btInitIo(&d,&m,&w,link()),btInit(btInitIo,scoreboard,baseline),btIo(&d,&m,&w,link()),
         rfkIo(&d,&m,{this,leaseBegin,leaseEnd,oneshot,recovery,leaseCheck}),rfk(rfkIo,c.cut),channel(rfkIo),
@@ -106,6 +106,14 @@ struct MacRadioBoot::State {
         if(!inGate()||stopped||failedState||!mailbox.setSchedulerMask(0))return false;
         schedulerKnown=true;schedulerMask=0;return paused();
     }
+    unsigned phaseNumber() const {
+        const char *names[]={"allocated","BB-table","power-unit","gain-table","BB-reset","RF-A","RF-B","RF-firmware-pages","BT-initialization","PHY-before-RFK","NCTL","BT-acquire","calibration","BT-restore","PHY-power-trim-path"};
+        for(unsigned i=0;i<sizeof(names)/sizeof(names[0]);++i){
+            unsigned n=0;while(names[i][n]&&phase[n]&&names[i][n]==phase[n])++n;
+            if(!names[i][n]&&!phase[n])return i;
+        }
+        return 255;
+    }
     void failed(){
         // One pre-cleanup snapshot preserves the initiating hardware error.
         // Normal stop also calls failed() to close ownership; do not log it as
@@ -116,6 +124,46 @@ struct MacRadioBoot::State {
            (commands.error()!=CommandError::none&&commands.error()!=CommandError::invalidated)||
            (lease&&lease->result.error!=bt::Error::none))){
             failureLogged=true;const auto &p=phy.result();
+            // Numeric, credential-free, first-failure snapshot before cleanup.
+            // PCI provider survives controller shutdown and unavailable dmesg.
+            bool snapshotComplete=true;
+            snapshotComplete=device.setProperty("R16RadioPhase",uint64_t(phaseNumber()),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RadioStage",uint64_t(sequence.result.stage),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RadioStep",uint64_t(sequence.result.step),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RadioError",uint64_t(sequence.result.error),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RadioCommandError",uint64_t(commands.error()),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RadioCommandsUsed",uint64_t(commands.allocated()),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RadioUploadPath",uint64_t(uploadPath),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RadioUploadPage",uint64_t(uploadPage),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtInitStage",uint64_t(btInit.result.stage),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtInitError",uint64_t(btInit.result.error),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtInitAddress",uint64_t(btInit.result.address),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtLeaseStage",uint64_t(lease?unsigned(lease->result.stage):0),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtLeaseError",uint64_t(lease?unsigned(lease->result.error):0),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtLeaseAddress",uint64_t(lease?lease->result.address:0),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtLeaseHeld",uint64_t(lease&&lease->result.ownershipHeld),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtLeaseConsumed",uint64_t(leaseConsumed),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16BtLeaseEnded",uint64_t(leaseEnded),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RfkNativeLease",uint64_t(rfkIo.leaseActive()),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RfkStage",uint64_t(rfk.result.stage),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RfkError",uint64_t(rfk.result.error),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RfkSpace",uint64_t(rfk.result.space),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RfkPath",uint64_t(rfk.result.path),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RfkAddress",uint64_t(rfk.result.address),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RfkMask",uint64_t(rfk.result.mask),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RfkValue",uint64_t(rfk.result.value),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RfkOperations",uint64_t(rfk.result.operations),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RfkPolls",uint64_t(rfk.result.polls),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16PhyStage",uint64_t(p.stage),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16PhyError",uint64_t(p.error),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16PhyAddress",uint64_t(p.address),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16PhyExpected",uint64_t(p.expected),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16PhyActual",uint64_t(p.actual),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16ChannelStage",uint64_t(channel.result.stage),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16ChannelError",uint64_t(channel.result.error),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16ChannelAddress",uint64_t(channel.result.address),64)&&snapshotComplete;
+            snapshotComplete=device.setProperty("R16RadioIoStatus",uint64_t(radio.ioStatus()),64)&&snapshotComplete;
+            device.setProperty("R16RadioSnapshotComplete",uint64_t(snapshotComplete),64);
             IOLog("RTL8852BE radio failure: phase=%s stage=%u step=%u error=%u cmd=%u used=%u "
                   "btinit=%u/%u@%08x btlease=%u/%u@%08x held=%u consumed=%u ended=%u native=%u "
                   "rfk=%u/%u space=%u path=%u@%08x mask=%08x value=%08x ops=%u polls=%u "
