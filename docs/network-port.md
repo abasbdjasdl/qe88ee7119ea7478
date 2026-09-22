@@ -220,8 +220,8 @@ CI checks regeneration and compiles the native adapter with the protocol stack.
 These are model/compile checks, with no physical MAC/RFK or network evidence.
 
 `rfk::Initialization` imports the original dependency closure for initial DPD
-backoff, both-path RCK, DRCK/ADDCK/DACK and RXDCK: 22 functions, 13 RFK command
-tables, and 127 referenced constants. It retains per-path ADC/DAC calibration
+backoff, both-path RCK, DRCK/ADDCK/DACK, RXDCK and channel IQK: 50 functions,
+13 RFK command tables, 18 IQK arrays and 242 referenced constants. It retains per-path ADC/DAC calibration
 values, MSBK arrays and original success-path restoration. Unlike the upstream
 warning-only timeout paths, a timeout latches an error, suppresses subsequent
 normal I/O and cannot expose `dack_done` as valid. Partially programmed hardware
@@ -246,9 +246,35 @@ cleanup; the borrowed owner cannot be destroyed while its lease remains active.
 Host tests verify calibration result arrays, RF state and DPD backoff values,
 all 1,070 I/O failures, every delay failure, all begin/end/drain failures,
 RCK/DRCK/ADDCK/DACK timeouts, cancellation and clock anomalies. These are register
-models, not real calibration measurements. Channel IQK/TSSI/DPK, RF tracking,
+models, not real calibration measurements. Channel TSSI/DPK, RF tracking,
 firmware/BT control callbacks and controller lifecycle remain unimplemented;
 initial calibration success is not full RFK or network readiness.
+
+`calibrateIq()` executes both IQK paths for 2.4 GHz 20/40 MHz and 5 GHz
+20/40/80 MHz after initial calibration. The caller must already have programmed
+the requested center channel and bandwidth; this API does not tune the radio.
+It saves/restores the upstream BB/RF register sets, selects the two coefficient
+banks across channel changes and records TX/RX CFIR and LOK results. Geometry
+validation is not regulatory permission to use a channel. Every operation has
+its own two-second/200,000-I/O budget, rather than exhausting a lifetime quota
+during ordinary channel changes.
+
+LOK coarse/fine and both VBUFFER failure reports participate in the existing
+three-attempt retry, including reports ignored upstream. Terminal LOK failure,
+any TX/RX group failure and the restore command's error prevent `iqReady`.
+Transport faults suppress subsequent normal I/O; this is not a hardware rollback.
+Per-path coexistence oneshot notifications are mandatory native callbacks,
+with STOP attempted even after failure/cancellation; parent lease cleanup retries
+an outstanding STOP before releasing control. Controller BT policy is still
+missing, so this component cannot yet run as an independent network driver.
+
+IQK model tests cover both bands/all supported widths, restoration of all saved
+BB/RF values, 979 read/write failures, 64 delay failures, command failures,
+LOK out-of-range measurements, all four oneshot notification failures,
+parent lease failures, cancellation, bounded timeout/clock anomalies, invalid
+channels and 512 successive calibrations. Native code also compiles for the
+x86_64 macOS kernel. These tests supply synthetic register responses, not
+measured RF calibration or over-the-air results.
 
 `firmware::Mailbox` now implements the AX register-message channel used for
 firmware-acknowledged scheduler pause/resume. It writes four H2C words, increments

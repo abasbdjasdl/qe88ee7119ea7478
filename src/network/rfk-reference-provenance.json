@@ -7,9 +7,16 @@
     "_rck",
     "_dac_cal",
     "_wait_rx_mode",
-    "_rx_dck"
+    "_rx_dck",
+    "_iqk_init",
+    "_iqk"
   ],
   "original_functions": {
+    "_rfk_backup_bb_reg": "7ab4d3005e6fd820bd9b97b6cd558906d8e16f52ecc1843d4dfeb1bf793b7a3a",
+    "_rfk_backup_rf_reg": "e3dca9b142829335d77fc72610c7318cc482766875562301609e9ce9cc5c1649",
+    "_rfk_restore_bb_reg": "6cf3774f90e6d808674208436262f77b4f8074bcbdfd32c11db507c386ef0c85",
+    "_rfk_restore_rf_reg": "3a49356e76f0d24458555c06a291104bbc345fd53b4f7c41c9816b4ca5a3f10b",
+    "_iqk_check_cal": "25581940e7e2d7ae77ec691faf71ebad59ad4ccaf2f8376c1827aafb195a2acf",
     "_kpath": "6549a72d4d4057b4463d8202d704dbcfaf64c89be1e2d62fcde139faf64b93e8",
     "_set_rx_dck": "12188efc903b5a8c71a7939ffc7d6a4a2c741ce1f627f25ee0f3d2ac21486297",
     "_rx_dck": "ad76c4a7c94e85fc78511880bd31ac690afc6aace316e92a394f106c9343f946",
@@ -30,7 +37,30 @@
     "_dack": "6f9d835842324f66325e92c73f7b8614d88cf02a9c73998344114e536bb3b6a9",
     "_dack_dump": "b04b4795367bdef889744e3c774868cac89e98cfdf1bade4b76a39b7649d50e4",
     "_dac_cal": "8e11e5557b22a798cf5f6b00cac528b43814ceacae59346c202679845f7aca3f",
+    "_iqk_rxk_setting": "9e7d767c70e7c92c38f7fdd30663b0095d1c6d96dc6473de2361eade9121cc5b",
+    "_iqk_one_shot": "ad00421ee996a9ec5342aa1887524549e347c3bd287bb06ba220b26e76af0c87",
+    "_rxk_group_sel": "6b332fcdeb49cb2aff764c0a41ac7bfa6d78846ebd1df529dc81883ab719a219",
+    "_iqk_nbrxk": "e6e252620ff1584f92f7bf7d0aff70cd33bd6163b199776949efb0f2b61189fe",
+    "_iqk_rxclk_setting": "e2b01676194da573334e71fe6ed410f8fe8875defa76ffc423ab39f1aa007fa4",
+    "_txk_group_sel": "304536c184994826415a84196cb4186532ebeb1ee88f56d0942c0c8ab013f448",
+    "_iqk_nbtxk": "9679202932e72b722c44ebde25100e760fa2e3f1f364ef4462fdf8c3876c91dd",
+    "_lok_res_table": "a5c1744ecb7087e43c1c2b4952c8429a6bc666513460ce761ab3ab7215d98901",
+    "_lok_finetune_check": "3458438bb139f49884c0e18f0c586d50fb9714f90e28925565b07efebff24f3d",
+    "_iqk_lok": "daf90b58c052d5670571322f1a34e1a13f607671ff1443dcefb8d49f0b6f5134",
+    "_iqk_txk_setting": "d646e02d438ee526d7520295a9673540330d1ec2b61f8f13984c72d7e272a8cc",
+    "_iqk_txclk_setting": "fef871415ec7305a925d872b6af6cd757b55ccfde1f4d0a94cf276f4f35a85ca",
+    "_iqk_info_iqk": "670b37e3059daadbe6846b3f88879007d76f57e563b9f491b65372b050458160",
+    "_iqk_by_path": "5fb43dd63345329d2a0f50a6c7ba3093e50235b178aa59b8ad32cbdf73f0d3e1",
+    "_iqk_get_ch_info": "98f18249f5aeb54de08a0cae1d75ba221125464a4f181e6d2b79545988faf809",
+    "_iqk_start_iqk": "1ced0c0302e854ba2e4ad7891d4e624e1b714e29b751c79be26fd5a8d5e84207",
+    "_iqk_restore": "354b18a12620ffedd3fbb0f9cef0466081781539dba7ef6e21a1974ca730c557",
+    "_iqk_afebb_restore": "be082ec3639856aa8e9934e098737c73406d26f4f3f3b5ed48ee38f81e2c522b",
+    "_iqk_preset": "de462fe96e3f163c7dedc4e04e16deea87499239f3478d5cb180454b32192809",
+    "_iqk_macbb_setting": "9e59321628ac2a0bf5f9dc0cc3313204a3b31da67b47f951311cc5c5881c7a7d",
+    "_iqk_init": "447ade890ea50eeb564c4b1b097b60df58de5651d0270782ed07ef03375300f9",
     "_wait_rx_mode": "d726c74478a22f8c853a2a2e9c58c0e2c82c201734cab6d05894767685e88e60",
+    "_doiqk": "9f9d9903d4494cb1ce53f25dfafa53fa6d7a958c80ff2450059ebf964c85826f",
+    "_iqk": "5a5b499b147ff603cbaa4fbe070d3748e83d483c3a12f6e7af6e0988201ccf4a",
     "_set_dpd_backoff": "58d76da56fef459658c346a8802715d8de8a48403b18b36b188074bbad7fdae7"
   },
   "original_tables": {
@@ -48,24 +78,48 @@
     "rtw8852b_dack_s1_2_defs": "06cd9e1e0b5e318687c6f08a072170ac086cadbf1df5ae5c1a42fc17b7a789ca",
     "rtw8852b_dack_s1_3_defs": "a034446d9b6faf1b1e54402b63edd4ca05308fc964c3024a350ae4954ab6bed2"
   },
+  "original_arrays": {
+    "_a_idxrxgain": "ca03f9568724eb078cfa19b9f10a69c49a77790a582e7511afafd6d14d2295f3",
+    "_a_idxattc2": "c860cea037ac2d0eddcc370d064724d49f39e7917aaad2d47cfc94537b24db8e",
+    "_a_idxattc1": "b6c03fb3633deeef035ff3eebc7ca9c88861242dd41f8d74d5f89b4bf3f65c29",
+    "_g_idxrxgain": "3be87214c4c11878879627f586249a93a7bc4bea07996898f421cc5d854244c8",
+    "_g_idxattc2": "9050cf0835782403edad7b7a44209916c34a48ad73f4052ed1d587418c760890",
+    "_g_idxattc1": "d99170f558425004e997b544eecd0fa844ed8bec191a8ff94d4dbd95994605ca",
+    "_a_power_range": "28de02e969303b4ea15c57c75ca902e47c03e8e1460fb8514c720107178fc016",
+    "_a_track_range": "1fcde7ddfefd7e4572a9e8ca679ef510dbb8883af243695cee2b98ef800a60d3",
+    "_a_gain_bb": "440e306a7be5e53d582aaf4f50683d26703d1d20401a301681c649a6ecabc205",
+    "_a_itqt": "b6644ff110f47ac55d2e7a97ecc66e9272e404d7d0e6ef4ec301fd71fbdc612a",
+    "_g_power_range": "d42c33ad5b59733283f45a2c64911b50a5ed1614e9a6a0001667d9912e6a3d40",
+    "_g_track_range": "40cccab40b6eca28bf2b717827fd9300e0d9d5fbfa528b7e790d4ac0edd46330",
+    "_g_gain_bb": "c06a915731de2190201e1cdb41a6aef631270d44b12a0176bd738591671b0e39",
+    "_g_itqt": "9d7cbf403efdaae72ce96058a771463a5a13df86b068e29473256f774a20e4da",
+    "rtw8852b_backup_bb_regs": "f846fdda371b61d49864c9d453e012068aac049ca14e5c7776dcb1ee30b929ae",
+    "rtw8852b_backup_rf_regs": "1d0ad8783223970f6b21b18ff9d968a4fb34d35095e0da8f84c83dbcbc1a7a74",
+    "rtw8852b_set_nondbcc_path01": "f848c0ca175740338093c6553459c4f05e79d512f2c0e7df78c1dfe210674968",
+    "rtw8852b_restore_nondbcc_path01": "8596679a974dd28fee7dff030694d1096d229193f033dd767b9c71cb9342ab3d"
+  },
   "sources": {
     "rtw8852b_rfk.c": "a8f96bd5d4f7b319443e9f327e07eda5e4f37f3454d9d88b343a4b2600cb88ba",
     "rtw8852b_rfk_table.c": "ebc6840d2e15c7a9f12fb7d7121ca19bb8acff93524d3902a7ce892e0714fc21",
     "rtw8852b.h": "fe243e53bdc4fdf8ca5df118dcb82dfdbe4550dfbf83e589254a8a5997acd26d",
     "core.h": "ec8c6d32fe8f86620ed23190b26d8f4aaa11238fb195bba4c4e66ee01d5e2366",
     "phy.h": "ceac88b387d211f48b07a8e94466d6968a28ed23fd88ee9b0e21aa214f95e5dd",
-    "reg.h": "9609382125b396708d52f2d64a4e8a1e7abb080690ea2776308323834b725d03"
+    "reg.h": "9609382125b396708d52f2d64a4e8a1e7abb080690ea2776308323834b725d03",
+    "coex.h": "4a4cf3c81455fdf9b83dccf3e36b05666918b7ab7c40253444e73c9b38d4c6aa"
   },
   "adaptations": [
     "typed Context",
     "RF path arguments accept bounded u8",
     "bounded failure-latching polling and delays",
-    "Linux bit and signed helpers replaced with local helpers",
-    "RFK table macros expanded in original order"
+    "Linux bit/array/signed helpers replaced with local helpers",
+    "RFK table macros expanded in original order",
+    "C try variable renamed for C++",
+    "LOK terminal failure and restore failure retained for public readiness checks",
+    "LOK retries retain coarse/fine and both VBUFFER command failures"
   ],
   "generated": {
-    "Rtw8852bRfkConstants.hpp": "0b0c76506acfbdda05dce9b918894d14e70f61b5ed4eac4fa524178a97fa5f5b",
-    "Rtw8852bRfkFunctions.inc": "148f234e56c2e95e4a78d9784e8184b5e673761cf64d267ad500406a844f8bb5"
+    "Rtw8852bRfkConstants.hpp": "7f205dc47b5eac3bbad5973c3158efbe295916ade8c6a77b2c3698a61e3ca6f1",
+    "Rtw8852bRfkFunctions.inc": "86329467e5e9e9cd5e225ff7635921a3bdd1f71ed325fd1e705923f9b2182413"
   },
   "hardware_tested": false,
   "full_rfk_implemented": false

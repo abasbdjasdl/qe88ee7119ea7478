@@ -20,6 +20,7 @@ bool MacRfkIo::macRead(uint32_t a,uint32_t &v){
 }
 bool MacRfkIo::begin(Kind kind){
     if(active_||!accessible()||!control_.owner||!control_.begin||!control_.end)return false;
+    if(kind==Kind::iqk&&!control_.oneshot)return false;
     if(!control_.begin(control_.owner,kind))return false;
     active_=true;kind_=kind;u32 fw=0,cmac=0,sys=0,tx=0;
     // Independent evidence of firmware/MAC/BB readiness and acknowledged pause.
@@ -35,8 +36,18 @@ bool MacRfkIo::begin(Kind kind){
 bool MacRfkIo::end(Kind kind,bool success){
     if(!active_||kind!=kind_)return false;
     // Must remain callable after cancellation or a failed MMIO transaction.
+    if(oneshotActive_&&!oneshot(kind,oneshotMap_,false))return false;
     if(!control_.end(control_.owner,kind,success))return false;
     active_=false;return true;
+}
+bool MacRfkIo::oneshot(Kind kind,u8 phyMap,bool start){
+    if(!active_||kind!=kind_||!control_.oneshot)return false;
+    if(start){
+        if(oneshotActive_||!accessible()||!control_.oneshot(control_.owner,kind,phyMap,true))return false;
+        oneshotActive_=true;oneshotMap_=phyMap;return true;
+    }
+    if(!oneshotActive_||phyMap!=oneshotMap_||!control_.oneshot(control_.owner,kind,phyMap,false))return false;
+    oneshotActive_=false;return true;
 }
 bool MacRfkIo::readRf(u8 p,u32 a,u32 m,u32 &v){v=0;return active_&&accessible()&&radio_.readRf(p,a,m,v);}
 bool MacRfkIo::writeRf(u8 p,u32 a,u32 m,u32 v){return active_&&accessible()&&radio_.writeRf(p,a,m,v);}

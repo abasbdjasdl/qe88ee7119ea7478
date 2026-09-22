@@ -3,24 +3,41 @@
 #include "Rtw8852bRfkConstants.hpp"
 namespace rtl8852be { namespace rfk {
 enum class Error {none,precondition,io,timeout,clock,cancelled,calibration};
-enum class Stage {idle,rck,dack,rxDc,complete};
-enum class Kind {rck,dack,rxDc};
+enum class Stage {idle,rck,dack,rxDc,complete,iqk};
+enum class Kind {rck,dack,rxDc,iqk};
 enum class Space {none,mac,baseband,radio};
+// Center channel and hardware bandwidth encoding (20/40/80 = 0/1/2).
+// This checks chip geometry only; the controller must enforce regulatory rules.
+struct Channel {u8 band{},width{},center{};};
+inline bool validChannel(Channel c){
+    if(c.band==RTW89_BAND_2G)return c.width==0?(c.center>=1&&c.center<=14):(c.width==1&&c.center>=3&&c.center<=11);
+    if(c.band!=RTW89_BAND_5G)return false;
+    if(c.width==0)return (c.center>=36&&c.center<=64&&c.center%4==0)||
+        (c.center>=100&&c.center<=144&&c.center%4==0)||(c.center>=149&&c.center<=177&&(c.center-149)%4==0);
+    const u8 centers40[]={38,46,54,62,102,110,118,126,134,142,151,159,167,175};
+    const u8 centers80[]={42,58,106,122,138,155,171};
+    if(c.width==1){for(auto n:centers40)if(c.center==n)return true;}
+    if(c.width==2){for(auto n:centers80)if(c.center==n)return true;}
+    return false;
+}
 struct Result {
     Error error{Error::none};Stage stage{Stage::idle};Space space{Space::none};
     u32 address{},mask{},value{};u8 path{};unsigned operations{},polls{},messages{};
-    bool rckReady{},dackReady{},rxDcReady{},requiresReset{},ownershipReleased{};
+    bool rckReady{},dackReady{},rxDcReady{},iqReady{},requiresReset{},ownershipReleased{};
+    Channel iqChannel{};
 };
 // Backend owns validated I/O and the calibration lease. begin(kind) must quiesce
 // DMA/TX and coordinate firmware/BT; end(kind,success) must keep TX stopped on
 // failure. Neither is optional. The native adapter rejects absent callbacks.
-// This object performs initial RCK/DACK/RXDCK, not channel IQK/TSSI/DPK.
+// Performs initial RCK/DACK/RXDCK and channel IQK; TSSI/DPK still remain.
 template<class Backend> class Initialization {
     struct rtw89_dpk_info {u8 dpk_gs[2]{};};
+    struct rtw89_chan {u8 band_type{},band_width{},channel{};};
     struct Context {
         Backend &io;Result &result;rtw89_dack_info dack{};rtw89_dpk_info dpk{};
+        rtw89_iqk_info iqk{};rtw89_chan channel{};bool restoreFailed[2]{},oneshotActive{};
         bool dbcc_en=false,is_tssi_mode[2]{};struct {u8 cv;} hal;
-        uint64_t first{},previous{};bool started{};Space lastSpace{Space::none};
+        uint64_t first{},previous{};unsigned operationBase{};bool started{};Space lastSpace{Space::none};
         u32 lastAddress{},lastMask{},lastValue{};u8 lastPath{};
         Context(Backend &i,Result &r,u8 cut):io(i),result(r),hal{cut}{}
     };
@@ -35,7 +52,7 @@ template<class Backend> class Initialization {
         if(d->io.cancelled())return fail(d,Error::cancelled);
         const auto t=d->io.nowUs();if(!d->started){d->first=d->previous=t;d->started=true;}
         if(t<d->previous)return fail(d,Error::clock);d->previous=t;
-        if(t-d->first>2000000||d->result.operations>=200000)return fail(d,Error::timeout);
+        if(t-d->first>2000000||d->result.operations-d->operationBase>=200000)return fail(d,Error::timeout);
         return true;
     }
     static bool op(Context *d,Space s,u32 a,u32 m,u32 v=0,u8 path=0){
@@ -69,6 +86,25 @@ template<class Backend> class Initialization {
     static void delay(Context *d,unsigned us){if(!check(d))return;
         if(us>50000||!d->io.delayUs(us))fail(d,Error::io);}
     static void rtw89_debug(Context *d,unsigned,const char *,...){++d->result.messages;}
+    static const rtw89_chan *rtw89_chan_get(Context *d,rtw89_sub_entity_idx entity){
+        if(entity!=RTW89_SUB_ENTITY_0)fail(d,Error::precondition);return &d->channel;
+    }
+    static u8 rtw89_btc_phymap(Context *d,rtw89_phy_idx phy,rtw89_rf_path_bit paths){
+        if(phy!=RTW89_PHY_0||paths!=RF_AB){fail(d,Error::precondition);return 0;}
+        return u8((u32(paths)&BTC_RFK_PATH_MAP)|((bit(phy)<<shift(BTC_RFK_PHY_MAP))&BTC_RFK_PHY_MAP)|
+            ((u32(d->channel.band_type)<<shift(BTC_RFK_BAND_MAP))&BTC_RFK_BAND_MAP));
+    }
+    static void rtw89_btc_ntfy_wl_rfk(Context *d,u8 phyMap,btc_wl_rfk_type type,btc_wl_rfk_state state){
+        if(type!=BTC_WRFKT_IQK||(state!=BTC_WRFK_ONESHOT_START&&state!=BTC_WRFK_ONESHOT_STOP)){
+            fail(d,Error::precondition);return;}
+        if(state==BTC_WRFK_ONESHOT_START){
+            if(!check(d))return;if(d->oneshotActive){fail(d,Error::precondition);return;}
+            if(!d->io.oneshot(Kind::iqk,phyMap,true)){fail(d,Error::io);return;}d->oneshotActive=true;
+        }else if(d->oneshotActive){
+            // Cleanup notification remains required after a failed register op.
+            if(!d->io.oneshot(Kind::iqk,phyMap,false)){fail(d,Error::io);return;}d->oneshotActive=false;
+        }
+    }
     static void rtw89_rfk_parser(Context *d,const rtw89_rfk_tbl *table){
         if(!table||!table->defs||table->size>4096){fail(d,Error::precondition);return;}
         for(u32 i=0;i<table->size&&check(d);++i){const auto &r=table->defs[i];
@@ -120,6 +156,7 @@ public:
     Initialization(Backend &io,u8 cut):context_(io,result,cut){}
     Initialization(const Initialization &)=delete;Initialization &operator=(const Initialization &)=delete;
     const rtw89_dack_info &dack()const{return context_.dack;}
+    const rtw89_iqk_info &iqk()const{return context_.iqk;}
     u8 dpdBackoff()const{return context_.dpk.dpk_gs[0];}
     bool initialize(){
         if(result.stage!=Stage::idle||!begin(Kind::rck,Stage::rck))return false;
@@ -135,6 +172,20 @@ public:
         _wait_rx_mode(&context_,RF_AB);_rx_dck(&context_,RTW89_PHY_0);
         result.rxDcReady=end(Kind::rxDc);if(!result.rxDcReady)return false;
         result.stage=Stage::complete;return true;
+    }
+    bool calibrateIq(Channel channel){
+        if(result.stage!=Stage::complete||result.error!=Error::none||!result.rxDcReady||!validChannel(channel))return false;
+        result.iqReady=false;context_.channel={channel.band,channel.width,channel.center};
+        context_.restoreFailed[0]=context_.restoreFailed[1]=false;context_.started=false;
+        context_.operationBase=result.operations;
+        if(!begin(Kind::iqk,Stage::iqk))return false;
+        _wait_rx_mode(&context_,RF_AB);_iqk_init(&context_);_iqk(&context_,RTW89_PHY_0,false);
+        if(check(&context_))for(unsigned p=0;p<2;++p){const auto &q=context_.iqk;
+            if(q.lok_fail[p]||q.lok_cor_fail[0][p]||q.lok_fin_fail[0][p]||q.iqk_tx_fail[0][p]||q.iqk_rx_fail[0][p]||context_.restoreFailed[p])
+                fail(&context_,Error::calibration);
+        }
+        if(!end(Kind::iqk))return false;
+        result.iqChannel=channel;result.iqReady=true;result.stage=Stage::complete;return true;
     }
 };
 } }
