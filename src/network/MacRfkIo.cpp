@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 #include "MacRfkIo.hpp"
+#include "ChannelProgramming.hpp"
 #include <IOKit/IOLib.h>
 #include <libkern/OSByteOrder.h>
 #include <libkern/OSAtomic.h>
@@ -44,7 +45,10 @@ bool MacRfkIo::end(Kind kind,bool success){
         modified_=false;
     }
     if(oneshotActive_&&!oneshot(kind,oneshotMap_,false))return false;
+    u32 tx=0;
+    if(kind==Kind::channel&&success&&(!macRead(R_AX_CTN_TXEN,tx)||(tx&B_AX_CTN_TXEN_ALL_MASK))){modified_=true;return false;}
     if(!control_.end(control_.owner,kind,success))return false;
+    if(kind==Kind::channel&&success&&(!macRead(R_AX_CTN_TXEN,tx)||(tx&B_AX_CTN_TXEN_ALL_MASK))){modified_=true;return false;}
     active_=false;modified_=false;return true;
 }
 bool MacRfkIo::oneshot(Kind kind,u8 phyMap,bool start){
@@ -92,8 +96,27 @@ bool MacRfkIo::writeMac(u32 a,u32 v){
     OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),a,v);
     __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
 }
+bool MacRfkIo::readChannelMac8(u32 a,u8 &v){
+    v=0;if(!active_||kind_!=Kind::channel||!accessible()||!channel::macByteAddress(a))return false;
+    OSSynchronizeIO();v=*(reinterpret_cast<const volatile u8 *>(mapping_->getVirtualAddress())+a);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);return true;
+}
+bool MacRfkIo::writeChannelMac8(u32 a,u8 v){
+    if(!active_||kind_!=Kind::channel||!accessible()||!channel::macByteAddress(a))return false;
+    modified_=true;*(reinterpret_cast<volatile u8 *>(mapping_->getVirtualAddress())+a)=v;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
+}
+bool MacRfkIo::readChannelMac32(u32 a,u32 &v){
+    v=0;return active_&&kind_==Kind::channel&&channel::macWordAddress(a,false)&&macRead(a,v);
+}
+bool MacRfkIo::writeChannelMac32(u32 a,u32 v){
+    if(!active_||kind_!=Kind::channel||!accessible()||!channel::macWordAddress(a,true))return false;
+    modified_=true;OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),a,v);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
+}
 bool MacRfkIo::drain(){return active_&&accessible()&&radio_.drain();}
 uint64_t MacRfkIo::nowUs(){uint64_t t=0,n=0;clock_get_uptime(&t);absolutetime_to_nanoseconds(t,&n);return n/1000;}
 bool MacRfkIo::delayUs(unsigned us){return active_&&accessible()&&radioIo_.delayUs(us);}
 template class Initialization<MacRfkIo>;
 } }
+template class rtl8852be::channel::ChannelProgramming<rtl8852be::rfk::MacRfkIo>;

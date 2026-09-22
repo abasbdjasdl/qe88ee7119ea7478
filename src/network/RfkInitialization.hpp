@@ -5,7 +5,7 @@
 namespace rtl8852be { namespace rfk {
 enum class Error {none,precondition,io,timeout,clock,cancelled,calibration};
 enum class Stage {idle,rck,dack,rxDc,complete,iqk,tssi,dpk,track,scan};
-enum class Kind {rck,dack,rxDc,iqk,tssi,dpk,track,scan};
+enum class Kind {rck,dack,rxDc,iqk,tssi,dpk,track,scan,channel};
 enum class Space {none,mac,baseband,radio};
 // Center channel and hardware bandwidth encoding (20/40/80 = 0/1/2).
 // This checks chip geometry only; the controller must enforce regulatory rules.

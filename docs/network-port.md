@@ -414,6 +414,50 @@ The reference checker verifies registers, counter masks, command IDs and bit
 layouts against pinned rtw89. The transport is not yet wired to RFK begin/end:
 firmware/BT coexistence handling and the controller are still required.
 
+### Channel programming
+
+`ChannelProgramming<MacRfkIo>` implements the pinned chip's MAC, baseband and
+both-path DAV/DDV RF channel sequence. The separate importer retains hashes
+for 37 source functions, five arrays and 137 additional constants, sharing the
+same pinned RFK numeric definitions. It includes MAC bandwidth/subcarrier/rate
+checks, primary-channel geometry, SCO/CCK, gain and RXSC compensation, 5 MHz
+masks, baseband resets, RF band/bandwidth programming and PLL recovery.
+Configuration copies this device's parsed BB gain and eFuse data plus captured
+gain bases and RX antenna; it must be allocated off the kernel stack.
+
+`program()` validates center/primary channel and 20/40/80 MHz geometry before
+acquiring the required firmware/BT scheduler lease. It disables PPDU reporting,
+TSSI tracking and ADC, asserts BB reset, and checks that quiescent settings read
+back before reprogramming. Both RF register banks/paths and critical MAC/BB
+channel settings are read back. The PLL path retains upstream recovery attempts
+but fails if the final lock indication is still absent; busy timeout also latches
+failure instead of continuing from a warning.
+
+Successful programming leaves the lease held and reports `prepared`. The
+controller must apply the actual by-rate/offset/shape/limit/RU power configuration
+in this interval, then call `finish()` to restore receivers/PPDU/tracking. Power
+tables and regulatory policy are **not supplied by this channel component**.
+Both phases have a shared bounded deadline. `abort()` is available when external
+power work fails, including after a native preflight acquired a lease whose
+cleanup failed. Partial failures require the native owner's verified recovery.
+
+Neither `registersProgrammed` nor `receiversRestored` authorizes TX. A channel
+lease release must keep scheduler TX paused until power, RFK and controller
+prerequisites are satisfied. Native code checks the TX mask before and after
+the release callback and retains ownership on violation. Channel MAC writes
+are restricted to two byte registers and three word registers, with CMAC state
+read-only; this interface cannot write the scheduler mask, PCI or unrelated MAC
+registers. The same native RF/BB transport and recovery owner are reused.
+
+Tests cover valid primary placements in both bands, signed gain values, 297 I/O
+and four delay faults, cancellation/deadline/clock anomalies, all PLL retry
+levels and final failure, ignored programming and receiver-restoration writes,
+retained abort/recovery ownership and 128 consecutive channel changes. Native
+tests verify byte-width isolation, register/kind restrictions, detection of a
+release callback that resumes TX, and recovery of a lease retained after failed
+preflight cleanup. These are register/IOKit models and cross-compilation, not
+real channel tuning, implemented power limits or network readiness.
+
 1. Complete and preserve the RTL8852B power/MAC/PHY/RF/efuse/calibration sequence;
    the diagnostic subset currently shuts the chip down after probing. Physical
    DAV eFuse reads, applying gain state to channel registers, full BB reset/TX power

@@ -1,0 +1,81 @@
+{
+  "repository": "https://github.com/lwfinger/rtw89",
+  "commit": "d1fced1b8a741dc9f92b47c69489c24385945f6e",
+  "license": "BSD-3-Clause option",
+  "roots": [
+    "rtw8852b_set_channel",
+    "rtw8852b_set_channel_help",
+    "rtw89_mac_cfg_ppdu_status_ax"
+  ],
+  "original_functions": {
+    "rtw8852b_set_channel_mac": "2e415d23a645aa7995fa802a7f3a2899abe3d03e08d1a9566a426862d19625a1",
+    "rtw8852b_ctrl_sco_cck": "e22b37476d33652662e59135b3c294799457e1d4e19f701a76a21d464712b969",
+    "rtw8852b_sco_mapping": "be13b408eeb17b5db7f652dc4cc16bcff8bca1158f702cf5d62f2b30248ce08c",
+    "rtw8852b_set_gain_error": "885c68231d870e16994c91ad05f22348820a1a86917ee4bc7aaa6c7ecd4ddd06",
+    "rtw8852b_set_gain_offset": "6cb768dacef6713362fa3a53acab7e2a643e140cee2b919b3e06270ee9aa4e4a",
+    "rtw8852b_set_rxsc_rpl_comp": "dcc91f573f977d47398ee435080e11ab123b0359386dfaa3fc699ef52712dff4",
+    "rtw8852b_ctrl_ch": "5615b54f4fb3af4a3a2b04b20c4ebc9633e732fd6a602d847c10dbad868d851e",
+    "rtw8852b_bw_setting": "ee9ef037974c5ac5865e68b603e7b175352aa8ef6eb9e032aea9c0f54734dc40",
+    "rtw8852b_ctrl_bw": "ccfa028b4c29ceff781dd07f95237f6854b3f33ee61d84932a70224a29596ce8",
+    "rtw8852b_ctrl_cck_en": "5087c8ad32cf57380f391a6c5f21935ac83e6bb44f27335333024f94df2873e5",
+    "rtw8852b_5m_mask": "a153c1387b861784f289815aed8fbd71701c5e7030ae9d80f44fd1a11b68f8e8",
+    "rtw8852b_bb_reset_all": "68e13fbd3f1e0a2cb0300b4669a18e6560ecf59dc788f491a4cde09e08508317",
+    "rtw8852b_bb_reset_en": "93bb5ef1eee8f4252a1131f1fadd6fd568eac6beee84bf93370e4db43ca1e4b2",
+    "rtw8852b_bb_set_pop": "04b272bbfbb3b5e502cd08157eae3db42f844faf85281bfce3b96d021546dfe6",
+    "rtw8852b_set_channel_bb": "c6df7171ef32c779732cc03f9cb711064d505698e2a24bf76cb2847cecbe2550",
+    "rtw8852b_set_channel": "b02db045a632b663dcef270273a4ad2d25f6345b2e8ae62e6acd76dc8f6c1219",
+    "rtw8852b_tssi_cont_en": "0c55b0655e905fe37df059dd965d4aa21a6aaeec37b26eb65f51c39f33b7b966",
+    "rtw8852b_tssi_cont_en_phyidx": "d9a8c07bb52a743db3128e937ad090e88f52568f9c8bf64cf4033c855d4d36a4",
+    "rtw8852b_adc_en": "5c39452faadc2e94374eac34ea4511da942cd26789bd339cf9ddb3f83d7516f6",
+    "rtw8852b_set_channel_help": "6b19657ddc7d7b10a9705a3b14a7f77eb0f3a1db8e19f894566e15d0d8780016",
+    "_kpath": "6549a72d4d4057b4463d8202d704dbcfaf64c89be1e2d62fcde139faf64b93e8",
+    "_bw_setting": "d80b58669941ad8fb379f2374c546d4636479f86fd14dbbb4880598e191de206",
+    "_ctrl_bw": "91be112df5f4fe6361bd306c3fbad6565cc63ce50ca41effe82104bfcff9dc72",
+    "_set_s0_arfc18": "778b381c900fb5d905b2ee923d86117dd898ecccadabc315b1c2f97ab1f087a0",
+    "_lck_check": "6240a9b36fd74a39117e881b80f3b29aa4eec697c741707824a15ea9af2468c6",
+    "_set_ch": "65a504c2861bbfbd873d7c0635f557c0434129b3b516c4942225034078ae3da6",
+    "_ch_setting": "1f04c912ea1cf118d3ee62838bfac2a1c28a7cfae1c83239e393de066df6020c",
+    "_ctrl_ch": "738ad71b279b39863c3b12a60d452f030fd2f0668fac1b6e37c56dc72708971c",
+    "_set_rxbb_bw": "c31c8c61126e252b410eaa3f8dfcacce62693ddfd96e2050905a49ff1184615a",
+    "_rxbb_bw": "df36a721079878957a5dc9472988fafeab3fbaa590588b5401bc13a0bf1e7b42",
+    "rtw8852b_ctrl_bw_ch": "c874a659a74c22fd500ef3213a8ef1f01c6313b80e7296b473fdcaf537c37808",
+    "rtw8852b_set_channel_rf": "84548c91698e0d4c74f06a5b6691763f5a5562cb1df83601e0edfd960e2d9ce6",
+    "rtw89_phy_get_txsc": "6b41cabbc21ee7b7b2512c8ee685e0af5098620438ddc6f688b978b3cb0c6592",
+    "rtw89_encode_chan_idx": "1b161e9e209e238155fe44924abb0bf91b5face318461d02878ca6de387ef7be",
+    "rtw89_subband_to_bb_gain_band": "33efe7ed25f1fb75353b432675fe1cb026cd4b8252850129b1ff1c95adbc28bf",
+    "rtw89_subband_to_gain_offset_band_of_ofdm": "50432a86ab4f3bc632db3ab2255e70821abe8cf483d64160b82a13a67fd92e52",
+    "rtw89_mac_cfg_ppdu_status_ax": "b8fc9b6e662d88e700ee17a3072ae58e06b7e499be7932c36daa4ac4e2ea0271"
+  },
+  "original_arrays": {
+    "rtw8852b_sco_barker_threshold": "f92641e73b34767463e919150bae69023c6ce9a3d7699f5e424f03a9cbd5f31a",
+    "rtw8852b_sco_cck_threshold": "84dab52a0a37d725059279a0bd37692a591a151c2edbb6ee1ec55a5b78c98e63",
+    "bb_gain_lna": "7ccdf14d59a5d6a2eec1c2863473f0d0df807617db503af062b337c08b4d95b6",
+    "bb_gain_tia": "bbce21dec847ecebad42b688149d44ac2d61ac89c91d0eb62be4c310383d580a",
+    "rtw89_ch_base_table": "a2ed8b185866b8d70fc16c8cd38bed2a03b884d7f44b8f7698c7513e61a99505"
+  },
+  "sources": {
+    "rtw8852b.c": "be0fbd13013d64835742c089f5c66963e4154cf1d78723dd7b88f2c5e28df3c2",
+    "rtw8852b_rfk.c": "a8f96bd5d4f7b319443e9f327e07eda5e4f37f3454d9d88b343a4b2600cb88ba",
+    "phy.c": "8d0e06bdc14878648f2be84e4ec67de76ad20718202e1d00199618d356b9fd72",
+    "phy.h": "ceac88b387d211f48b07a8e94466d6968a28ed23fd88ee9b0e21aa214f95e5dd",
+    "mac.c": "e3882df844813af81121d9de2c1f63a8eabc6041d807bbc55b09607c672151b5",
+    "mac.h": "7857ff22da7beef10738a66b8f1d33fbd34279f97a7a0fe02c9ef22d6aef5cf0",
+    "core.h": "ec8c6d32fe8f86620ed23190b26d8f4aaa11238fb195bba4c4e66ee01d5e2366",
+    "reg.h": "9609382125b396708d52f2d64a4e8a1e7abb080690ea2776308323834b725d03"
+  },
+  "adaptations": [
+    "typed bounded Context",
+    "scheduler pause belongs to mandatory parent lease; never resume TX here",
+    "bounded failure-latching I/O/polls",
+    "verify terminal synthesizer lock",
+    "signed gain shifts use multiplication",
+    "monitor flag passed as boolean; only MAC0/PHY0 supported",
+    "shared pinned RFK numeric constants"
+  ],
+  "generated": {
+    "Rtw8852bChannelConstants.hpp": "a36d8ffd0446041f1fce7d4b014ad22cb2eb25c973ae7a353ad0a2eb6148d608",
+    "Rtw8852bChannelFunctions.inc": "4fb2e773ab4ff7e41d85bc06531457b4b170d384e3b2b2998a668b7fb7199259"
+  },
+  "hardware_tested": false,
+  "power_limits_implemented": false
+}
