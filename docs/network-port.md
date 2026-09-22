@@ -1,9 +1,11 @@
 # Reusing a macOS Wi-Fi stack for RTL8852BE
 
-This is an unfinished port. There is no installable networking kext and no
-demonstrated association, DHCP lease or Internet connection. The live diagnostic
-0.0.13 remains unchanged. Network components must not be packaged as a functional
-driver simply because the archive compiles.
+This is an unfinished port. The installed 120aae9 networking controller has
+demonstrated association, DHCP and basic Internet connectivity on one
+WPA2-Personal/CCMP network. Native macOS Wi-Fi registration and broader network
+types remain unfinished; see [current native/authentication status](native-auth-status.md).
+The historical component descriptions below are not claims that every newer
+mode or interface has been tested on hardware.
 
 ## Code reused
 
