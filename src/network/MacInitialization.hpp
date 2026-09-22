@@ -56,7 +56,7 @@ template<class D> class MacInitialization {
         ++d->result.reads;if(!initAddress(a)||!d->io.read16(a,v))fail(d,InitError::read,a);d->lastAddress=a;d->lastValue=v;return v;}
     static u32 rtw89_read32(Context *d,u32 a){u32 v=0;if(!check(d))return 0;
         ++d->result.reads;if(!initAddress(a)||!d->io.read32(a,v)||
-            (v==0xffffffff&&a!=R_AX_DMAC_ERR_IMR&&a!=R_AX_CMAC_ERR_IMR&&a!=R_AX_CK_EN)||v==0xdeadbeef){
+            (v==0xffffffff&&a!=R_AX_DMAC_ERR_IMR&&a!=R_AX_CMAC_ERR_IMR&&a!=R_AX_CK_EN&&a!=R_AX_WDRLS_ERR_IMR)||v==0xdeadbeef){
             fail(d,InitError::read,a,0,v);}
         d->lastAddress=a;d->lastValue=v;return v;}
     static void rtw89_write8(Context *d,u32 a,u8 v){if(!check(d))return;++d->result.writes;
@@ -64,7 +64,14 @@ template<class D> class MacInitialization {
     static void rtw89_write16(Context *d,u32 a,u16 v){if(!check(d))return;++d->result.writes;
         if(!initWriteAddress(a)||!d->io.write16(a,v))fail(d,InitError::write,a,v);}
     static void rtw89_write32(Context *d,u32 a,u32 v){if(!check(d))return;++d->result.writes;
-        if(!initWriteAddress(a)||!d->io.write32(a,v))fail(d,InitError::write,a,v);}
+        if(!initWriteAddress(a)||!d->io.write32(a,v)){fail(d,InitError::write,a,v);return;}
+        // Accept an all-ones initial WDRLS mask only with proof that the
+        // upstream clear/set operation changes the implemented enable bits.
+        // A disconnected/stuck-all-ones read must not pass the clear step.
+        if(a==R_AX_WDRLS_ERR_IMR){const auto got=rtw89_read32(d,a);
+            if(check(d)&&((got^v)&B_AX_WDRLS_IMR_EN_CLR))
+                fail(d,InitError::precondition,a,v&B_AX_WDRLS_IMR_EN_CLR,got);}
+    }
     static u32 rtw89_read32_mask(Context *d,u32 a,u32 m){return (rtw89_read32(d,a)&m)>>shift(m);}
     static void rtw89_write32_mask(Context *d,u32 a,u32 m,u32 v){const auto old=rtw89_read32(d,a);rtw89_write32(d,a,u32_replace_bits(old,v,m));}
     static void rtw89_write16_mask(Context *d,u32 a,u16 m,u16 v){const auto old=rtw89_read16(d,a);rtw89_write16(d,a,u16_replace_bits(old,v,m));}

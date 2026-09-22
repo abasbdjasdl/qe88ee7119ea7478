@@ -72,6 +72,12 @@ int main(){
     // The CMAC recovery path intentionally writes ALLCKEN (all ones). It is
     // valid for this clock register, but not a general invalid-read exemption.
     {Device f;f.put(m::R_AX_CK_EN,0xffffffff,4);assert(run(f,result));}
+    {Device f;f.put(m::R_AX_WDRLS_ERR_IMR,0xffffffff,4);assert(run(f,result));
+        assert((f.get(m::R_AX_WDRLS_ERR_IMR)&m::B_AX_WDRLS_IMR_EN_CLR)==m::B_AX_WDRLS_IMR_SET);}
+    {Device f;f.put(m::R_AX_WDRLS_ERR_IMR,0xffffffff,4);f.ignoreWrite=m::R_AX_WDRLS_ERR_IMR;
+        assert(!run(f,result)&&result.error==m::InitError::precondition&&result.address==m::R_AX_WDRLS_ERR_IMR);}
+    {Device f;f.put(m::R_AX_WDRLS_ERR_IMR,0xdeadbeef,4);
+        assert(!run(f,result)&&result.error==m::InitError::read&&result.address==m::R_AX_WDRLS_ERR_IMR);}
     {Device f;f.cancel=true;assert(!run(f,result)&&!f.operations);}
     {Device f;f.cmd=6;assert(!run(f,result)&&!f.operations);}
     {Device f;m::MacInitialization<Device> init(f);assert(!init.enableSystem()&&!init.initializeDmac()&&!init.initializeCmac()&&!init.finishTrx()&&!f.operations);
