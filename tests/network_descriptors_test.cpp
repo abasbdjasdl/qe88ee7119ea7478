@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 #include "../src/network/NetworkDescriptors.hpp"
+#include "../src/network/RxTrace.hpp"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -7,6 +8,27 @@
 namespace n=rtl8852be::network;
 static void put(std::vector<uint8_t>&v,size_t p,uint32_t x){for(unsigned j=0;j<4;++j)v[p+j]=x>>(8*j);}
 int main(){
+    // EAPOL location for ordinary/QoS/4-address/HT-control headers, with FCS.
+    const uint8_t local[6]={2,1,2,3,4,5};
+    for(unsigned mode=0;mode<8;++mode){
+        std::vector<uint8_t> frame(80);frame[0]=(mode&1)?0x88:8;
+        frame[1]=(mode&2)?3:2;if(mode&4)frame[1]|=0x80;
+        memcpy(frame.data()+4,local,6);
+        size_t header=24+((mode&2)?6:0)+((mode&1)?2:0)+(((mode&5)==5)?4:0);
+        const uint8_t llc[]={0xaa,0xaa,3,0,0,0,0x88,0x8e};memcpy(frame.data()+header,llc,8);
+        n::RxPacket p{};p.payload=frame.data();p.length=header+12;
+        assert(n::inspectRx(p,local).eapol);
+        --p.length;assert(!n::inspectRx(p,local).eapol);++p.length;
+        p.info.hw_dec=true;assert(!n::inspectRx(p,local).eapol);
+        p.info.sw_dec=true;assert(n::inspectRx(p,local).eapol);
+        frame[1]|=0x40;assert(!n::inspectRx(p,local).eapol);frame[1]&=~0x40;
+        frame[4]^=1;assert(!n::inspectRx(p,local).eapol);frame[4]^=1;
+        if(mode&1){frame[24+((mode&2)?6:0)]|=0x80;assert(!n::inspectRx(p,local).eapol);}
+    }
+    {uint8_t frame[30]={0xc0};memcpy(frame+4,local,6);frame[24]=15;
+     n::RxPacket p{};p.payload=frame;p.length=30;
+     assert(n::inspectRx(p,local).deauth&&n::inspectRx(p,local).deauthReason==15);
+     p.length=29;assert(!n::inspectRx(p,local).deauth);}
     n::TxInfo tx{};tx.pkt_size=1500;tx.en_wd_info=true;tx.ch_dma=2;tx.qsel=4;tx.mac_id=7;
     tx.hdr_llc_len=12;tx.seq=0xabc;tx.use_rate=true;tx.data_rate=4;tx.port=1;
     uint8_t out[50];memset(out,0xaa,sizeof(out));size_t len=0;
@@ -31,6 +53,18 @@ int main(){
     assert(n::decodeRx(rx.data(),rx.size(),base,packet)==n::DescriptorStatus::ok);
     assert(packet.payload==rx.data()+offset&&packet.length==payload&&packet.info.bw==2);
     assert(packet.info.data_rate==4&&packet.info.free_run_cnt==0x12345678&&packet.info.mac_id==7&&packet.info.addr_cam_valid);
+    // Raw RXWD bit combinations: HW_DEC + SW_DEC must remain a software frame.
+    // Error-bearing packets must still fail decode before the bridge sees them.
+    for(unsigned bits=0;bits<8;++bits){
+        put(rx,base+12,bits);
+        assert(n::decodeRx(rx.data(),rx.size(),base,packet)==n::DescriptorStatus::ok);
+        assert(n::hardwareDecrypted(packet.info)==((bits&6)==4));
+    }
+    for(unsigned bits=0;bits<8;++bits){
+        put(rx,base+12,bits|0x400);
+        assert(n::decodeRx(rx.data(),rx.size(),base,packet)==n::DescriptorStatus::corruptFrame&&!packet.payload);
+    }
+    put(rx,base+12,0);
     for(size_t cap=0;cap<rx.size();++cap){assert(n::decodeRx(rx.data(),cap,base,packet)!=n::DescriptorStatus::ok);assert(!packet.payload&&!packet.length&&!packet.info.ready);}
     put(rx,base+12,0x200);assert(n::decodeRx(rx.data(),rx.size(),base,packet)==n::DescriptorStatus::corruptFrame&&!packet.payload);
     put(rx,base+12,0x400);assert(n::decodeRx(rx.data(),rx.size(),base,packet)==n::DescriptorStatus::corruptFrame);

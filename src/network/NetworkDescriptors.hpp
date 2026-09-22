@@ -23,6 +23,9 @@ inline DescriptorStatus encodeTx(const TxInfo &p,uint8_t *out,size_t capacity,si
     for(size_t i=0;i<needed;++i)out[i]=encoded[i];length=needed;return DescriptorStatus::ok;
 }
 struct RxPacket {RxInfo info{};const uint8_t *payload{};size_t length{},offset{};};
+// Same effective-decryption condition as pinned rtw89_core_update_rx_status.
+// HW_DEC alone is insufficient: SW_DEC requests host software processing.
+inline bool hardwareDecrypted(const RxInfo &info){return info.hw_dec&&!info.sw_dec&&!info.icv_err;}
 // Header-only inspection for the first PCI fragment. Payload is never exposed
 // until the complete-frame decoder has checked the advertised packet length.
 inline DescriptorStatus decodeRxHeader(const uint8_t *data,size_t size,size_t descriptorOffset,RxPacket &out){

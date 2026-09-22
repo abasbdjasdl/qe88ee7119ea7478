@@ -171,7 +171,7 @@ fi
 worker="$target/network-input/run-network-test.sh"
 collector="$target/network-input/collect_network_state.sh"
 expected_worker=c99bc4104b4227ed2bd1e6fee121739f6aa5a75f342227d1be3d8c9bd75dd5d4
-expected_collector=0dd15a192c57986200fa7b87ca63a0d6d298003ff612d507eaad63b0f1537a2e
+expected_collector=eecbbe090b7929b21d814e34fa4d31d376df2c649692559cb3801b58f7207ea2
 for script in "$worker" "$collector"; do
     [ -f "$script" ] || { echo 'Missing input.'; exit 4; }
     actual=$(/sbin/sha256 -q "$script" 2>/dev/null)

@@ -3,6 +3,7 @@
 #include "Net80211Runtime.hpp"
 #include "MacPciRingIo.hpp"
 #include "MacNetworkPhyWait.hpp"
+#include "RxTrace.hpp"
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -38,8 +39,11 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     bool stateDeferred{};int deferredState{},deferredArgument{};
     uint64_t stateRequests[5]{},runCommitted{},portAuthorizations{},rxBridgeOk{},rxBridgeError{},txPrepareErrors{};
     uint64_t lastStateRequest{},lastRxBridgeError{},lastTxPrepareError{};
+    uint64_t rxTypes[4]{},rxHardwareCrypto{},rxSoftwareFallback{},rxEapol{},rxEapolGated{},rxEapolBridge{},lastDeauthReason{};
     void deliver(const uint8_t *data,size_t length,uint8_t channel,int rssi){
         receivingProtocol=true;++rxDeliveryAttempts;
+        RxPacket packet;
+        if(decodeRx(data,length,4,packet)==DescriptorStatus::ok&&inspectRx(packet,identity.interface.address.bytes).eapol)++rxEapolBridge;
         const int error=deliverRealtekRx(&ic,data,length,4,channel,rssi);
         receivingProtocol=false;
         if(error){++rxBridgeError;lastRxBridgeError=unsigned(error);}else ++rxBridgeOk;
@@ -209,6 +213,15 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         AssembledRx frame;const auto status=s.rxAssembly.feed(data,length,frame);
         if(status!=AssemblyStatus::complete)return true;
         ++s.rxComplete;
+        if(frame.packet.info.pkt_type==0){
+            const auto trace=inspectRx(frame.packet,s.identity.interface.address.bytes);
+            ++s.rxTypes[trace.type];
+            if(hardwareDecrypted(frame.packet.info))++s.rxHardwareCrypto;
+            if(frame.packet.info.hw_dec&&frame.packet.info.sw_dec)++s.rxSoftwareFallback;
+            if(trace.deauth)s.lastDeauthReason=trace.deauthReason;
+            if(trace.eapol){++s.rxEapol;
+                if(!s.attached||!s.owner.interface_||!s.enabled||s.actionInFlight)++s.rxEapolGated;}
+        }
         if(frame.packet.info.pkt_type==0){++s.rxWireless;if(!s.attached||!s.owner.interface_||!s.enabled||s.actionInFlight)++s.rxGated;}
         if(frame.packet.info.pkt_type==1)++s.rxPhy;
         if(frame.packet.info.pkt_type==10){
@@ -326,6 +339,16 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     uint64_t lastStatus{};
     void publishStatus(){
         if(!owner.pci_)return;
+        owner.pci_->setProperty("R16TraceRxManagement",uint64_t(rxTypes[0]),64);
+        owner.pci_->setProperty("R16TraceRxControl",uint64_t(rxTypes[1]),64);
+        owner.pci_->setProperty("R16TraceRxData",uint64_t(rxTypes[2]),64);
+        owner.pci_->setProperty("R16TraceRxOther",uint64_t(rxTypes[3]),64);
+        owner.pci_->setProperty("R16TraceRxHardwareCrypto",uint64_t(rxHardwareCrypto),64);
+        owner.pci_->setProperty("R16TraceRxSoftwareFallback",uint64_t(rxSoftwareFallback),64);
+        owner.pci_->setProperty("R16TraceEapolSeen",uint64_t(rxEapol),64);
+        owner.pci_->setProperty("R16TraceEapolGated",uint64_t(rxEapolGated),64);
+        owner.pci_->setProperty("R16TraceEapolBridge",uint64_t(rxEapolBridge),64);
+        owner.pci_->setProperty("R16TraceDeauthReason",uint64_t(lastDeauthReason),64);
         owner.pci_->setProperty("R16TraceRequestInit",uint64_t(stateRequests[0]),64);
         owner.pci_->setProperty("R16TraceRequestScan",uint64_t(stateRequests[1]),64);
         owner.pci_->setProperty("R16TraceRequestAuth",uint64_t(stateRequests[2]),64);

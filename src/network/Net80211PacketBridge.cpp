@@ -60,7 +60,7 @@ int deliverRealtekRx(ieee80211com *ic,const uint8_t *dma,size_t bytes,size_t des
     RxPacket rx;
     if(decodeRx(dma,bytes,descriptorOffset,rx)!=DescriptorStatus::ok)return EINVAL;
     // C2H/PPDU/TX reports belong to their hardware handlers, never net80211.
-    if(rx.info.pkt_type!=0||rx.info.hw_dec)return EOPNOTSUPP;
+    if(rx.info.pkt_type!=0||hardwareDecrypted(rx.info))return EOPNOTSUPP;
     if(rx.length<sizeof(ieee80211_frame)+4)return EINVAL;
     const auto type=rx.payload[0]&IEEE80211_FC0_TYPE_MASK;
     if(type!=IEEE80211_FC0_TYPE_DATA&&type!=IEEE80211_FC0_TYPE_MGT)return EOPNOTSUPP;
