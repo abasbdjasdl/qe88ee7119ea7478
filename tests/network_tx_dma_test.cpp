@@ -10,7 +10,7 @@ struct ieee80211com{};struct ieee80211_node{};
 static unsigned frames{},nodes{},released{};
 namespace rtl8852be { namespace network {
 void releaseTx(ieee80211com *,TxLease &lease){if(lease.frame){delete lease.frame;--frames;}if(lease.node){delete lease.node;--nodes;}lease={};++released;}
-int deliverRealtekRx(ieee80211com *,const uint8_t *,size_t,size_t,uint8_t,int){return 0;}
+int deliverRealtekRx(ieee80211com *,const uint8_t *,size_t,size_t,uint8_t,int,RxDeliveryTrace *){return 0;}
 } }
 using namespace rtl8852be::network;
 void empty(){assert(!fake.memories&&!fake.commands&&!fake.mappers&&!fake.memoryPrepared&&!fake.dmaPrepared&&!fake.logs&&!frames&&!nodes);}
