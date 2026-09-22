@@ -33,6 +33,10 @@ and disconnect for an automated test/controller process. Join reads the exact
 binary request from stdin, which avoids secrets in command-line arguments.
 Never dump that request or redirect it into CI/public artifacts. It intentionally
 does not print network names or key material in status diagnostics.
+The `probe` operation batches a real status read with unknown-selector,
+empty-join, invalid-version, short-output and unexpected-scalar rejection checks.
+It sends no valid join/disconnect and reports actual return codes. Run it as
+part of the next scheduled hardware capture, not as proof from a cloud build.
 
 Concurrency: user-client calls serialize on the client lock, then the provider
 control lock, then the hardware command gate. The provider rejects public
