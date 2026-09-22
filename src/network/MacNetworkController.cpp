@@ -37,6 +37,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     bool bound{},attached{},visible{},runtimeAttempted{},prepared{},bootStarted{},stationStarted{},interruptAttached{},credentials{};
     bool enabled{},faulted{},stopping{},scanDone{},authPending{},probePending{},runPending{},resetPending{};
     bool stateDeferred{};int deferredState{},deferredArgument{};
+    selection::Pending pendingSelection;
     uint64_t stateRequests[5]{},runCommitted{},portAuthorizations{},rxBridgeOk{},rxBridgeError{},txPrepareErrors{};
     uint64_t lastStateRequest{},lastRxBridgeError{},lastTxPrepareError{};
     uint64_t rxTypes[4]{},rxHardwareCrypto{},rxSoftwareFallback{},rxEapol{},rxEapolGated{},rxEapolBridge{},lastDeauthReason{};
@@ -82,6 +83,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     bool inGate(){return owner.loop_->inGate();}
     void fail(const char *reason){
         if(faulted)return;faulted=true;traffic=station::Traffic::none;enabled=false;
+        pendingSelection.clear();
         ic.ic_if.if_flags&=~IFF_RUNNING;
         owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
         publishStatus();owner.setProperty("R16Failure",reason);IOLog("RTL8852BE network: %s\n",reason);
@@ -169,6 +171,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             if(s.stationStarted)s.station.disconnect(s.now());return 0;
         }
         if(!s.enabled||!s.stationStarted)return ENETDOWN;
+        if(s.pendingSelection.waiting())return EBUSY;
         if(next==IEEE80211_S_SCAN){
             if(s.station.state()!=station::State::idle){
                 s.stateDeferred=true;s.deferredState=next;s.deferredArgument=arg;
@@ -318,6 +321,45 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         }else{join.i_flags=IEEE80211_JOIN_NWKEY;join.i_nwkey.i_wepon=IEEE80211_NWKEY_OPEN;}
         if(ieee80211_add_ess(&ic,&join))return false;ic.ic_flags|=IEEE80211_F_AUTO_JOIN;credentials=true;return true;
     }
+    IOReturn queueSelection(const selection::Join *requested){
+        if(!attached||!stationStarted||faulted||stopping||!enabled)return kIOReturnNotReady;
+        if(requested){
+            if(!selection::valid(*requested))return kIOReturnBadArgument;
+            if(!pendingSelection.submit(*requested))return kIOReturnBusy;
+        }else pendingSelection.clear();
+        // Keep the old protocol keys until all old-channel TX and hardware work
+        // has drained. Never install the new credentials from this call stack.
+        if(!station.disconnect(now())){pendingSelection.clear();return kIOReturnBusy;}
+        credentials=false;ic.ic_flags&=~IEEE80211_F_AUTO_JOIN;
+        stateDeferred=true;deferredState=IEEE80211_S_INIT;deferredArgument=-1;
+        authPending=probePending=runPending=scanDone=false;
+        owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
+        return kIOReturnSuccess;
+    }
+    bool applyPendingSelection(){
+        selection::Join selected{};
+        if(!pendingSelection.take(station.state()==station::State::idle&&ic.ic_state==IEEE80211_S_INIT,
+                                  dataDrained(),actionInFlight||stateDeferred||resetPending,selected))return true;
+        ieee80211_del_ess(&ic,nullptr,0,1);ieee80211_deselect_ess(&ic);
+        ieee80211_disable_rsn(&ic);ieee80211_disable_wep(&ic);
+        selection::wipe(ic.ic_psk,sizeof(ic.ic_psk));
+        ieee80211_join join{};join.i_len=selected.ssidLength;
+        memcpy(join.i_nwid,selected.ssid,selected.ssidLength);
+        if(selected.security==selection::Security::wpa2Psk){
+            join.i_flags=IEEE80211_JOIN_WPAPSK|IEEE80211_JOIN_WPA;
+            join.i_wpaparams.i_enabled=1;join.i_wpaparams.i_protos=IEEE80211_WPA_PROTO_WPA2;
+            join.i_wpaparams.i_akms=IEEE80211_WPA_AKM_PSK;
+            join.i_wpaparams.i_ciphers=IEEE80211_WPA_CIPHER_CCMP;
+            join.i_wpaparams.i_groupcipher=IEEE80211_WPA_CIPHER_CCMP;
+            join.i_wpapsk.i_enabled=1;memcpy(join.i_wpapsk.i_psk,selected.pmk,32);
+        }else{join.i_flags=IEEE80211_JOIN_NWKEY;join.i_nwkey.i_wepon=IEEE80211_NWKEY_OPEN;}
+        const int error=ieee80211_add_ess(&ic,&join);
+        if(selected.specificBssid){memcpy(ic.ic_des_bssid,selected.bssid,6);ic.ic_flags|=IEEE80211_F_DESBSSID;}
+        else{memset(ic.ic_des_bssid,0,6);ic.ic_flags&=~IEEE80211_F_DESBSSID;}
+        selection::wipe(&selected,sizeof(selected));selection::wipe(&join,sizeof(join));
+        if(error)return false;
+        ic.ic_flags|=IEEE80211_F_AUTO_JOIN;credentials=true;return true;
+    }
     bool startHardware(){
         owner.recordStartup(owner.pci_,30);
         if(!boot->prepare(identity))return false;prepared=true;
@@ -463,6 +505,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(authPending){authPending=false;savedState(&ic,IEEE80211_S_AUTH,-1);}
         if(probePending){probePending=false;savedState(&ic,IEEE80211_S_SCAN,-1);}
         if(scanDone){scanDone=false;ieee80211_next_scan(&ic.ic_if);}
+        if(!applyPendingSelection()){fail("network selection failed");return;}
         if(runPending&&station.state()==station::State::associated){
             runPending=false;if(!savedState(&ic,IEEE80211_S_RUN,-1)&&ic.ic_state==IEEE80211_S_RUN)++runCommitted;
         }
@@ -481,6 +524,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     }
     bool shutdown(){
         stopping=true;enabled=false;traffic=station::Traffic::none;owner.timer_->cancelTimeout();
+        pendingSelection.clear();
         owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
         if(commands)commands->invalidate();
         // Disable the source first. No memory is released while a callback borrows it.
@@ -598,13 +642,21 @@ IOReturn R16NetworkController::enableGated(OSObject *o,void *on,void*,void*,void
     auto &owner=*static_cast<R16NetworkController*>(o);auto *s=owner.state_;
     if(!s||s->faulted||s->stopping)return kIOReturnNotReady;s->enabled=on!=nullptr;
     if(s->enabled){s->ic.ic_if.if_flags|=IFF_UP|IFF_RUNNING;s->lastWatchdog=s->now();}
-    else{s->ic.ic_if.if_flags&=~(IFF_UP|IFF_RUNNING);s->stateDeferred=true;s->deferredState=IEEE80211_S_INIT;s->deferredArgument=-1;
+    else{s->pendingSelection.clear();s->ic.ic_if.if_flags&=~(IFF_UP|IFF_RUNNING);s->stateDeferred=true;s->deferredState=IEEE80211_S_INIT;s->deferredArgument=-1;
         if(s->stationStarted)s->station.disconnect(s->now());
         owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);}
     return kIOReturnSuccess;
 }
 IOReturn R16NetworkController::enable(IONetworkInterface*){return gate_?gate_->runAction(enableGated,this):kIOReturnNotReady;}
 IOReturn R16NetworkController::disable(IONetworkInterface*){return gate_?gate_->runAction(enableGated):kIOReturnNotReady;}
+IOReturn R16NetworkController::selectionGated(OSObject *o,void *request,void*,void*,void*){
+    auto *s=static_cast<R16NetworkController*>(o)->state_;
+    return s?s->queueSelection(static_cast<const selection::Join*>(request)):kIOReturnNotReady;
+}
+IOReturn R16NetworkController::selectWirelessNetwork(const selection::Join &request){
+    return gate_?gate_->runAction(selectionGated,const_cast<selection::Join*>(&request)):kIOReturnNotReady;
+}
+IOReturn R16NetworkController::disconnectWirelessNetwork(){return gate_?gate_->runAction(selectionGated):kIOReturnNotReady;}
 IOReturn R16NetworkController::outputGated(OSObject *o,void *p,void *out,void*,void*){
     auto &owner=*static_cast<R16NetworkController*>(o);auto *s=owner.state_;auto m=static_cast<mbuf_t>(p);
     auto &result=*static_cast<UInt32*>(out);result=kIOReturnOutputDropped;

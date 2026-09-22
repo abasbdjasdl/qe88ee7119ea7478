@@ -7,6 +7,7 @@
 #include "MacFirmwareCommands.hpp"
 #include "StationController.hpp"
 #include "StationIoCore.hpp"
+#include "WirelessSelection.hpp"
 struct ieee80211com;
 class IOEthernetInterface;
 namespace rtl8852be { namespace network {
@@ -60,6 +61,7 @@ class R16NetworkController : public IOEthernetController {
     static IOReturn stopGated(OSObject*,void*,void*,void*,void*);
     static IOReturn enableGated(OSObject*,void*,void*,void*,void*);
     static IOReturn outputGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn selectionGated(OSObject*,void*,void*,void*,void*);
     static void timer(OSObject*,IOTimerEventSource*);
     void releaseResources();
     unsigned startupStage_{};
@@ -81,4 +83,8 @@ public:
     IOReturn disable(IONetworkInterface*) override;
     UInt32 outputPacket(mbuf_t,void*) override;
     bool setLinkStatus(UInt32,const IONetworkMedium * = nullptr,UInt64 = 0,OSData * = nullptr) override;
+    // Kernel-side native UI adapter entry points. Success means queued only.
+    // They never publish credentials through IORegistry or a property setter.
+    IOReturn selectWirelessNetwork(const rtl8852be::network::selection::Join&);
+    IOReturn disconnectWirelessNetwork();
 };
