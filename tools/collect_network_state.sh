@@ -43,13 +43,15 @@ fi
 # Do not overwrite an old experiment or follow a pre-existing report symlink.
 if ! (set -C; : > "$report") 2>/dev/null; then echo 'Output must be a new writable file.' >&2; exit 73; fi
 exec 3>"$report" || exit 73
+exec 4>"$report.command-status.txt" || exit 73
 
 # Every actual command has a bounded lifetime, including both sides of the
 # registry pipeline. No raw registry bytes are ever redirected to any file.
 bounded() (
     seconds=$1; shift
-    "$@" & command_pid=$!
-    (sleep "$seconds"; kill -TERM "$command_pid" 2>/dev/null; sleep 1; kill -KILL "$command_pid" 2>/dev/null) & guard_pid=$!
+    exec 9<&0
+    "$@" <&9 9<&- & command_pid=$!
+    (sleep "$seconds"; kill -TERM "$command_pid" 2>/dev/null; sleep 1; kill -KILL "$command_pid" 2>/dev/null) >/dev/null 2>&1 & guard_pid=$!
     trap 'kill -TERM "$command_pid" "$guard_pid" 2>/dev/null' 1 2 15
     wait "$command_pid"; result=$?
     kill -TERM "$guard_pid" 2>/dev/null
@@ -57,10 +59,11 @@ bounded() (
     exit "$result"
 )
 registry_value() {
-    # plutil parses XML and emits only this exact scalar; grep is NOT a plist
-    # sanitizer. The key is supplied solely by literals in this script.
-    bounded 3 /usr/sbin/ioreg -r -c R16RTL8852BE -a -d 2 2>/dev/null |
+    ( bounded 3 /usr/sbin/ioreg -r -c R16RTL8852BE -a -d 2 2>/dev/null
+      code=$?; printf 'query=%s ioreg_exit=%s\n' "$1" "$code" >&4 ) |
         bounded 3 /usr/bin/plutil -extract "$1" raw -o - - 2>/dev/null
+    code=$?; printf 'query=%s plutil_exit=%s\n' "$1" "$code" >&4
+    return "$code"
 }
 record() {
     label=$1; shift
@@ -72,6 +75,26 @@ printf 'format=R16-network-capture-v1\ncollector=read_only_snapshot\n' >&3
 printf 'utc=%s\n' "$(bounded 3 /bin/date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)" >&3
 printf 'os=%s\n' "$(bounded 3 /usr/bin/sw_vers -productVersion 2>/dev/null)" >&3
 record kext_load /usr/sbin/kextstat -l -b local.rtl8852be.network
+
+provider_value() {
+    ( bounded 3 /usr/sbin/ioreg -r -k R16NetworkTestId -a -d 1 2>/dev/null
+      code=$?; printf 'provider_query=%s ioreg_exit=%s\n' "$1" "$code" >&4 ) |
+        bounded 3 /usr/bin/plutil -extract "$1" raw -o - - 2>/dev/null
+    code=$?; printf 'provider_query=%s plutil_exit=%s\n' "$1" "$code" >&4
+    return "$code"
+}
+printf '\n[persistent_pci_startup]\n' >&3
+test_id=$(provider_value 0.R16NetworkTestId) || test_id=
+second_id=$(provider_value 1.R16NetworkTestId) || second_id=
+if [ "$test_id" = NETWORK-START-02 ] && [ -z "$second_id" ]; then
+    printf 'provider_test_id=NETWORK-START-02\n' >&3
+    for key in R16NetworkStage R16NetworkStartFailed R16ProbeStage R16ProbeError R16ProbePciError R16ProbePowerError R16ProbeDownloadStatus R16ProbePollAddress R16ProbePollMask R16ProbePollWanted R16ProbePollActual; do
+        value=$(provider_value "0.$key") || value=unknown
+        case "$value" in true|false|unknown) ;; ''|*[!0-9]*) value=invalid;; esac
+        printf '%s=%s\n' "$key" "$value" >&3
+    done
+else printf 'provider_test_id=missing_or_ambiguous\n' >&3
+fi
 
 target=; matched=no
 if [ -x /usr/sbin/ioreg ] && [ -x /usr/bin/plutil ]; then
@@ -132,9 +155,16 @@ printf '\n[driver_numeric_dmesg_diagnostics]\n' >&3
 # Only reconstruct known numeric/native-phase diagnostics. Do not write raw
 # dmesg, arbitrary Wi-Fi messages, registry dumps, SSIDs or key material.
 bounded 5 /sbin/dmesg 2>/dev/null | /usr/bin/awk '
- /RTL8852BE (radio failure:|probe failure stage=|probe MAC stage=|probe cycle preparation stage=|probe download PCI stage=)/ {
-   p=index($0,"RTL8852BE "); s=substr($0,p); n=split(s,a," "); out="RTL8852BE diagnostic";
-   for(i=1;i<=n;i++) if(a[i] ~ /^(phase|stage|step|error|cmd|used|epoch|cut|cycle|address|wanted|actual|failureAddress|status|lease|elapsed)=[A-Za-z0-9_x-]+$/) out=out " " a[i];
+ /RTL8852BE:? (radio failure:|probe failure stage=|probe MAC stage=|probe cycle preparation stage=|probe download PCI stage=)/ {
+   p=index($0,"RTL8852BE"); s=substr($0,p); n=split(s,a," ");
+   kind="radio_failure"; if(s ~ /probe failure/)kind="probe_failure";
+   if(s ~ /probe MAC/)kind="probe_mac"; if(s ~ /probe cycle/)kind="probe_preparation";
+   if(s ~ /probe download/)kind="probe_download_pci";
+   out="RTL8852BE diagnostic=" kind;
+   for(i=1;i<=n;i++) {
+     if(a[i] ~ /^phase=[A-Za-z0-9_-]+$/)out=out " " a[i];
+     else if(a[i] ~ /^(stage|step|error|cmd|used|epoch|cut|cycle|address|wanted|actual|failureAddress|fw|operation|failedPhase|lastControl|lastIndex|retained|pciError|pciAddress|pciValue|powerError|powerAddress|pollAddress|pollMask|pollWanted|pollActual|pollReason|btinit|btlease|held|consumed|ended|native|rfk|space|path|mask|value|ops|polls|phy|expected|channel|radioio)=[0-9a-fA-Fx\/@-]+$/)out=out " " a[i];
+   }
    print out; if(++shown>=40)exit;
  }' >&3
 printf '\nsummary=%s\n' "$(classify "$matched" "$link" "$ipv4")" >&3
