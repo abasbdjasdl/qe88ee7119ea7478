@@ -20,7 +20,9 @@ struct r16_sae *r16_sae_create(const uint8_t own[6],const uint8_t peer[6],
     s->h2e=h2e;
     if(sae_set_group(&s->sae,19))goto error;
     s->sae.akmp=WPA_KEY_MGMT_SAE;
-    s->sae.own_akm_suite_selector=wpa_akm_to_suite(WPA_KEY_MGMT_SAE);
+    // The optional commit AKM selector is for SAE extended-key modes only.
+    // Ordinary SAE commits omit it; setting it here rejects a valid peer's
+    // absent selector (zero) before key derivation.
     if(h2e){
         const int groups[]={19,0};
         struct sae_pt *pt=sae_derive_pt(groups,ssid,ssid_len,password,password_len,NULL,0);
@@ -41,7 +43,8 @@ static int output(struct r16_sae *s,uint8_t *out,size_t capacity,size_t *written
     int error=confirm?sae_write_confirm(&s->sae,b):sae_write_commit(&s->sae,b,NULL,NULL,0);
     if(error||wpabuf_len(b)>capacity){wpabuf_free(b);return fail(s);}
     *written=wpabuf_len(b);os_memcpy(out,wpabuf_head(b),*written);wpabuf_free(b);
-    if(confirm)s->confirm_sent=1;else s->commit_sent=1;
+    if(confirm){s->confirm_sent=1;s->sae.state=SAE_CONFIRMED;}
+    else{s->commit_sent=1;s->sae.state=SAE_COMMITTED;}
     return 0;
 }
 int r16_sae_commit(struct r16_sae *s,uint8_t *out,size_t capacity,size_t *written){return output(s,out,capacity,written,0);}

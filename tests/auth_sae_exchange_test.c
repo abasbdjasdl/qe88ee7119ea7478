@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 static void exchange(int h2e,int wrong_password,int corrupt_confirm){
+    fprintf(stderr,"SAE exchange h2e=%d wrong-password=%d tamper=%d\n",h2e,wrong_password,corrupt_confirm);
     const uint8_t a[6]={2,0,0,0,0,1},b[6]={2,0,0,0,0,2};
     const uint8_t ssid[]={'t',0,'s','t'},password[]="offline-test-password",wrong[]="wrong-test-password";
     struct r16_sae *x=r16_sae_create(a,b,ssid,sizeof(ssid),password,sizeof(password)-1,h2e);
