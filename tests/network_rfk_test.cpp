@@ -314,6 +314,81 @@ void testDpk(){
     assert(g.calibrateIq({1,0,149})&&!g.result.dpkReady&&!g.result.tssiReady); // new channel invalidates power state
     printf("PASS: DPK dual-path model, %u I/O and %u delay failures, two NCTL completion stages, DC/correlation/AGC checks, measured thermal EWMA and %u tracking faults; not hardware DPD\n",count,delays,trackCount);
 }
+void prepareScan(Backend &b,r::Initialization<Backend> &c){prepareDpk(b,c);assert(c.beginScan());}
+void testScan(){
+    const r::Channel home{1,2,42},other{0,0,6};
+    Backend golden;r::Initialization<Backend> g(golden,1);prepareDpk(golden,g);assert(g.calibrateDpk());
+    const auto before=g.tssi();const auto dpkBefore=g.dpk();const auto iqBefore=g.iqk();
+    const unsigned preserved[]={r::R_IQK_RES,r::R_TXIQC,r::R_RXIQC,r::R_DPD_CH0A,r::R_DPD_BND};
+    unsigned coefficients[2][5]{};
+    for(unsigned p=0;p<2;++p)for(unsigned i=0;i<5;++i)coefficients[p][i]=golden.bb[preserved[i]+(p<<8)];
+    const auto pmac=golden.pmacStarts,shots=golden.oneshots;
+    assert(g.beginScan()&&g.result.scanActive&&g.result.scanReady);
+    assert(!g.result.iqReady&&!g.result.tssiReady&&!g.result.dpkReady);
+    auto n=golden.operations;
+    assert(!g.beginScan()&&!g.calibrateIq(home)&&!g.calibrateTssi()&&!g.calibrateDpk()&&!g.trackDpk());
+    assert(!g.prepareScanChannel({2,0,1})&&!g.finishScan(other)&&golden.operations==n);
+    assert(g.prepareScanChannel(other));const auto hopCount=golden.operations-n;
+    assert(g.result.scanReady&&r::sameChannel(g.result.scanChannel,other));
+    // Default scan alignment for an unmeasured band is never recorded as a
+    // measurement. Visiting channels must not run PMAC or overwrite IQK/DPK.
+    for(auto ch:{r::Channel{1,0,100},r::Channel{1,0,149},r::Channel{1,0,36}}){
+        assert(g.prepareScanChannel(ch));
+        for(unsigned p=0;p<2;++p){
+            assert(!g.tssi().alignment_done[p][r::TSSI_ALIMK_2G]);
+            assert(!g.tssi().alignment_done[p][r::TSSI_ALIMK_5GM]);
+            assert(!g.tssi().alignment_done[p][r::TSSI_ALIMK_5GH]);
+            assert(g.dpk().bp[p][0].ch==dpkBefore.bp[p][0].ch&&g.dpk().bp[p][0].pwsf==dpkBefore.bp[p][0].pwsf);
+            assert(g.iqk().iqk_ch[p]==iqBefore.iqk_ch[p]);
+            for(unsigned i=0;i<5;++i)assert(golden.bb[preserved[i]+(p<<8)]==coefficients[p][i]);
+        }
+    }
+    const unsigned align[]={r::R_P0_TSSI_ALIM1,r::R_P0_TSSI_ALIM3,r::R_P0_TSSI_ALIM2,r::R_P0_TSSI_ALIM4};
+    for(unsigned p=0;p<2;++p)for(unsigned i=0;i<4;++i)
+        assert(golden.bb[align[i]+(p<<13)]==before.alignment_value[p][r::TSSI_ALIMK_5GL][i]);
+    assert(g.prepareScanChannel(other));n=golden.operations;
+    assert(g.finishScan(home));const auto finishCount=golden.operations-n;
+    assert(!g.result.scanActive&&!g.result.scanReady&&g.result.iqReady&&g.result.tssiReady&&g.result.dpkReady);
+    assert(golden.pmacStarts==pmac&&golden.oneshots==shots);
+    for(unsigned p=0;p<2;++p){
+        const unsigned reg=golden.bb[r::R_P0_TSSI_TRK+(p<<13)];
+        assert(r::fieldGet(r::B_P0_TSSI_OFT,reg)==0xc0&&(reg&r::B_P0_TSSI_OFT_EN));
+        for(unsigned i=0;i<4;++i)assert(golden.bb[align[i]+(p<<13)]==before.alignment_value[p][r::TSSI_ALIMK_5GL][i]);
+        for(unsigned i=0;i<5;++i)assert(golden.bb[preserved[i]+(p<<8)]==coefficients[p][i]);
+    }
+    n=golden.operations;assert(!g.finishScan(home)&&!g.prepareScanChannel(other)&&golden.operations==n);
+    // Scan can start before DPK but cannot promote it to calibrated afterward.
+    {Backend b;r::Initialization<Backend> c(b,1);prepareTssi(b,c);
+        assert(!c.result.tssiReady&&c.beginScan()&&b.pmacStarts==4);
+        assert(c.prepareScanChannel(other)&&c.finishScan(home)&&!c.result.dpkReady&&c.result.tssiReady);}
+    {Backend b;r::Initialization<Backend> c(b,1);assert(!c.beginScan()&&!b.operations);
+        prepareTssi(b,c);b.noCwPath=1;assert(!c.beginScan()&&!c.result.scanActive&&!c.result.scanReady);}
+    for(unsigned phase=0;phase<2;++phase){const auto count=phase?finishCount:hopCount;
+        for(unsigned i=1;i<=count;++i){Backend b;r::Initialization<Backend> c(b,1);prepareScan(b,c);
+            if(phase)assert(c.prepareScanChannel(other));b.failAt=b.operations+i;
+            assert(!(phase?c.finishScan(home):c.prepareScanChannel(other))&&c.result.error==r::Error::io);
+            assert(b.operations==b.failAt&&!b.active&&!c.result.scanReady&&c.result.scanActive&&c.result.requiresReset);
+            assert(!c.result.iqReady&&!c.result.tssiReady&&!c.result.dpkReady);
+            const auto stopped=b.operations;assert(!c.finishScan(home)&&b.operations==stopped);
+        }
+        for(unsigned i:{1u,count/2,count}){Backend b;r::Initialization<Backend> c(b,1);prepareScan(b,c);
+            if(phase)assert(c.prepareScanChannel(other));b.cancelAt=b.operations+i;
+            assert(!(phase?c.finishScan(home):c.prepareScanChannel(other))&&c.result.error==r::Error::cancelled&&!c.result.scanReady&&!b.active);}
+    }
+    for(unsigned phase=0;phase<3;++phase)for(unsigned fault=0;fault<3;++fault){
+        Backend b;r::Initialization<Backend> c(b,1);prepareDpk(b,c);
+        if(phase)assert(c.beginScan());if(phase==2)assert(c.prepareScanChannel(other));
+        if(fault==0)b.failBegin=b.begins+1;if(fault==1)b.failEnd=b.ends+1;if(fault==2)b.failDrain=b.drains+1;
+        assert(!(phase==0?c.beginScan():phase==1?c.prepareScanChannel(other):c.finishScan(home)));
+        assert(!c.result.scanReady&&!c.result.iqReady&&!c.result.tssiReady&&!c.result.dpkReady&&c.result.requiresReset);
+        assert(b.active==(fault==1));
+    }
+    {Backend b;r::Initialization<Backend> c(b,1);prepareScan(b,c);b.backwards=true;
+        assert(!c.prepareScanChannel(other)&&c.result.error==r::Error::clock&&!c.result.scanReady&&!b.active);}
+    for(unsigned i=0;i<128;++i){golden.clock+=3000000;assert(g.beginScan());
+        assert(g.prepareScanChannel(other)&&g.finishScan(home)&&g.result.dpkReady);}
+    printf("PASS: scan RFK four thermal bands, measured/default alignment distinction, home IQK/DPK preservation, %u hop and %u restore I/O failures, cancellation/leases and repeated scans; not AP scanning\n",hopCount,finishCount);
+}
 int main(){
     // PAS reports arrive in 16-bit containers but contain signed 12-bit data.
     assert(r::sign_extend32(0xf001,11)==1&&r::sign_extend32(0xf7ff,11)==2047);
@@ -362,4 +437,5 @@ int main(){
     testIq();
     testTssi();
     testDpk();
+    testScan();
 }

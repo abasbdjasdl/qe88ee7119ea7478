@@ -221,7 +221,8 @@ These are model/compile checks, with no physical MAC/RFK or network evidence.
 
 `rfk::Initialization` imports the original dependency closure for initial DPD
 backoff, both-path RCK, DRCK/ADDCK/DACK, RXDCK, channel IQK/TSSI/DPK and thermal
-tracking: 134 functions, 51 RFK command tables, 43 arrays and 504 referenced
+tracking and scan power restoration: 140 functions, 51 RFK command tables,
+43 arrays and 504 referenced
 constants. It retains per-path ADC/DAC calibration
 values, MSBK arrays and original success-path restoration. Unlike the upstream
 warning-only timeout paths, a timeout latches an error, suppresses subsequent
@@ -253,7 +254,7 @@ controller contract, not a reset implemented by clearing a completion bit.
 Host tests verify calibration result arrays, RF state and DPD backoff values,
 all 1,070 I/O failures, every delay failure, all begin/end/drain failures,
 RCK/DRCK/ADDCK/DACK timeouts, cancellation and clock anomalies. These are register
-models, not real calibration measurements. Scan-specific RFK hooks,
+models, not real calibration measurements. Physical tuning/power control,
 firmware/BT control callbacks and controller lifecycle remain unimplemented;
 initial calibration success is not full RFK or network readiness.
 
@@ -349,6 +350,37 @@ temperatures, averaged samples, zero samples and both extremes of the sensor
 range. Native tests exercise required recovery, retained ownership on reset
 failure and retry without a second reset. These are modeled device responses;
 no RF linearization, radio emission or real-chip calibration is established.
+
+The scan RFK path uses the imported `rtw8852b_tssi_scan`,
+`rtw8852b_wifi_scan_notify` and their dependency closure. Normal TSSI now uses
+the same imported outer function; the native parent lease holds scheduler TX
+paused for both paths instead of resuming it between paths. PMAC stop and
+measured-result validation still precede coexistence release.
+
+`beginScan()` requires an IQ-calibrated home channel and immutable device
+calibration. If TSSI is not initialized, it executes full measured TSSI under
+the ordinary TSSI lease first. It saves home calibration validity and clears
+normal IQ/TSSI/DPK readiness while scanning. `prepareScanChannel()` configures
+TSSI RF/system/thermal/eFuse data for each visited channel and restores measured
+band alignment when available, otherwise the source's default alignment. It
+never labels a default as measured calibration and does not run PMAC on every
+scan hop. `scanReady` only records completion of this RFK programming step.
+
+`finishScan()` accepts only the saved home channel/bandwidth, reapplies its
+TSSI settings and scan-end offset/enable sequence, restores alignment and then
+restores home readiness. IQK/DPK coefficient state is preserved through scan;
+a scan that began without DPK does not manufacture DPK readiness afterward.
+Any programming/cleanup failure retains the error and prevents normal-TX
+readiness. This is not hardware channel verification: the controller must first
+retune the radio and apply channel power, and separately handle scan BT policy,
+CAM/MAC identity, probes, dwell timers, regulatory restrictions and results.
+
+Scan model tests cover all four thermal bands, measured/default alignment,
+selected IQK/DPK register preservation, cold/warm TSSI setup, invalid transitions
+and incorrect home channels, all 260 hop and 288 home-restoration I/O failures,
+cancellation, lease/clock faults and 128 repeated scans. The native adapter test
+checks that a scan lease cannot arm PMAC and retains ownership after failed
+recovery. These do not demonstrate discovery of an access point.
 
 `firmware::Mailbox` now implements the AX register-message channel used for
 firmware-acknowledged scheduler pause/resume. It writes four H2C words, increments

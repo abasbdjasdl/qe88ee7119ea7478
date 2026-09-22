@@ -26,7 +26,10 @@
     "_tssi_set_efuse_to_de",
     "_dpk",
     "_dpk_track",
-    "rtw8852b_get_thermal"
+    "rtw8852b_get_thermal",
+    "rtw8852b_tssi",
+    "rtw8852b_tssi_scan",
+    "rtw8852b_wifi_scan_notify"
   ],
   "original_functions": {
     "_rfk_backup_bb_reg": "7ab4d3005e6fd820bd9b97b6cd558906d8e16f52ecc1843d4dfeb1bf793b7a3a",
@@ -78,6 +81,7 @@
     "_iqk_macbb_setting": "9e59321628ac2a0bf5f9dc0cc3313204a3b31da67b47f951311cc5c5881c7a7d",
     "_iqk_init": "447ade890ea50eeb564c4b1b097b60df58de5651d0270782ed07ef03375300f9",
     "_wait_rx_mode": "d726c74478a22f8c853a2a2e9c58c0e2c82c201734cab6d05894767685e88e60",
+    "_tmac_tx_pause": "74ab942295e408fb8313bbb381432fe5e1b90727623727335a8f911b6dc06448",
     "_doiqk": "9f9d9903d4494cb1ce53f25dfafa53fa6d7a958c80ff2450059ebf964c85826f",
     "_iqk": "5a5b499b147ff603cbaa4fbe070d3748e83d483c3a12f6e7af6e0988201ccf4a",
     "_dpk_bkup_kip": "0fdc9de57fd82553b35a08b2e67654b966906e39632145790a761abad686d540",
@@ -142,12 +146,17 @@
     "_tssi_get_ofdm_trim_de": "4dd8c8bfee33a6b68a0b11e9aeb0bd3a148946414747edfed0564262dc56f4ba",
     "_tssi_set_efuse_to_de": "677825dcd96c32fa6af9e5a4dac7124de2db46d3de67b51eb1562c2961ac427d",
     "_tssi_alimentk_dump_result": "eb7f8012d87c3eaa89036c93925024fe6f18a779a692314091a7432cac372994",
+    "_tssi_alimentk_done": "b65d774650dd20c8902c0495b4d713be35067861bd0e61c498a41db9458b57ae",
     "_tssi_hw_tx": "a73a8afa8a831f867be323a8865b5ebc9c8fc773f877c1888885dcd998f85fe6",
     "_tssi_backup_bb_registers": "14f32dc4b8eee7945c322f006150ac496202d2c1a1ef6d974cc412308846951d",
     "_tssi_reload_bb_registers": "b3d09cda179cd9d307ca0e8058c42765ee4168174e1ea323ca9b28c248626789",
     "_tssi_ch_to_idx": "7ff1b7cfdfd3d3e5b14f0babe238de17d85c328957a7053ea130ede667a7c8c1",
     "_tssi_get_cw_report": "452293441c90b83b9e86c8342cd1baecd2a54df79d5e0d6bb55fe86542a1d046",
     "_tssi_alimentk": "d590967cf4fd2c44dc20d8adec5567da78247cd692c18af54aa18d4a84940a71",
+    "rtw8852b_tssi": "693ef65572e1b5a988b7f19cb30ecc04e976392a37677cd690ce3c390767fd7e",
+    "rtw8852b_tssi_scan": "9d47f05f28aeaaf5769eff4c3877fc06150d05f5dcabcdb944ae2a7b138d130d",
+    "rtw8852b_tssi_default_txagc": "22307d1961da3a469f12e6094f4388d4942b8fd6d0242bb5e88382bae292c039",
+    "rtw8852b_wifi_scan_notify": "955b7456929b4024fea79a7e07d92e93059a5df43a2bff594c9a9ad8aac50f05",
     "rtw8852b_set_gain_offset": "6cb768dacef6713362fa3a53acab7e2a643e140cee2b919b3e06270ee9aa4e4a",
     "rtw8852b_bb_set_plcp_tx": "e912fa73ad33e02f1abfef699b95912b0b1c668017a6f3234950453f0c61749d",
     "rtw8852b_stop_pmac_tx": "b6477f39d738670214a768518081eda73d5c5b842ef3e5f02a027faea3894618",
@@ -284,6 +293,7 @@
     "LOK terminal failure and restore failure retained for public readiness checks",
     "LOK retries retain coarse/fine and both VBUFFER command failures",
     "TSSI PMAC start records TX ownership; mandatory backend stop bypasses normal I/O fault latch",
+    "TSSI outer scheduler pause is held by mandatory native parent lease across both paths",
     "TSSI report timeout latches failure; signed gain shifts use bounded multiplication",
     "Thermal byte packing uses unsigned shifts; track configuration uses positional C++ initializer",
     "DPK AGC exhausted search returns failure; signed TX gain bounds remain signed",
@@ -292,7 +302,7 @@
   ],
   "generated": {
     "Rtw8852bRfkConstants.hpp": "09282f2b78630df07923bc9c81ae6b393825fa05f3bd844b4f64707e2f263a51",
-    "Rtw8852bRfkFunctions.inc": "0dba337df566d35cd96fa378f77aba779125b0bb7132571689c750ae8e4d593f"
+    "Rtw8852bRfkFunctions.inc": "dd12721c14fddbe47dca788b147c41b6591cfba5575d0211435d753c3b42046c"
   },
   "hardware_tested": false,
   "full_rfk_implemented": false

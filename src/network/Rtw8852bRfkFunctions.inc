@@ -1429,6 +1429,15 @@ static void _wait_rx_mode(Context *rtwdev, u8 kpath)
 	}
 }
 
+static void _tmac_tx_pause(Context *rtwdev, enum rtw89_phy_idx band_idx,
+			   bool is_pause)
+{
+	if (!is_pause)
+		return;
+
+	_wait_rx_mode(rtwdev, _kpath(rtwdev, band_idx));
+}
+
 static void _doiqk(Context *rtwdev, bool force,
 		   enum rtw89_phy_idx phy_idx, u8 path)
 {
@@ -3187,6 +3196,42 @@ static void _tssi_alimentk_dump_result(Context *rtwdev, u8 path)
 		    rtw89_phy_read32_mask(rtwdev, R_TSSI_PA_K8 + (path << 13), MASKDWORD));
 }
 
+static void _tssi_alimentk_done(Context *rtwdev,
+				enum rtw89_phy_idx phy, u8 path)
+{
+	struct rtw89_tssi_info *tssi_info = &rtwdev->tssi;
+	const struct rtw89_chan *chan = rtw89_chan_get(rtwdev, RTW89_SUB_ENTITY_0);
+	u8 channel = chan->channel;
+	u8 band;
+
+	rtw89_debug(rtwdev, RTW89_DBG_RFK,
+		    "======>%s   phy=%d   path=%d\n", __func__, phy, path);
+
+	if (channel >= 1 && channel <= 14)
+		band = TSSI_ALIMK_2G;
+	else if (channel >= 36 && channel <= 64)
+		band = TSSI_ALIMK_5GL;
+	else if (channel >= 100 && channel <= 144)
+		band = TSSI_ALIMK_5GM;
+	else if (channel >= 149 && channel <= 177)
+		band = TSSI_ALIMK_5GH;
+	else
+		band = TSSI_ALIMK_2G;
+
+	if (tssi_info->alignment_done[path][band]) {
+		rtw89_phy_write32_mask(rtwdev, R_P0_TSSI_ALIM1 + (path << 13), MASKDWORD,
+				       tssi_info->alignment_value[path][band][0]);
+		rtw89_phy_write32_mask(rtwdev, R_P0_TSSI_ALIM3 + (path << 13), MASKDWORD,
+				       tssi_info->alignment_value[path][band][1]);
+		rtw89_phy_write32_mask(rtwdev, R_P0_TSSI_ALIM2 + (path << 13), MASKDWORD,
+				       tssi_info->alignment_value[path][band][2]);
+		rtw89_phy_write32_mask(rtwdev, R_P0_TSSI_ALIM4 + (path << 13), MASKDWORD,
+				       tssi_info->alignment_value[path][band][3]);
+	}
+
+	_tssi_alimentk_dump_result(rtwdev, path);
+}
+
 static void _tssi_hw_tx(Context *rtwdev, enum rtw89_phy_idx phy,
 			u8 path, u16 cnt, u16 period, s16 pwr_dbm,
 			u8 enable)
@@ -3515,6 +3560,135 @@ out:
 	rtw89_debug(rtwdev, RTW89_DBG_RFK,
 		    "[TSSI PA K] %s processing time = %d ms\n", __func__,
 		    tssi_info->tssi_alimk_time);
+}
+
+static void rtw8852b_tssi(Context *rtwdev, enum rtw89_phy_idx phy, bool hwtx_en)
+{
+	u8 phy_map = rtw89_btc_phymap(rtwdev, phy, RF_AB);
+	u8 i;
+
+	rtw89_debug(rtwdev, RTW89_DBG_TSSI, "[TSSI] %s: phy=%d\n", __func__, phy);
+	rtw89_btc_ntfy_wl_rfk(rtwdev, phy_map, BTC_WRFKT_IQK, BTC_WRFK_ONESHOT_START);
+
+	_tssi_disable(rtwdev, phy);
+
+	for (i = RF_PATH_A; i < RF_PATH_NUM_8852B && check(rtwdev); i++) {
+		_tssi_rf_setting(rtwdev, phy, i);
+		_tssi_set_sys(rtwdev, phy, i);
+		_tssi_ini_txpwr_ctrl_bb(rtwdev, phy, i);
+		_tssi_ini_txpwr_ctrl_bb_he_tb(rtwdev, phy, i);
+		_tssi_set_dck(rtwdev, phy, i);
+		_tssi_set_tmeter_tbl(rtwdev, phy, i);
+		_tssi_set_dac_gain_tbl(rtwdev, phy, i);
+		_tssi_slope_cal_org(rtwdev, phy, i);
+		_tssi_alignment_default(rtwdev, phy, i, true);
+		_tssi_set_tssi_slope(rtwdev, phy, i);
+
+		_tmac_tx_pause(rtwdev, phy, true);
+		if (hwtx_en)
+			_tssi_alimentk(rtwdev, phy, i);
+		_tmac_tx_pause(rtwdev, phy, false);
+	}
+
+	if (!rtwdev->io.stopCalibrationTx()) fail(rtwdev,Error::io);
+	if (check(rtwdev)) {
+		_tssi_enable(rtwdev, phy);
+		_tssi_set_efuse_to_de(rtwdev, phy);
+	}
+	const auto idx = _tssi_ch_to_idx(rtwdev,rtwdev->channel.channel);
+	if (check(rtwdev) && (!rtwdev->tssi.check_backup_aligmk[0][idx] ||
+	    !rtwdev->tssi.check_backup_aligmk[1][idx])) fail(rtwdev,Error::calibration);
+
+	rtw89_btc_ntfy_wl_rfk(rtwdev, phy_map, BTC_WRFKT_IQK, BTC_WRFK_ONESHOT_STOP);
+}
+
+static void rtw8852b_tssi_scan(Context *rtwdev, enum rtw89_phy_idx phy)
+{
+	const struct rtw89_chan *chan = rtw89_chan_get(rtwdev, RTW89_SUB_ENTITY_0);
+	struct rtw89_tssi_info *tssi_info = &rtwdev->tssi;
+	u8 channel = chan->channel;
+	u8 band;
+	u32 i;
+
+	rtw89_debug(rtwdev, RTW89_DBG_RFK,
+		    "======>%s   phy=%d  channel=%d\n", __func__, phy, channel);
+
+	if (channel >= 1 && channel <= 14)
+		band = TSSI_ALIMK_2G;
+	else if (channel >= 36 && channel <= 64)
+		band = TSSI_ALIMK_5GL;
+	else if (channel >= 100 && channel <= 144)
+		band = TSSI_ALIMK_5GM;
+	else if (channel >= 149 && channel <= 177)
+		band = TSSI_ALIMK_5GH;
+	else
+		band = TSSI_ALIMK_2G;
+
+	_tssi_disable(rtwdev, phy);
+
+	for (i = RF_PATH_A; i < RTW8852B_TSSI_PATH_NR; i++) {
+		_tssi_rf_setting(rtwdev, phy, i);
+		_tssi_set_sys(rtwdev, phy, i);
+		_tssi_set_tmeter_tbl(rtwdev, phy, i);
+
+		if (tssi_info->alignment_done[i][band])
+			_tssi_alimentk_done(rtwdev, phy, i);
+		else
+			_tssi_alignment_default(rtwdev, phy, i, true);
+	}
+
+	_tssi_enable(rtwdev, phy);
+	_tssi_set_efuse_to_de(rtwdev, phy);
+}
+
+static void rtw8852b_tssi_default_txagc(Context *rtwdev,
+					enum rtw89_phy_idx phy, bool enable)
+{
+	const struct rtw89_chan *chan = rtw89_chan_get(rtwdev, RTW89_SUB_ENTITY_0);
+	u8 channel = chan->channel;
+
+	rtw89_debug(rtwdev, RTW89_DBG_RFK, "======> %s   ch=%d\n",
+		    __func__, channel);
+
+	if (enable) {
+		if (!rtwdev->is_tssi_mode[RF_PATH_A] && !rtwdev->is_tssi_mode[RF_PATH_B])
+			rtw8852b_tssi(rtwdev, phy, true);
+		return;
+	}
+
+	rtw89_debug(rtwdev, RTW89_DBG_RFK,
+		    "======>%s 1 SCAN_END Set 0x5818[7:0]=0x%x 0x7818[7:0]=0x%x\n",
+		    __func__,
+		    rtw89_phy_read32_mask(rtwdev, R_P0_TSSI_TRK, B_P0_TSSI_OFT),
+		    rtw89_phy_read32_mask(rtwdev, R_P1_TSSI_TRK, B_P1_TSSI_OFT));
+
+	rtw89_phy_write32_mask(rtwdev, R_P0_TSSI_TRK, B_P0_TSSI_OFT, 0xc0);
+	rtw89_phy_write32_mask(rtwdev, R_P1_TSSI_TRK, B_P1_TSSI_OFT,  0xc0);
+	rtw89_phy_write32_mask(rtwdev, R_P0_TSSI_TRK, B_P0_TSSI_OFT_EN, 0x0);
+	rtw89_phy_write32_mask(rtwdev, R_P0_TSSI_TRK, B_P0_TSSI_OFT_EN, 0x1);
+	rtw89_phy_write32_mask(rtwdev, R_P1_TSSI_TRK, B_P1_TSSI_OFT_EN, 0x0);
+	rtw89_phy_write32_mask(rtwdev, R_P1_TSSI_TRK, B_P1_TSSI_OFT_EN, 0x1);
+
+	_tssi_alimentk_done(rtwdev, phy, RF_PATH_A);
+	_tssi_alimentk_done(rtwdev, phy, RF_PATH_B);
+
+	rtw89_debug(rtwdev, RTW89_DBG_RFK,
+		    "======>%s 2 SCAN_END Set 0x5818[7:0]=0x%x 0x7818[7:0]=0x%x\n",
+		    __func__,
+		    rtw89_phy_read32_mask(rtwdev, R_P0_TSSI_TRK, B_P0_TSSI_OFT),
+		    rtw89_phy_read32_mask(rtwdev, R_P1_TSSI_TRK, B_P1_TSSI_OFT));
+
+	rtw89_debug(rtwdev, RTW89_DBG_RFK,
+		    "======> %s   SCAN_END\n", __func__);
+}
+
+static void rtw8852b_wifi_scan_notify(Context *rtwdev, bool scan_start,
+			       enum rtw89_phy_idx phy_idx)
+{
+	if (scan_start)
+		rtw8852b_tssi_default_txagc(rtwdev, phy_idx, true);
+	else
+		rtw8852b_tssi_default_txagc(rtwdev, phy_idx, false);
 }
 
 static void rtw8852b_set_gain_offset(Context *rtwdev,

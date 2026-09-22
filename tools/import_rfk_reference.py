@@ -32,6 +32,7 @@ roots+=['_tssi_disable','_tssi_rf_setting','_tssi_set_sys','_tssi_ini_txpwr_ctrl
         '_tssi_set_dac_gain_tbl','_tssi_slope_cal_org','_tssi_alignment_default',
         '_tssi_set_tssi_slope','_tssi_alimentk','_tssi_enable','_tssi_set_efuse_to_de']
 roots+=['_dpk','_dpk_track','rtw8852b_get_thermal']
+roots+=['rtw8852b_tssi','rtw8852b_tssi_scan','rtw8852b_wifi_scan_notify']
 for n in roots:visit(n)
 original={n:block(src,signature+n+r'\([^;]+?\n\{') for n in all_names if n in selected}
 original['rtw89_subband_to_gain_offset_band_of_ofdm']=block(texts['phy.h'],r'^enum rtw89_gain_offset rtw89_subband_to_gain_offset_band_of_ofdm\([^;]+?\n\{')
@@ -87,6 +88,21 @@ def adapt(t):
 def adapt_function(name,text):
     t=adapt(text)
     if not t.startswith('static '):t='static '+t
+    if name=='rtw8852b_tssi':
+        # The mandatory native parent lease holds scheduler TX paused across
+        # both paths. Do not briefly resume it between calibration paths.
+        for line in ['\tu32 tx_en;\n',
+                     '\t\trtw89_chip_stop_sch_tx(rtwdev, phy, &tx_en, RTW89_SCH_TX_SEL_ALL);\n',
+                     '\t\trtw89_chip_resume_sch_tx(rtwdev, phy, tx_en);\n']:
+            assert t.count(line)==1,(name,line)
+            t=t.replace(line,'')
+        t=t.replace('i < RF_PATH_NUM_8852B;', 'i < RF_PATH_NUM_8852B && check(rtwdev);')
+        t=t.replace('\t_tssi_enable(rtwdev, phy);\n\t_tssi_set_efuse_to_de(rtwdev, phy);',
+                    '\tif (!rtwdev->io.stopCalibrationTx()) fail(rtwdev,Error::io);\n'
+                    '\tif (check(rtwdev)) {\n\t\t_tssi_enable(rtwdev, phy);\n\t\t_tssi_set_efuse_to_de(rtwdev, phy);\n\t}\n'
+                    '\tconst auto idx = _tssi_ch_to_idx(rtwdev,rtwdev->channel.channel);\n'
+                    '\tif (check(rtwdev) && (!rtwdev->tssi.check_backup_aligmk[0][idx] ||\n'
+                    '\t    !rtwdev->tssi.check_backup_aligmk[1][idx])) fail(rtwdev,Error::calibration);')
     if name=='rtw8852b_get_thermal':t=t.replace('enum rtw89_rf_path rf_path','u8 rf_path')
     if name=='_dpk_sync_check':
         t=re.sub(r'^#define DPK_SYNC_TH_\w+[^\n]*\n','',t,flags=re.M)
@@ -195,6 +211,7 @@ report={'repository':'https://github.com/lwfinger/rtw89','commit':commit,'licens
         'C try variable renamed for C++','LOK terminal failure and restore failure retained for public readiness checks',
         'LOK retries retain coarse/fine and both VBUFFER command failures',
         'TSSI PMAC start records TX ownership; mandatory backend stop bypasses normal I/O fault latch',
+        'TSSI outer scheduler pause is held by mandatory native parent lease across both paths',
         'TSSI report timeout latches failure; signed gain shifts use bounded multiplication',
         'Thermal byte packing uses unsigned shifts; track configuration uses positional C++ initializer',
         'DPK AGC exhausted search returns failure; signed TX gain bounds remain signed',

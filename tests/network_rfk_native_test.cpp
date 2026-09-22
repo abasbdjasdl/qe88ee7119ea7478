@@ -56,5 +56,10 @@ int main(){
     {Fixture f;f.arm();f.owner.failRecover=true;assert(!f.io.end(r::Kind::tssi,false));
         assert(!f.io.calibrationTxArmed()&&f.io.leaseActive()&&f.owner.shotCount==1&&!f.owner.endCount);
         f.owner.failRecover=false;assert(f.io.end(r::Kind::tssi,false)&&f.owner.shotCount==2);}
+    {Fixture f;auto ctl=f.owner.control();ctl.oneshot=nullptr;r::MacRfkIo io(&f.device,&f.map,ctl);
+        assert(io.begin(r::Kind::scan)&&!io.armCalibrationTx());
+        assert(io.writeBb(r::R_P0_TSSI_TRK,0xc0));io.cancel();f.owner.failRecover=true;
+        assert(!io.end(r::Kind::scan,false)&&io.leaseActive()&&!f.owner.endCount&&!f.owner.shotCount);
+        f.owner.failRecover=false;assert(io.end(r::Kind::scan,false)&&!io.leaseActive());}
     puts("PASS: native MacRfkIo PMAC stop after cancellation, read/write/readback failures, device loss, mandatory recovery before releasing modified calibration/coexistence ownership; modeled MMIO");
 }

@@ -4,12 +4,13 @@
 #include "EfuseCalibration.hpp"
 namespace rtl8852be { namespace rfk {
 enum class Error {none,precondition,io,timeout,clock,cancelled,calibration};
-enum class Stage {idle,rck,dack,rxDc,complete,iqk,tssi,dpk,track};
-enum class Kind {rck,dack,rxDc,iqk,tssi,dpk,track};
+enum class Stage {idle,rck,dack,rxDc,complete,iqk,tssi,dpk,track,scan};
+enum class Kind {rck,dack,rxDc,iqk,tssi,dpk,track,scan};
 enum class Space {none,mac,baseband,radio};
 // Center channel and hardware bandwidth encoding (20/40/80 = 0/1/2).
 // This checks chip geometry only; the controller must enforce regulatory rules.
 struct Channel {u8 band{},width{},center{};};
+inline bool sameChannel(Channel a,Channel b){return a.band==b.band&&a.width==b.width&&a.center==b.center;}
 inline bool validChannel(Channel c){
     if(c.band==RTW89_BAND_2G)return c.width==0?(c.center>=1&&c.center<=14):(c.width==1&&c.center>=3&&c.center<=11);
     if(c.band!=RTW89_BAND_5G)return false;
@@ -25,7 +26,8 @@ struct Result {
     Error error{Error::none};Stage stage{Stage::idle};Space space{Space::none};
     u32 address{},mask{},value{};u8 path{};unsigned operations{},polls{},messages{};
     bool rckReady{},dackReady{},rxDcReady{},iqReady{},tssiReady{},dpkReady{},requiresReset{},ownershipReleased{};
-    Channel iqChannel{};
+    Channel iqChannel{},scanHome{},scanChannel{};
+    bool scanActive{},scanReady{};
 };
 // Backend owns validated I/O and the calibration lease. begin(kind) must quiesce
 // DMA/TX and coordinate firmware/BT; end(kind,success) must keep TX stopped on
@@ -46,7 +48,7 @@ template<class Backend> class Initialization {
         // Pinned 8852B has fem_setup=NULL; unlike 8852A it sets no EPA flags.
         // Preserve that per-chip default: perform DPK, never invent a bypass.
         rtw89_fem_info fem{};struct {ThermalAverage avg_thermal[2];} phystat{};
-        bool dbcc_en=false,is_tssi_mode[2]{};rtw89_hal hal;
+        bool dbcc_en=false,is_tssi_mode[2]{},homeDpkReady{};rtw89_hal hal;
         uint64_t first{},previous{};unsigned operationBase{};bool started{};Space lastSpace{Space::none};
         u32 lastAddress{},lastMask{},lastValue{};u8 lastPath{};
         Context(Backend &i,Result &r,u8 cut):io(i),result(r),hal{cut,0}{}
@@ -175,6 +177,11 @@ public:
     Result result{};
 private:
     Context context_;
+    void setChannel(Channel c){
+        context_.channel={static_cast<rtw89_band>(c.band),static_cast<rtw89_bandwidth>(c.width),c.center,
+            c.band==0?RTW89_CH_2G:c.center<=64?RTW89_CH_5G_BAND_1:c.center<=144?RTW89_CH_5G_BAND_3:RTW89_CH_5G_BAND_4};
+    }
+    void freshBudget(){context_.started=false;context_.operationBase=result.operations;}
 public:
     Initialization(Backend &io,u8 cut):context_(io,result,cut){}
     Initialization(const Initialization &)=delete;Initialization &operator=(const Initialization &)=delete;
@@ -214,10 +221,9 @@ public:
         result.stage=Stage::complete;return true;
     }
     bool calibrateIq(Channel channel){
-        if(result.stage!=Stage::complete||result.error!=Error::none||!result.rxDcReady||!validChannel(channel))return false;
+        if(result.stage!=Stage::complete||result.error!=Error::none||result.scanActive||!result.rxDcReady||!validChannel(channel))return false;
         result.iqReady=false;result.tssiReady=false;result.dpkReady=false;
-        context_.channel={static_cast<rtw89_band>(channel.band),static_cast<rtw89_bandwidth>(channel.width),channel.center,
-            channel.band==0?RTW89_CH_2G:channel.center<=64?RTW89_CH_5G_BAND_1:channel.center<=144?RTW89_CH_5G_BAND_3:RTW89_CH_5G_BAND_4};
+        setChannel(channel);
         context_.restoreFailed[0]=context_.restoreFailed[1]=false;context_.started=false;
         context_.operationBase=result.operations;
         // RXDCK must run on every newly programmed channel, not just at boot.
@@ -235,33 +241,16 @@ public:
         result.iqChannel=channel;result.iqReady=true;result.stage=Stage::complete;return true;
     }
     bool calibrateTssi(){
-        if(result.stage!=Stage::complete||result.error!=Error::none||!result.iqReady||!context_.calibrationConfigured)return false;
+        if(result.stage!=Stage::complete||result.error!=Error::none||result.scanActive||!result.iqReady||!context_.calibrationConfigured)return false;
         result.tssiReady=false;result.dpkReady=false;context_.started=false;context_.operationBase=result.operations;
         if(!begin(Kind::tssi,Stage::tssi))return false;
-        auto *d=&context_;const auto phy=RTW89_PHY_0;
-        const auto phyMap=rtw89_btc_phymap(d,phy,RF_AB);
-        rtw89_btc_ntfy_wl_rfk(d,phyMap,BTC_WRFKT_IQK,BTC_WRFK_ONESHOT_START);
-        _tssi_disable(d,phy);
-        for(u8 p=0;p<2&&check(d);++p){
-            _tssi_rf_setting(d,phy,p);_tssi_set_sys(d,phy,p);_tssi_ini_txpwr_ctrl_bb(d,phy,p);
-            _tssi_ini_txpwr_ctrl_bb_he_tb(d,phy,p);_tssi_set_dck(d,phy,p);_tssi_set_tmeter_tbl(d,phy,p);
-            _tssi_set_dac_gain_tbl(d,phy,p);_tssi_slope_cal_org(d,phy,p);_tssi_alignment_default(d,phy,p,true);
-            _tssi_set_tssi_slope(d,phy,p);_wait_rx_mode(d,RF_AB);_tssi_alimentk(d,phy,p);
-        }
-        // Scheduler TX stays paused for the entire parent lease. Cleanup must
-        // run before coexistence STOP even when normal I/O has been suppressed.
-        const bool txStopped=d->io.stopCalibrationTx();if(!txStopped)fail(d,Error::io);
-        if(check(d)){_tssi_enable(d,phy);_tssi_set_efuse_to_de(d,phy);}
-        const auto idx=_tssi_ch_to_idx(d,d->channel.channel);
-        if(check(d)&&(!d->tssi.check_backup_aligmk[0][idx]||!d->tssi.check_backup_aligmk[1][idx]))fail(d,Error::calibration);
-        // A failed PMAC stop cannot release coexistence ownership. Native end
-        // retries stop first and retains both leases if that also fails.
-        if(txStopped)rtw89_btc_ntfy_wl_rfk(d,phyMap,BTC_WRFKT_IQK,BTC_WRFK_ONESHOT_STOP);
+        auto *d=&context_;
+        rtw8852b_tssi(d,RTW89_PHY_0,true);
         if(!end(Kind::tssi))return false;
         result.tssiReady=true;result.stage=Stage::complete;return true;
     }
     bool calibrateDpk(){
-        if(result.stage!=Stage::complete||result.error!=Error::none||!result.iqReady||!result.tssiReady)return false;
+        if(result.stage!=Stage::complete||result.error!=Error::none||result.scanActive||!result.iqReady||!result.tssiReady)return false;
         result.dpkReady=false;context_.started=false;context_.operationBase=result.operations;
         if(!begin(Kind::dpk,Stage::dpk))return false;
         auto *d=&context_;d->dpk.is_dpk_enable=true;d->dpk.is_dpk_reload_en=false;
@@ -275,7 +264,7 @@ public:
         result.dpkReady=true;result.stage=Stage::complete;return true;
     }
     bool trackDpk(){
-        if(result.stage!=Stage::complete||result.error!=Error::none||!result.dpkReady)return false;
+        if(result.stage!=Stage::complete||result.error!=Error::none||result.scanActive||!result.dpkReady)return false;
         result.dpkReady=false;context_.started=false;context_.operationBase=result.operations;
         if(!begin(Kind::track,Stage::track))return false;
         auto *d=&context_;
@@ -285,6 +274,45 @@ public:
         _dpk_track(d);
         if(!end(Kind::track))return false;
         result.dpkReady=true;result.stage=Stage::complete;return true;
+    }
+    // Controller has tuned the IQ-calibrated home channel and must separately
+    // manage scan BT notifications, CAM/MAC identity and regulatory TX limits.
+    bool beginScan(){
+        if(result.stage!=Stage::complete||result.error!=Error::none||result.scanActive||!result.iqReady||!context_.calibrationConfigured)return false;
+        if(!result.tssiReady&&!calibrateTssi())return false;
+        if(!context_.is_tssi_mode[0]||!context_.is_tssi_mode[1])return false;
+        result.scanHome=result.iqChannel;result.scanChannel=result.iqChannel;
+        context_.homeDpkReady=result.dpkReady;
+        result.iqReady=false;result.tssiReady=false;result.dpkReady=false;result.scanReady=false;
+        freshBudget();if(!begin(Kind::scan,Stage::scan))return false;
+        // TSSI is now enabled on both paths, so source START does not generate
+        // PMAC traffic under a scan lease. Cold setup used the full TSSI lease.
+        rtw8852b_wifi_scan_notify(&context_,true,RTW89_PHY_0);
+        if(!end(Kind::scan))return false;
+        result.scanActive=true;result.scanReady=true;result.stage=Stage::complete;return true;
+    }
+    // Called after the controller programs this channel/bandwidth/power. The
+    // scan coefficients are not evidence of full IQK/DPK on the visited channel.
+    bool prepareScanChannel(Channel channel){
+        if(result.stage!=Stage::complete||result.error!=Error::none||!result.scanActive||!validChannel(channel))return false;
+        result.scanReady=false;setChannel(channel);freshBudget();
+        if(!begin(Kind::scan,Stage::scan))return false;
+        rtw8852b_tssi_scan(&context_,RTW89_PHY_0);
+        if(!end(Kind::scan))return false;
+        result.scanChannel=channel;result.scanReady=true;result.stage=Stage::complete;return true;
+    }
+    // Caller must first retune the saved home channel. Never accept a different
+    // channel and expose its stale IQK/DPK coefficients as normal-TX readiness.
+    bool finishScan(Channel restored){
+        if(result.stage!=Stage::complete||result.error!=Error::none||!result.scanActive||!sameChannel(restored,result.scanHome))return false;
+        result.scanReady=false;setChannel(restored);freshBudget();
+        if(!begin(Kind::scan,Stage::scan))return false;
+        rtw8852b_tssi_scan(&context_,RTW89_PHY_0);
+        rtw8852b_wifi_scan_notify(&context_,false,RTW89_PHY_0);
+        if(!end(Kind::scan))return false;
+        result.scanActive=false;result.scanChannel=restored;result.iqChannel=restored;
+        result.iqReady=true;result.tssiReady=true;result.dpkReady=context_.homeDpkReady;
+        result.stage=Stage::complete;return true;
     }
 };
 } }
