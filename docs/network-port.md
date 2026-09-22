@@ -516,8 +516,13 @@ See [DAV reader](dav-efuse.md) for physical register and timeout evidence.
 
 The new [BT/RFK coordinator](bt-rfk-coordination.md) implements scoreboard
 arbitration, LTE grant access, acknowledged calibration-policy acquisition and
-restoration with a 300 ms absolute lease. It still needs a native adapter and
-lease validation inside synchronous RFK polling, plus physical reset recovery.
+restoration with a 300 ms absolute lease. Native RFK now requires a live lease
+callback before/after I/O, inside indirect RF polls, and between 1 ms sleep
+slices. Lease loss blocks further programming and successful release until
+verified recovery, while narrow PMAC stop remains callable. Tests cover expiry
+inside a 50 ms sleep, inside an indirect RF poll and after an MMIO write. The
+coordinator still needs a native adapter, binding to that callback and physical
+reset recovery.
 
 The [station controller](station-controller.md) implements asynchronous role,
 join, scan, association and disconnect ordering. Real firmware ACKs and backend

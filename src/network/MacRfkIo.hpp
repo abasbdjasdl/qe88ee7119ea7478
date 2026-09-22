@@ -19,6 +19,11 @@ struct CalibrationControl {
     // engines and RF hardware while retaining BT/TX ownership. Return true only
     // after verifying quiescence/reset. This is not the ordinary release hook.
     bool (*recover)(void *,Kind){};
+    // Mandatory live gate/BT/firmware ownership check. Called before/after MMIO
+    // and inside indirect RF polls and sleep slices. Must not recurse into this
+    // adapter or wait for work queued on the same workloop. A false result is
+    // latched until verified recovery; timer-only expiry checking is insufficient.
+    bool (*check)(void *,Kind){};
 };
 // Device, mapping and callback owner are borrowed and must outlive this adapter
 // and any outstanding lease. All calls run on the controller's serialized lane.
@@ -26,9 +31,12 @@ class MacRfkIo {
     IOPCIDevice *device_{};IOMemoryMap *mapping_{};
     network::MacRadioIo radioIo_;network::RadioAccess<network::MacRadioIo> radio_;
     CalibrationControl control_;bool active_{},oneshotActive_{},txArmed_{},modified_{};Kind kind_{};u8 oneshotMap_{};
-    bool macRead(uint32_t,uint32_t &);bool accessible()const;
+    mutable bool leaseLost_{};
+    bool macRead(uint32_t,uint32_t &);bool accessible()const;bool checkLease()const;
+    static bool guard(void *);
 public:
     MacRfkIo(IOPCIDevice *,IOMemoryMap *,CalibrationControl);
+    MacRfkIo(const MacRfkIo&)=delete;MacRfkIo&operator=(const MacRfkIo&)=delete;
     bool valid()const{return radioIo_.valid()&&device_&&mapping_;}
     bool leaseActive()const{return active_;}
     void cancel(){radioIo_.cancel();}bool cancelled()const{return radioIo_.cancelled();}

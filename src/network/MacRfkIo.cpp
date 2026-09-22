@@ -6,24 +6,30 @@
 #include <libkern/OSAtomic.h>
 #include <kern/clock.h>
 namespace rtl8852be { namespace rfk {
-MacRfkIo::MacRfkIo(IOPCIDevice *d,IOMemoryMap *m,CalibrationControl c):radioIo_(d,m),radio_(radioIo_),control_(c){
+MacRfkIo::MacRfkIo(IOPCIDevice *d,IOMemoryMap *m,CalibrationControl c):radioIo_(d,m,{this,guard}),radio_(radioIo_),control_(c){
     if(radioIo_.valid()){device_=d;mapping_=m;}
 }
+bool MacRfkIo::checkLease()const{
+    if(!active_||leaseLost_)return false;
+    if(!control_.check||!control_.check(control_.owner,kind_)){leaseLost_=true;return false;}
+    return true;
+}
+bool MacRfkIo::guard(void *owner){return static_cast<MacRfkIo *>(owner)->checkLease();}
 bool MacRfkIo::accessible()const{
     if(!valid()||cancelled())return false;
     const auto cmd=device_->configRead16(kIOPCIConfigCommand);
-    return cmd!=0xffff&&(cmd&2)!=0;
+    return cmd!=0xffff&&(cmd&2)!=0&&(!active_||checkLease());
 }
 bool MacRfkIo::macRead(uint32_t a,uint32_t &v){
     v=0;if(!accessible()||(a&3)||a>=0x10000)return false;
     OSSynchronizeIO();v=OSReadLittleInt32(reinterpret_cast<const volatile void *>(mapping_->getVirtualAddress()),a);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);return v!=0xffffffff&&v!=0xdeadbeef;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);return v!=0xffffffff&&v!=0xdeadbeef&&accessible();
 }
 bool MacRfkIo::begin(Kind kind){
-    if(active_||!accessible()||!control_.owner||!control_.begin||!control_.end||!control_.recover)return false;
+    if(active_||!accessible()||!control_.owner||!control_.begin||!control_.end||!control_.recover||!control_.check)return false;
     if((kind==Kind::iqk||kind==Kind::tssi)&&!control_.oneshot)return false;
     if(!control_.begin(control_.owner,kind))return false;
-    active_=true;kind_=kind;u32 fw=0,cmac=0,sys=0,tx=0;
+    active_=true;leaseLost_=false;kind_=kind;u32 fw=0,cmac=0,sys=0,tx=0;
     // Independent evidence of firmware/MAC/BB readiness and acknowledged pause.
     constexpr u32 bbResetMask=(B_AX_FEN_BBRSTB|B_AX_FEN_BB_GLB_RSTN)<<((R_AX_SYS_FUNC_EN&3)*8);
     if(!macRead(R_AX_WCPU_FW_CTRL,fw)||fieldGet(B_AX_WCPU_FWDL_STS_MASK,fw)!=7||
@@ -38,11 +44,12 @@ bool MacRfkIo::end(Kind kind,bool success){
     if(!active_||kind!=kind_)return false;
     // Must remain callable after cancellation or a failed MMIO transaction.
     if(txArmed_&&!stopCalibrationTx())return false;
-    if(!success&&modified_){
+    if(success&&!checkLease())return false;
+    if(!success&&(modified_||leaseLost_)){
         // A bounded poll failure cannot prove a stopped NCTL/KIP/RF engine.
         // Retain ownership until the controller has verified reset/quiescence.
         if(!control_.recover(control_.owner,kind))return false;
-        modified_=false;
+        modified_=false;leaseLost_=false;
     }
     if(oneshotActive_&&!oneshot(kind,oneshotMap_,false))return false;
     u32 tx=0;
@@ -94,17 +101,17 @@ bool MacRfkIo::writeMac(u32 a,u32 v){
     if(!active_||!accessible()||a!=R_AX_PHYREG_SET||v!=0xf)return false;
     modified_=true;
     OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),a,v);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return accessible();
 }
 bool MacRfkIo::readChannelMac8(u32 a,u8 &v){
     v=0;if(!active_||kind_!=Kind::channel||!accessible()||!channel::macByteAddress(a))return false;
     OSSynchronizeIO();v=*(reinterpret_cast<const volatile u8 *>(mapping_->getVirtualAddress())+a);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);return true;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);return accessible();
 }
 bool MacRfkIo::writeChannelMac8(u32 a,u8 v){
     if(!active_||kind_!=Kind::channel||!accessible()||!channel::macByteAddress(a))return false;
     modified_=true;*(reinterpret_cast<volatile u8 *>(mapping_->getVirtualAddress())+a)=v;
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return accessible();
 }
 bool MacRfkIo::readChannelMac32(u32 a,u32 &v){
     v=0;return active_&&kind_==Kind::channel&&channel::macWordAddress(a,false)&&macRead(a,v);
@@ -112,7 +119,7 @@ bool MacRfkIo::readChannelMac32(u32 a,u32 &v){
 bool MacRfkIo::writeChannelMac32(u32 a,u32 v){
     if(!active_||kind_!=Kind::channel||!accessible()||!channel::macWordAddress(a,true))return false;
     modified_=true;OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),a,v);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return accessible();
 }
 bool MacRfkIo::readPowerMac32(u32 a,u32 &v){
     v=0;u32 cmac=0,tx=0;
@@ -127,7 +134,7 @@ bool MacRfkIo::readPowerMac32(u32 a,u32 &v){
 bool MacRfkIo::writePowerMac32(u32 a,u32 v){
     u32 old=0;if(!readPowerMac32(a,old))return false;
     modified_=true;OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),a,v);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return accessible();
 }
 bool MacRfkIo::drain(){return active_&&accessible()&&radio_.drain();}
 uint64_t MacRfkIo::nowUs(){uint64_t t=0,n=0;clock_get_uptime(&t);absolutetime_to_nanoseconds(t,&n);return n/1000;}

@@ -82,7 +82,13 @@ SHA-256 of the exact source files inspected:
    not add it to upstream's RFK call flow.
 9. The 300 ms lease is absolute and is never renewed by oneshot calls. Run
    `service()` from the native timer and validate the lease during calibration
-   polling/callbacks. The RFK algorithm's separate 2-second upper bound does
+   polling/callbacks. `MacRfkIo` now requires `CalibrationControl.check`; the
+   controller must bind it to this coordinator's live `ready()` plus its own
+   ownership checks. The native adapter checks before/after register accesses,
+   including nested indirect RF polls, and after each 1 ms sleep slice. Failure
+   latches until verified recovery; it cannot be cleared by a later ready result.
+   PMAC emission-stop cleanup remains available after expiry. The RFK
+   algorithm's separate 2-second upper bound does
    **not** extend BT ownership to 2 seconds. A timer queued behind a synchronous
    2-second workloop operation cannot enforce the 300 ms contract: the adapter
    must check elapsed time during that operation and trigger verified recovery
@@ -135,8 +141,9 @@ declaration-only I/O contract checks kernel-target compilation. It does not
 provide a native I/O implementation or link the component into the driver.
 
 Still required: the concrete native MMIO/queue adapter; shared H2C ACK routing;
-controller async acquisition and synchronous lease consumption; direct RFK
-polling/watchdog integration; actual firmware/BB/RF power-cycle recovery; valid
+controller async acquisition and synchronous lease consumption, including
+binding its mandatory live RFK check to the acquired coordinator; actual
+firmware/BB/RF power-cycle recovery; valid
 coex initialization and policy snapshots; dynamic BT profile/antenna/AFH/TDMA
 policy recomputation and actual controller binding. None is marked complete by
 these component tests.
