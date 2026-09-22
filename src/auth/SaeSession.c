@@ -51,6 +51,9 @@ int r16_sae_commit(struct r16_sae *s,uint8_t *out,size_t capacity,size_t *writte
 int r16_sae_confirm(struct r16_sae *s,uint8_t *out,size_t capacity,size_t *written){return output(s,out,capacity,written,1);}
 int r16_sae_receive_commit(struct r16_sae *s,const uint8_t *data,size_t length){
     if(!s||s->failed||!s->commit_sent||s->peer_commit||!data||length>SAE_COMMIT_MAX_LEN)return -1;
+    // This component negotiates group 19 without token/password-id/rejected-
+    // group/extended-key elements. Reject unhandled trailing data explicitly.
+    if(length!=98||WPA_GET_LE16(data)!=19)return fail(s);
     int groups[]={19,0};const u8 *token=NULL;size_t token_len=0;
     if(sae_parse_commit(&s->sae,data,length,&token,&token_len,groups,s->h2e,NULL)||
        token_len||sae_process_commit(&s->sae))return fail(s);
