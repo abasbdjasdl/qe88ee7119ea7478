@@ -23,6 +23,7 @@ struct Device {
     std::map<uint32_t,uint32_t> lte;
     std::map<unsigned,uint32_t> rf,lut;
     std::vector<Write> writes;std::vector<Command> commands;
+    uint32_t rfSelStatus{};
     uint32_t lteSelected{},scoreboard=0x16000003,lastScoreboard{};
     uint32_t ignoreAddress=0xffffffff;unsigned ignoreWidth{};
     unsigned ops{},failAt{},delayCalls{},failDelay{},submitCalls{},failSubmit{},poisons{};
@@ -64,7 +65,7 @@ struct Device {
     bool write8(uint32_t a,uint8_t v){return write(a,v,1);}
     bool write16(uint32_t a,uint16_t v){return write(a,v,2);}
     bool write32(uint32_t a,uint32_t v){return write(a,v,4);}
-    bool readRf(uint8_t path,uint32_t a,uint32_t mask,uint32_t &v){assert(mask==0xfffff);v=rf[(unsigned(path)<<16)|a];return step();}
+    bool readRf(uint8_t path,uint32_t a,uint32_t mask,uint32_t &v){assert(mask==0xfffff);v=rf[(unsigned(path)<<16)|a]|(a==2?rfSelStatus:0);return step();}
     bool writeRf(uint8_t path,uint32_t a,uint32_t mask,uint32_t v){
         assert(mask==0xfffff);const bool ok=step();if(!ok&&!afterWriteFailure)return false;
         writes.push_back({0x100000+(unsigned(path)<<16)+a,v,20});
@@ -148,6 +149,11 @@ static unsigned success(){
     return f.io.ops;
 }
 static void variants(){
+    {Fixture f;f.io.rfSelStatus=0x18;assert(f.run());} // observed hardware residual
+    for(unsigned bit=16;bit<=18;++bit){Fixture f;f.io.rfSelStatus=1U<<bit;
+        assert(!f.begin()&&f.init.result.error==i::Error::readback&&f.init.result.address==2);}
+    {Fixture f;f.io.rfSelStatus=0xfffff;assert(!f.begin()&&f.init.result.error==i::Error::readback);}
+
     Fixture wlan;assert(wlan.init.begin({0x001d1d00,1,1,true,true}));
     for(unsigned k=0;k<5;++k)assert(wlan.ackLast()==b::EventResult::consumed);
     assert(wlan.io.commands[2].data[11]==3); // FW WL_ONLY|WL_INITOK, not normal mode

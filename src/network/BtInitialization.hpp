@@ -141,7 +141,13 @@ template<class Io> class Initialization {
         if(!check())return false;
         if(verify){uint32_t got=0;++result.operations;
             if(!io_.readRf(path,a,0xfffff,got))return fail(Error::io,a);
-            if(!check())return false;if(got!=v)return fail(Error::readback,a,got);}
+            if(!check())return false;
+            // RR_WLSEL_AG is bits 18:16 in pinned rtw89 reg.h. Real hardware
+            // retains 0x18 outside that field after btc_init_cfg writes zero.
+            // Keep upstream's full write, but verify only the defined selector.
+            // RR_LUTWE retains its existing full-width readback check.
+            const uint32_t verifyMask=a==2?0x70000:0xfffff;
+            if((got^v)&verifyMask)return fail(Error::readback,a,got);}
         return true;
     }
     bool trxMask(uint8_t path,uint8_t group,uint32_t value){
