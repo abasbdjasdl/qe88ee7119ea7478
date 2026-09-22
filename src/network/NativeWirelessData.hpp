@@ -34,7 +34,7 @@ inline IOReturn channel(const wireless::Snapshot &s,apple80211_channel_data *out
 }
 inline IOReturn rssi(const wireless::Snapshot &s,apple80211_rssi_data *out){
     if(!out)return kIOReturnBadArgument;
-    memset(out,0,sizeof(*out));
+    memset(out,0,sizeof(*out));out->version=APPLE80211_VERSION;
     if(!current(s))return kIOReturnNotReady;
     out->num_radios=1;out->rssi_unit=APPLE80211_UNIT_PERCENT;
     out->rssi[0]=out->aggregate_rssi=out->rssi_ext[0]=out->aggregate_rssi_ext=

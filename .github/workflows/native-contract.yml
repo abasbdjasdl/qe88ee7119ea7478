@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['tools/build_native_contract.py', '.github/workflows/native-contract.yml', 'src/network/Wireless*.hpp', 'src/network/NativeWirelessData.hpp', 'tests/network_wireless_*']
+    paths: ['tools/build_native_contract.py', '.github/workflows/native-contract.yml', 'src/network/Wireless*.hpp', 'src/network/NativeWireless*.hpp', 'tests/network_wireless_*']
 permissions:
   contents: read
 jobs:
@@ -27,6 +27,8 @@ jobs:
           mkdir -p build/native-contract
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_wireless_selection_test.cpp -o build/native-contract/selection-test
           build/native-contract/selection-test
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_wireless_rsn_test.cpp -o build/native-contract/rsn-test
+          build/native-contract/rsn-test
           python3 tools/build_native_contract.py build-itlwm MacKernelSDK
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
