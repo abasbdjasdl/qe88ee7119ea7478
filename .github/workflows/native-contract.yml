@@ -1,0 +1,34 @@
+name: Audit native wireless interface layout
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['tools/build_native_contract.py', '.github/workflows/native-contract.yml', 'src/network/WirelessSelection.hpp', 'tests/network_wireless_selection_test.cpp']
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: macos-15-intel
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Fetch pinned headers
+        run: |
+          git init build-itlwm
+          git -C build-itlwm remote add origin https://github.com/OpenIntelWireless/itlwm.git
+          git -C build-itlwm fetch --depth 1 origin 53c51c2cdd6e4b69beb91f310d74c53422b0f8bd
+          git -C build-itlwm checkout --detach FETCH_HEAD
+          git init MacKernelSDK
+          git -C MacKernelSDK remote add origin https://github.com/acidanthera/MacKernelSDK.git
+          git -C MacKernelSDK fetch --depth 1 origin 05094e5e88cec7caedbfb35e8449ed0db94bf95b
+          git -C MacKernelSDK checkout --detach FETCH_HEAD
+      - name: Check selection queue and private declarations
+        run: |
+          mkdir -p build/native-contract
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_wireless_selection_test.cpp -o build/native-contract/selection-test
+          build/native-contract/selection-test
+          python3 tools/build_native_contract.py build-itlwm MacKernelSDK
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-contract-${{ github.sha }}
+          path: build/native-contract
