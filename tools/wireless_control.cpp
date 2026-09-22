@@ -21,7 +21,7 @@ int main(int argc,char **argv){
     if(!strcmp(argv[1],"status")){
         control::Status s{};size_t length=sizeof(s);
         result=IOConnectCallStructMethod(connection,control::status,nullptr,0,&s,&length);
-        if(result==KERN_SUCCESS&&(length!=sizeof(s)||s.version!=control::version||s.count>64))result=kIOReturnBadArgument;
+        if(result==KERN_SUCCESS&&(length!=sizeof(s)||s.version!=control::version||s.count>control::cacheCapacity))result=kIOReturnBadArgument;
         if(result==KERN_SUCCESS)std::printf("version=%u link=%u flags=%u cached=%u generation=%llu channel=%u signalPercent=%u\n",
             s.version,s.link,s.flags,s.count,(unsigned long long)s.selectionGeneration,s.current.channel,s.current.signalPercent);
     }else if(!strcmp(argv[1],"disconnect")){

@@ -29,7 +29,8 @@ int main(){
     s.current.ssid[0]=42;s.cached[0].ssidLength=32;s.cached[0].ssid[31]=255;
     s.cached[0].signalPercent=255;s.cached[0].privacy=true;s.cached[0].fiveGhz=true;
     control::Status status;std::memset(&status,0xaa,sizeof(status));control::encode(s,status);
-    assert(status.version==1&&status.count==64&&status.flags==10);
+    assert(status.version==1&&status.count==60&&status.flags==10);
+    static_assert(sizeof(control::Status)<4096,"must use in-band IOKit output");
     assert(status.current.ssid[0]==0&&status.cached[0].ssid[31]==255);
     assert(status.cached[0].signalPercent==100&&status.cached[0].flags==3);
     for(auto n:status.cached)assert(!n.reserved[0]&&!n.reserved[1]);

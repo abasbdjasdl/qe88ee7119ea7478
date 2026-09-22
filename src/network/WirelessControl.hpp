@@ -5,6 +5,9 @@
 namespace rtl8852be { namespace network { namespace control {
 // Versioned, pointer-free local x86_64 ABI. No Apple private layouts cross here.
 constexpr uint32_t version=1,connectionType=0x52313601;
+// Keep output below the IOKit in-band structure limit. Larger outputs become
+// memory descriptors; this deliberately bounded v1 endpoint does not map them.
+constexpr uint32_t cacheCapacity=60;
 enum Selector : uint32_t { status=0,join=1,disconnect=2 };
 struct Network {
     uint8_t ssid[32],bssid[6],ssidLength,channel,signalPercent,flags;
@@ -15,13 +18,13 @@ struct Status {
     uint32_t version,flags;
     uint64_t sampledAtUs,selectionGeneration;
     uint32_t link,count;
-    Network current,cached[64];
+    Network current,cached[cacheCapacity];
 };
 struct Join {
     uint32_t version,security,pairwise,group,ssidLength,pmkLength,specificBssid,reserved;
     uint8_t ssid[32],bssid[6],reservedBytes[2],pmk[32];
 };
-static_assert(sizeof(Network)==64&&sizeof(Status)==4192&&sizeof(Join)==104,"control ABI layout changed");
+static_assert(sizeof(Network)==64&&sizeof(Status)==3936&&sizeof(Join)==104,"control ABI layout changed");
 inline void encode(const wireless::Network &n,Network &out){
     out={};if(n.ssidLength>32)return;
     for(unsigned i=0;i<n.ssidLength;++i)out.ssid[i]=n.ssid[i];
@@ -34,8 +37,8 @@ inline void encode(const wireless::Network &n,Network &out){
 inline void encode(const wireless::Snapshot &s,Status &out){
     out={};out.version=version;out.sampledAtUs=s.sampledAtUs;out.selectionGeneration=s.selectionGeneration;
     out.flags=(s.currentValid?1:0)|(s.selectionPending?2:0)|(s.scanInProgress?4:0)|
-        ((s.cacheTruncated||s.count>64)?8:0);
-    out.link=static_cast<uint32_t>(s.link);out.count=s.count>64?64:s.count;
+        ((s.cacheTruncated||s.count>cacheCapacity)?8:0);
+    out.link=static_cast<uint32_t>(s.link);out.count=s.count>cacheCapacity?cacheCapacity:s.count;
     if(s.currentValid)encode(s.current,out.current);
     for(unsigned i=0;i<out.count;++i)encode(s.cached[i],out.cached[i]);
 }

@@ -7,6 +7,16 @@ available. No new package was installed or reboot armed for this work.
 
 ## Source changes and evidence
 
+- `WirelessUserClient` provides an administrator-only IOKit control connection
+  (`0x52313601`) to the actual controller. It rechecks caller privilege for every
+  operation and accepts only fixed-size pointer-free v1 status/join messages.
+  Join and disconnect call the existing gated selection backend. Public control
+  calls drain before controller teardown; retained stopped providers reject them.
+  `r16-wireless-control` is the userspace endpoint (binary join input via stdin,
+  never passwords or PMKs in argv/logs). This is a real driver control path in
+  source, but it is not yet hardware validated or an Apple Wi-Fi registration.
+  It does not yet transport SAE management frames or EAPOL to a daemon.
+
 - Native Apple association requests: open, WPA-Personal and WPA2-Personal with
   explicitly selected CCMP/TKIP, binary SSIDs and optional BSSID. Protected
   requests require a 32-byte PMK. Unsupported AKMs fail without downgrading.
