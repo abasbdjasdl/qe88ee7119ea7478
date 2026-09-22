@@ -59,7 +59,10 @@
     "rtw89_tmac_imr_enable": "bac725a865125ecdbdc19498f80ff8c87018973ff741e378f249f4721ef5154d",
     "enable_imr_ax": "85abdcb954103167717758db64289e1f70c14efd17bace6174129b6a46a7b960",
     "err_imr_ctrl_ax": "c524720cf01f50995395ceebc3df25967c6dddb55630b97cdca9c62b59567d7a",
-    "set_host_rpr_ax": "6a318d40b7d32c2a2e24fb7db6d36928f2b51f2bd21a4295ee3f8df28ccbeb19"
+    "set_host_rpr_ax": "6a318d40b7d32c2a2e24fb7db6d36928f2b51f2bd21a4295ee3f8df28ccbeb19",
+    "rtw89_mac_write_xtal_si_ax": "ffd095e68ddfaaf97b5ddd9f4745775b72b0c75bcf7a5f474500da8457ee1025",
+    "rtw89_mac_read_xtal_si_ax": "f842abdbebaf652dc70c535094d45069487dacaf6e9262bbd8921e592024784a",
+    "rtw8852b_mac_enable_bb_rf": "f43863908c42fdf0b742e223038bac7d6a5c8d5003cd61d0799fe87941a85577"
   },
   "sources": {
     "mac.c": "e3882df844813af81121d9de2c1f63a8eabc6041d807bbc55b09607c672151b5",
@@ -73,11 +76,12 @@
     "Linux bit/min/poll helpers mapped to bounded local helpers",
     "C loop index cast to enum for C++",
     "object macros changed to namespaced constexpr values",
-    "designated RRSR, page-register and IMR initializers converted to structure field order"
+    "designated RRSR, page-register and IMR initializers converted to structure field order",
+    "XTAL write dispatch bound to the AX implementation and imported as a static member"
   ],
   "generated": {
-    "Rtw8852bMacConstants.hpp": "db949c5913c9fc658edd203d8cf1fc3c480fc93f5fc122286b30c6ab032e5a1a",
-    "Rtw8852bMacFunctions.inc": "6fd439d45ca6bc6c48f7d199429376bb7fded70970ce45f167cd23d0f4a842ae"
+    "Rtw8852bMacConstants.hpp": "60e853b0857f5366e87872305eaaad492fd8b471dbbde0974d1e62dead587022",
+    "Rtw8852bMacFunctions.inc": "4d3981794104bf3818f13a21cbef63801b50407e764636abec8c7e7e9d3e3f62"
   },
   "hardware_tested": false
 }

@@ -3,13 +3,14 @@
 #include "Rtw8852bMacConstants.hpp"
 namespace rtl8852be { namespace macinit {
 enum class InitError {none,precondition,read,write,timeout,clock,cancelled,upstream};
-enum class InitStage {idle,system,dmac,cmac,reports};
+enum class InitStage {idle,radio,system,dmac,cmac,reports};
 struct InitResult {
     InitError error{InitError::none};InitStage stage{InitStage::idle};
     u32 address{},expected{},actual{};unsigned reads{},writes{},polls{},warnings{};
-    bool systemReady{},packetEnginesReady{},cmacReady{},trxReady{};
+    bool radioEnabled{},systemReady{},packetEnginesReady{},cmacReady{},trxReady{};
 };
 inline bool initAddress(u32 address){
+    if(address==R_AX_WLAN_XTAL_SI_CTRL+1)return true;
     for(auto a:macInitRegisters)if(a==address)return true;
     for(unsigned ch=0;ch<=12;++ch)if(address==rtw8852b_page_regs.ach_page_ctrl+ch*4||address==rtw8852b_page_regs.ach_page_info+ch*4)return true;
     // Preconditions and DLE/HFC readback; these are read-only in this adapter.
@@ -114,8 +115,28 @@ private:
 public:
     explicit MacInitialization(D &io):context_(io,result){}
     MacInitialization(const MacInitialization &)=delete;MacInitialization &operator=(const MacInitialization &)=delete;
+    bool enableRadio(){
+        if(result.stage!=InitStage::idle||!check(&context_))return false;result.stage=InitStage::radio;
+        if(!stopped()||!equals(&context_,0x1e0,0xe0,0xe0))return false;
+        // Refuse to overwrite another outstanding serial-interface transaction.
+        if(!equals(&context_,R_AX_WLAN_XTAL_SI_CTRL,B_AX_WL_XTAL_SI_CMD_POLL,0))return false;
+        if(!finished(rtw8852b_mac_enable_bb_rf(&context_)))return false;
+        const u8 offsets[]={XTAL_SI_WL_RFC_S0,XTAL_SI_WL_RFC_S1};
+        for(auto offset:offsets){
+            u8 value=0;
+            if(!finished(rtw89_mac_read_xtal_si_ax(&context_,u8(offset),&value)))return false;
+            if(value!=0xc7)return fail(&context_,InitError::precondition,R_AX_WLAN_XTAL_SI_CTRL,0xc7,value);
+        }
+        const auto sys=rtw89_read8(&context_,R_AX_SYS_FUNC_EN),phy=rtw89_read8(&context_,R_AX_PHYREG_SET);
+        if(!check(&context_))return false;
+        if((sys&(B_AX_FEN_BBRSTB|B_AX_FEN_BB_GLB_RSTN))!=(B_AX_FEN_BBRSTB|B_AX_FEN_BB_GLB_RSTN))
+            return fail(&context_,InitError::precondition,R_AX_SYS_FUNC_EN,B_AX_FEN_BBRSTB|B_AX_FEN_BB_GLB_RSTN,sys);
+        if(phy!=PHYREG_SET_XYN_CYCLE)return fail(&context_,InitError::precondition,R_AX_PHYREG_SET,PHYREG_SET_XYN_CYCLE,phy);
+        if(!equals(&context_,R_AX_WLRF_CTRL,B_AX_AFC_AFEDIG,B_AX_AFC_AFEDIG))return false;
+        result.radioEnabled=check(&context_);return result.radioEnabled;
+    }
     bool enableSystem(){
-        if(result.stage!=InitStage::idle)return false;result.stage=InitStage::system;
+        if(!result.radioEnabled||result.stage!=InitStage::radio||!check(&context_))return false;result.stage=InitStage::system;
         if(!stopped()||!equals(&context_,0x1e0,0xe0,0xe0))return false;
         result.systemReady=finished(sys_init_ax(&context_));return result.systemReady;
     }

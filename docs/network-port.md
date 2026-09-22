@@ -191,12 +191,12 @@ test injects failure at all 58 read/write points plus delay failures, stale cloc
 ignored cleanup writes and device removal. This has not yet read this device's
 physical OTP in macOS. The DAV/XTAL bank read path is still missing.
 
-`MacInitialization` now imports 57 original AX system/DMAC/CMAC/IMR/report
-functions and 581 referenced constants from the pinned rtw89 source. The SCC
+`MacInitialization` now imports 60 original AX BB/RF/system/DMAC/CMAC/IMR/report
+functions and 598 referenced constants from the pinned rtw89 source. The SCC
 sequence programs DLE sizes and quotas, HFC pages, scheduler, MPDU/security,
 CMAC0, internal error masks and PCIe host release reports. It explicitly disables
-hardware packet crypto while net80211 owns encryption. Its four one-shot stages
-are `enableSystem`, `initializeDmac`, `initializeCmac`, and `finishTrx`; callers
+hardware packet crypto while net80211 owns encryption. Its five one-shot stages
+are `enableRadio`, `enableSystem`, `initializeDmac`, `initializeCmac`, and `finishTrx`; callers
 must check every return and require `trxReady` before runtime DMA startup.
 
 `MacInitializationIo` performs actual 8/16/32-bit BAR2 access and uses kernel
@@ -205,11 +205,13 @@ decoding must be enabled, bus mastering off, all host engines/channels stopped,
 PCI interrupts masked and firmware state 7 before setup. Internal MAC error
 masks are distinct from the still-masked PCI MSI sources. Failure latches the
 first address/error and suppresses further accesses; partial setup requires a
-controller-owned power cycle, not reuse of the failed object. This is normal
-post-firmware MAC setup, not firmware upload, BB/RF enable, RFK, PCIe post-init,
+controller-owned power cycle, not reuse of the failed object. BB/RF enable uses
+the original AX XTAL serial write/read handshake, refuses an outstanding command,
+and verifies both RFC banks plus the BB reset/PHY cycle configuration. This is
+normal post-firmware MAC setup, not firmware upload, RFK, PCIe post-init,
 or a top-level controller. The object has a 500 ms total setup deadline.
 
-The host MAC test covers 334 read/write failure points, DLE/scheduler/CAM
+The host MAC test covers 366 read/write failure points, XTAL/DLE/scheduler/CAM
 timeouts, frozen/backward clocks, cancellation, invalid order, ignored release
 report/error mask writes, and SCC quota/filter golden values. All-ones is a
 valid value for the two global error masks; it remains rejected as an invalid

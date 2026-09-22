@@ -1333,3 +1333,78 @@ static int set_host_rpr_ax(Context *rtwdev)
 
 	return 0;
 }
+
+static
+int rtw89_mac_write_xtal_si_ax(Context *rtwdev, u8 offset, u8 val, u8 mask)
+{
+	u32 val32;
+	int ret;
+
+	val32 = fieldPrep(B_AX_WL_XTAL_SI_ADDR_MASK, offset) |
+		fieldPrep(B_AX_WL_XTAL_SI_DATA_MASK, val) |
+		fieldPrep(B_AX_WL_XTAL_SI_BITMASK_MASK, mask) |
+		fieldPrep(B_AX_WL_XTAL_SI_MODE_MASK, XTAL_SI_NORMAL_WRITE) |
+		fieldPrep(B_AX_WL_XTAL_SI_CMD_POLL, 1);
+	rtw89_write32(rtwdev, R_AX_WLAN_XTAL_SI_CTRL, val32);
+
+	ret = R16_MAC_POLL(rtw89_read32, val32, !(val32 & B_AX_WL_XTAL_SI_CMD_POLL),
+				50, 50000, false, rtwdev, R_AX_WLAN_XTAL_SI_CTRL);
+	if (ret) {
+		rtw89_warn(rtwdev, "xtal si not ready(W): offset=%x val=%x mask=%x\n",
+			   offset, val, mask);
+		return ret;
+	}
+
+	return 0;
+}
+
+static
+int rtw89_mac_read_xtal_si_ax(Context *rtwdev, u8 offset, u8 *val)
+{
+	u32 val32;
+	int ret;
+
+	val32 = fieldPrep(B_AX_WL_XTAL_SI_ADDR_MASK, offset) |
+		fieldPrep(B_AX_WL_XTAL_SI_DATA_MASK, 0x00) |
+		fieldPrep(B_AX_WL_XTAL_SI_BITMASK_MASK, 0x00) |
+		fieldPrep(B_AX_WL_XTAL_SI_MODE_MASK, XTAL_SI_NORMAL_READ) |
+		fieldPrep(B_AX_WL_XTAL_SI_CMD_POLL, 1);
+	rtw89_write32(rtwdev, R_AX_WLAN_XTAL_SI_CTRL, val32);
+
+	ret = R16_MAC_POLL(rtw89_read32, val32, !(val32 & B_AX_WL_XTAL_SI_CMD_POLL),
+				50, 50000, false, rtwdev, R_AX_WLAN_XTAL_SI_CTRL);
+	if (ret) {
+		rtw89_warn(rtwdev, "xtal si not ready(R): offset=%x\n", offset);
+		return ret;
+	}
+
+	*val = rtw89_read8(rtwdev, R_AX_WLAN_XTAL_SI_CTRL + 1);
+
+	return 0;
+}
+
+static int rtw8852b_mac_enable_bb_rf(Context *rtwdev)
+{
+	int ret;
+
+	rtw89_write8_set(rtwdev, R_AX_SYS_FUNC_EN,
+			 B_AX_FEN_BBRSTB | B_AX_FEN_BB_GLB_RSTN);
+	rtw89_write32_mask(rtwdev, R_AX_SPS_DIG_ON_CTRL0, B_AX_REG_ZCDC_H_MASK, 0x1);
+	rtw89_write32_set(rtwdev, R_AX_WLRF_CTRL, B_AX_AFC_AFEDIG);
+	rtw89_write32_clr(rtwdev, R_AX_WLRF_CTRL, B_AX_AFC_AFEDIG);
+	rtw89_write32_set(rtwdev, R_AX_WLRF_CTRL, B_AX_AFC_AFEDIG);
+
+	ret = rtw89_mac_write_xtal_si_ax(rtwdev, XTAL_SI_WL_RFC_S0, 0xC7,
+				      FULL_BIT_MASK);
+	if (ret)
+		return ret;
+
+	ret = rtw89_mac_write_xtal_si_ax(rtwdev, XTAL_SI_WL_RFC_S1, 0xC7,
+				      FULL_BIT_MASK);
+	if (ret)
+		return ret;
+
+	rtw89_write8(rtwdev, R_AX_PHYREG_SET, PHYREG_SET_XYN_CYCLE);
+
+	return 0;
+}

@@ -7,9 +7,9 @@
 namespace m=rtl8852be::macinit;
 struct Device {
     struct Op{unsigned width,address,value;bool write;};
-    std::map<unsigned,uint8_t> bytes;std::vector<Op> trace;
+    std::map<unsigned,uint8_t> bytes,xtal;std::vector<Op> trace;
     unsigned operations{},failAt{},delayCalls{},ignoreWrite=0xffffffff;uint64_t time=100;
-    bool frozen{},backwards{},cancel{},delayFailure{},noDle{},noScheduler{},noCam{},noBacam{},badHfc{};
+    bool frozen{},backwards{},cancel{},delayFailure{},noDle{},noScheduler{},noCam{},noBacam{},badHfc{},xtalBusy{},badXtal{};
     uint16_t cmd=2;
     Device(){put(0x1010,0x1f0f00,4);put(0x1e0,0xe0,4);}
     void put(unsigned a,unsigned v,unsigned n){for(unsigned i=0;i<n;++i)bytes[a+i]=uint8_t(v>>(8*i));}
@@ -22,6 +22,15 @@ struct Device {
         if(a==m::R_AX_ADDR_CAM_CTRL&&(v&m::B_AX_ADDR_CAM_CLR)&&!noCam)put(a,get(a)&~m::B_AX_ADDR_CAM_CLR,4);
         if(a==m::R_AX_RESPBA_CAM_CTRL&&(v&m::B_AX_BACAM_RST_MASK)&&!noBacam)put(a,get(a)&~m::B_AX_BACAM_RST_MASK,4);
         if(a==m::rtw8852b_page_regs.hci_fc_ctrl&&(v&9)==9)put(m::rtw8852b_page_regs.pub_page_info2,badHfc?445:446,4);
+        if(a==m::R_AX_WLAN_XTAL_SI_CTRL&&!xtalBusy){
+            const auto addr=v&255;
+            if((v&m::B_AX_WL_XTAL_SI_MODE_MASK)==0){const auto mask=(v>>16)&255;
+                xtal[addr]=uint8_t((xtal[addr]&~mask)|((v>>8)&mask));
+            }else if((v&m::B_AX_WL_XTAL_SI_MODE_MASK)==(1u<<24)){
+                v=(v&~0xff00u)|(unsigned(badXtal?0:xtal[addr])<<8);
+            }
+            put(a,v&~m::B_AX_WL_XTAL_SI_CMD_POLL,4);
+        }
         return true;
     }
     bool read8(unsigned a,uint8_t &v){unsigned x;bool ok=read(a,1,x);v=uint8_t(x);return ok;}
@@ -32,12 +41,12 @@ struct Device {
     bool delayUs(unsigned us){++delayCalls;if(!frozen)time+=us;return !delayFailure;}
     bool cancelled(){return cancel;}
 };
-bool run(Device &d,m::InitResult &result){m::MacInitialization<Device> init(d);bool ok=init.enableSystem()&&init.initializeDmac()&&init.initializeCmac()&&init.finishTrx();result=init.result;return ok;}
+bool run(Device &d,m::InitResult &result){m::MacInitialization<Device> init(d);bool ok=init.enableRadio()&&init.enableSystem()&&init.initializeDmac()&&init.initializeCmac()&&init.finishTrx();result=init.result;return ok;}
 int main(){
     Device d;m::InitResult result;const bool success=run(d,result);
     if(!success)fprintf(stderr,"MAC failure stage=%u error=%u address=%x expected=%x actual=%x operations=%u\n",unsigned(result.stage),unsigned(result.error),result.address,result.expected,result.actual,d.operations);
     assert(success);const auto operations=d.operations;
-    assert(result.systemReady&&result.packetEnginesReady&&result.cmacReady&&result.trxReady&&result.error==m::InitError::none);
+    assert(result.radioEnabled&&result.systemReady&&result.packetEnginesReady&&result.cmacReady&&result.trxReady&&result.error==m::InitError::none);
     // Golden SCC hardware values independently read from pinned field layouts.
     assert(d.get(0x8c08)==0x01fe0000&&d.get(0x9008)==0x01f00401);
     assert(d.get(0x8c40)==0x01be01be&&d.get(0x8c44)==0x00300030);
@@ -60,8 +69,8 @@ int main(){
     for(auto v:{0xffffffffu,0xdeadbeefu}){Device f;f.put(m::R_AX_CMAC_FUNC_EN,v,4);assert(!run(f,result)&&result.error==m::InitError::read);}
     {Device f;f.cancel=true;assert(!run(f,result)&&!f.operations);}
     {Device f;f.cmd=6;assert(!run(f,result)&&!f.operations);}
-    {Device f;m::MacInitialization<Device> init(f);assert(!init.initializeDmac()&&!init.initializeCmac()&&!init.finishTrx()&&!f.operations);
-        assert(init.enableSystem());assert(!init.enableSystem());assert(init.initializeDmac());assert(!init.initializeDmac());assert(init.initializeCmac());assert(!init.initializeCmac());assert(init.finishTrx());assert(!init.finishTrx());}
+    {Device f;m::MacInitialization<Device> init(f);assert(!init.enableSystem()&&!init.initializeDmac()&&!init.initializeCmac()&&!init.finishTrx()&&!f.operations);
+        assert(init.enableRadio());assert(!init.enableRadio());assert(init.enableSystem());assert(!init.enableSystem());assert(init.initializeDmac());assert(!init.initializeDmac());assert(init.initializeCmac());assert(!init.initializeCmac());assert(init.finishTrx());assert(!init.finishTrx());}
     assert((d.get(m::R_AX_WDRLS_CFG)&m::B_AX_WDRLS_MODE_MASK)==0);
     assert(m::u32_get_bits(d.get(m::R_AX_RLSRPT0_CFG1),m::B_AX_RLSRPT0_AGGNUM_MASK)==30);
     assert(m::u32_get_bits(d.get(m::R_AX_RLSRPT0_CFG1),m::B_AX_RLSRPT0_TO_MASK)==255);
@@ -74,5 +83,12 @@ int main(){
         assert(!run(f,result)&&result.error==m::InitError::precondition&&result.address==reg&&!result.trxReady);
     }
     assert(!m::initWriteAddress(m::R_AX_AFE_CTRL1)&&!m::initWriteAddress(m::R_AX_SYS_ISO_CTRL_EXTEND));
-    printf("PASS: 8852B SCC MAC register model; system/DLE/HFC/CMAC/internal IMR/host reports, %u read/write failures, scheduler/CAM/BA-CAM timeouts, frozen/backward clocks, software crypto policy\n",operations);
+    assert(d.xtal[0x80]==0xc7&&d.xtal[0x81]==0xc7);
+    for(unsigned mode=0;mode<4;++mode){Device f;
+        if(mode==0)f.xtalBusy=true;if(mode==1){f.xtalBusy=true;f.frozen=true;}if(mode==2)f.badXtal=true;
+        if(mode==3)f.put(m::R_AX_WLAN_XTAL_SI_CTRL,m::B_AX_WL_XTAL_SI_CMD_POLL,4);
+        assert(!run(f,result)&&!result.radioEnabled&&!result.systemReady&&result.address==m::R_AX_WLAN_XTAL_SI_CTRL);
+        assert(result.polls<=1001);
+    }
+    printf("PASS: 8852B SCC MAC register model; BB/RF enable/system/DLE/HFC/CMAC/internal IMR/host reports, %u read/write failures, XTAL/scheduler/CAM/BA-CAM timeouts, frozen/backward clocks, software crypto policy\n",operations);
 }
