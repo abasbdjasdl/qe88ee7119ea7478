@@ -60,7 +60,7 @@ template<class Backend> class Controller {
     ScanChannel channels_[64]{};size_t channelCount_{},channelIndex_{};
     Token epoch_{},associationToken_{},scanToken_{},pendingToken_{};
     Action pendingAction_{};CommandId pendingCommand_{};uint8_t pendingSequence_{};
-    uint64_t sequenceUsed_[4]{},serial_{},lastNow_{},deadline_{},scanDeadline_{};
+    uint64_t serial_{},lastNow_{},deadline_{},scanDeadline_{};
     bool clockStarted_{},waitingAction_{},waitingCommand_{},roleCreated_{},
          authenticated_{},scanCancelled_{},disconnectRequested_{};
     // Hardware actions include TX drain plus a bounded multi-phase radio tune.
@@ -104,9 +104,7 @@ template<class Backend> class Controller {
         if(waitingAction_||waitingCommand_)return fail(Error::backend);
         uint8_t sequence=0;
         if(!io_.reserveH2cSequence(sequence))return fail(Error::sequenceExhausted);
-        const auto mask=uint64_t(1)<<(sequence%64);
-        if(sequenceUsed_[sequence/64]&mask)return fail(Error::sequenceExhausted);
-        sequenceUsed_[sequence/64]|=mask;
+        // Shared command bus owns pending-slot exclusion and sequence wrap.
         uint8_t bytes[12]{};size_t length=0;bool encoded;
         if(role){
             network::RoleCommand request{};request.macid=interface_.macid;
@@ -180,7 +178,7 @@ public:
         state_=State::stopped;error_=Error::none;epoch_={newEpoch,0};serial_=0;
         associationToken_=scanToken_=pendingToken_={};waitingAction_=waitingCommand_=roleCreated_=false;
         authenticated_=scanCancelled_=disconnectRequested_=false;channelCount_=channelIndex_=0;
-        interface_={};peer_={};association_={};for(auto &word:sequenceUsed_)word=0;
+        interface_={};peer_={};association_={};
         lastNow_=now;clockStarted_=true;return true;
     }
     bool start(Interface config,uint64_t now){

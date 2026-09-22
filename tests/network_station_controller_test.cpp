@@ -15,7 +15,7 @@ struct Backend {
     bool op(){++operations;return operations!=failAt;}
     bool inGate(){return gated;}
     bool setTraffic(Traffic t){if(!op())return false;mode=t;trafficHistory.push_back(t);return true;}
-    bool reserveH2cSequence(uint8_t &out){if(!op()||nextSequence>255)return false;out=reuseSequence?0:uint8_t(nextSequence++);return true;}
+    bool reserveH2cSequence(uint8_t &out){if(!op())return false;out=reuseSequence?0:uint8_t(nextSequence++);return true;}
     bool publishH2c(const uint8_t *p,size_t n,Token t){
         assert(n==12&&t.epoch==expectedEpoch&&t.operation);if(!op())return false;
         std::array<uint8_t,12> copy{};for(unsigned i=0;i<12;++i)copy[i]=p[i];commands.push_back(copy);return true;
@@ -117,7 +117,7 @@ static void epochsAndTimeouts(){
     {Backend b;Device d(b);b.resetProven=false;assert(!d.restart(1,0));b.resetProven=true;assert(boot(d,b));
      assert(!d.restart(1,6));assert(!d.restart(2,6));b.expectedEpoch=2;assert(d.restart(2,6));}
     {Backend b;Device d(b);b.reuseSequence=true;assert(d.restart(1,0)&&d.start(interface(),1)&&finish(d,b,2));
-     assert(!ack(d,b,3));assert(d.error()==Error::sequenceExhausted&&b.commands.size()==1&&b.faults==1);}
+     assert(ack(d,b,3));assert(d.error()==Error::none&&b.commands.size()==2&&b.faults==0);}
     {Backend b;Device d(b);assert(d.restart(1,0)&&d.start(interface(),1)&&finish(d,b,2));
      const auto packet=b.commands.back();assert(!d.tick(2000002));assert(d.requiresRecovery());
      assert(!ackCommand(d,packet,2000003));assert(!d.start(interface(),2000004));
@@ -134,7 +134,7 @@ static void epochsAndTimeouts(){
      for(unsigned i=0;i<127;++i){assert(connect(d,b,now));now+=10;assert(disconnect(d,b,now));now+=10;}
      assert(b.commands.size()==256&&b.nextSequence==256);assert(d.connect(peer(),now)&&finish(d,b,now+1));
      assert(d.authenticated(d.associationToken(),peer().bssid,true,now+2)&&d.associationReceived(d.associationToken(),assoc(),now+3));
-     assert(!finish(d,b,now+4)&&d.error()==Error::sequenceExhausted&&b.commands.size()==256);}
+     assert(finish(d,b,now+4)&&b.commands.size()==257);assert(ack(d,b,now+5));}
 }
 static void cancellations(){
     // Cancel at scanBegin, tune pending, dwell, restore pending, end pending.

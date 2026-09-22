@@ -82,8 +82,15 @@ int main(){
         assert(bus.reserve({},0,100,seq));--t.time;
         assert(!bus.service()&&bus.error()==n::CommandError::clock);}
     {Transport t;Bus bus(t,1);uint8_t seq;
-        for(unsigned i=0;i<256;++i){assert(bus.submit(policy,false,true,nullptr,0,{},0,100,seq)&&seq==i);
-            Ack ack(policy,seq);assert(bus.accept(ack.event,1)==n::CommandEvent::completed);}
+        Owner owner;
+        for(unsigned i=0;i<1024;++i){assert(bus.submit(policy,false,true,nullptr,0,owner.receiver(),i+1,100,seq)&&seq==uint8_t(i));
+            Ack wrong(role,seq);assert(bus.accept(wrong.event,1)==n::CommandEvent::unrelated);
+            Ack ack(policy,seq);assert(bus.accept(ack.event,2)==n::CommandEvent::unrelated);
+            assert(bus.accept(ack.event,1)==n::CommandEvent::completed&&owner.token==i+1);
+            assert(bus.accept(ack.event,1)==n::CommandEvent::unrelated);}
+        assert(bus.allocated()==1024&&owner.callbacks==1024&&!bus.faulted());}
+    {Transport t;Bus bus(t,1);uint8_t seq;
+        for(unsigned i=0;i<256;++i)assert(bus.submit(policy,false,true,nullptr,0,{},0,100,seq));
         assert(!bus.reserve({},0,100,seq)&&bus.error()==n::CommandError::exhausted&&t.calls==256);}
     {Transport t;Bus bus(t,1);uint8_t seq;assert(bus.reserve({},0,100,seq));
         uint8_t bytes[12]{};size_t length=0;uint8_t payload[4]={0};assert(n::encodeH2c(role,seq,false,true,payload,4,bytes,12,length));

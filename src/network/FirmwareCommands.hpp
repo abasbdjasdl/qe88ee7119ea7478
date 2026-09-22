@@ -30,7 +30,7 @@ struct CommandRecord {
 template<class Transport> class FirmwareCommands {
     Transport &io_;const uint64_t epoch_;
     CommandRecord records_[256]{};uint8_t packet_[16383]{};
-    uint16_t next_{};uint64_t lastTime_{};bool clockStarted_{},publishing_{},delivering_{};
+    uint32_t next_{};uint64_t lastTime_{};bool clockStarted_{},publishing_{},delivering_{};
     CommandError error_{CommandError::none};
     bool fail(CommandError e){if(error_==CommandError::none)error_=e;return false;}
     bool check(){
@@ -38,7 +38,7 @@ template<class Transport> class FirmwareCommands {
         const auto now=io_.nowUs();
         if(clockStarted_&&now<lastTime_)return fail(CommandError::clock);
         lastTime_=now;clockStarted_=true;
-        for(unsigned i=0;i<next_;++i){const auto &r=records_[i];
+        for(unsigned i=0;i<256;++i){const auto &r=records_[i];
             if((r.state==CommandState::reserved||r.state==CommandState::pending)&&now>=r.deadline)
                 return fail(CommandError::timeout);
         }
@@ -63,13 +63,18 @@ public:
     void invalidate(){fail(CommandError::invalidated);}
     bool service(){return check();}
     // The same allocator covers role/join, BT policy, and fire-and-forget H2C.
-    // No sequence is reused within this firmware epoch: wire ACKs have no epoch.
-    // Exhaustion requires physical restart/RX drain until a wire fence exists.
+    // Like upstream u8 h2c_seq, wrap only onto an unused/completed record.
+    // Never replace pending/reserved commands. ACK wire format has no generation:
+    // a duplicate delayed across a full 256-command cycle with the same ID cannot
+    // be distinguished; this relies on normal firmware completion semantics.
+    // RX epoch still rejects events from an old physical queue incarnation.
     bool reserve(CommandReceiver receiver,uint64_t token,uint64_t timeoutUs,uint8_t &sequence){
         sequence=0;if(publishing_||!check()||!timeoutUs||timeoutUs>10000000||
             bool(receiver.owner)!=bool(receiver.event)||UINT64_MAX-lastTime_<timeoutUs)return false;
-        if(next_==256)return fail(CommandError::exhausted);
-        sequence=uint8_t(next_++);auto &r=records_[sequence];
+        if(next_==UINT32_MAX)return fail(CommandError::exhausted);
+        auto &r=records_[uint8_t(next_)];
+        if(r.state==CommandState::reserved||r.state==CommandState::pending)return fail(CommandError::exhausted);
+        sequence=uint8_t(next_++);r=CommandRecord{};
         r.state=CommandState::reserved;r.receiver=receiver;r.token=token;r.deadline=lastTime_+timeoutUs;return true;
     }
     bool publish(const uint8_t *bytes,size_t length){
