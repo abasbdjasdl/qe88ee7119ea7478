@@ -32,7 +32,8 @@ class MacRfkIo {
     network::MacRadioIo radioIo_;network::RadioAccess<network::MacRadioIo> radio_;
     CalibrationControl control_;bool active_{},oneshotActive_{},txArmed_{},modified_{};Kind kind_{};u8 oneshotMap_{};
     mutable bool leaseLost_{};
-    bool macRead(uint32_t,uint32_t &);bool accessible()const;bool checkLease()const;
+    bool macRead(uint32_t,uint32_t &,bool requireLease=true);
+    bool accessible(bool requireLease=true)const;bool checkLease()const;
     static bool guard(void *);
 public:
     MacRfkIo(IOPCIDevice *,IOMemoryMap *,CalibrationControl);

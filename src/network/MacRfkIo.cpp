@@ -15,15 +15,15 @@ bool MacRfkIo::checkLease()const{
     return true;
 }
 bool MacRfkIo::guard(void *owner){return static_cast<MacRfkIo *>(owner)->checkLease();}
-bool MacRfkIo::accessible()const{
+bool MacRfkIo::accessible(bool requireLease)const{
     if(!valid()||cancelled())return false;
     const auto cmd=device_->configRead16(kIOPCIConfigCommand);
-    return cmd!=0xffff&&(cmd&2)!=0&&(!active_||checkLease());
+    return cmd!=0xffff&&(cmd&2)!=0&&(!requireLease||!active_||checkLease());
 }
-bool MacRfkIo::macRead(uint32_t a,uint32_t &v){
-    v=0;if(!accessible()||(a&3)||a>=0x10000)return false;
+bool MacRfkIo::macRead(uint32_t a,uint32_t &v,bool requireLease){
+    v=0;if(!accessible(requireLease)||(a&3)||a>=0x10000)return false;
     OSSynchronizeIO();v=OSReadLittleInt32(reinterpret_cast<const volatile void *>(mapping_->getVirtualAddress()),a);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);return v!=0xffffffff&&v!=0xdeadbeef&&accessible();
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);return v!=0xffffffff&&v!=0xdeadbeef&&accessible(requireLease);
 }
 bool MacRfkIo::begin(Kind kind){
     if(active_||!accessible()||!control_.owner||!control_.begin||!control_.end||!control_.recover||!control_.check)return false;
@@ -55,7 +55,10 @@ bool MacRfkIo::end(Kind kind,bool success){
     u32 tx=0;
     if(kind==Kind::channel&&success&&(!macRead(R_AX_CTN_TXEN,tx)||(tx&B_AX_CTN_TXEN_ALL_MASK))){modified_=true;return false;}
     if(!control_.end(control_.owner,kind,success))return false;
-    if(kind==Kind::channel&&success&&(!macRead(R_AX_CTN_TXEN,tx)||(tx&B_AX_CTN_TXEN_ALL_MASK))){modified_=true;return false;}
+    // The owner may retire its synchronous lease in end(). This final read is
+    // only an independent TX-pause check, not permission for more programming.
+    // Keep PCI/cancellation/sentinel checks, without consuming a retired lease.
+    if(kind==Kind::channel&&success&&(!macRead(R_AX_CTN_TXEN,tx,false)||(tx&B_AX_CTN_TXEN_ALL_MASK))){modified_=true;return false;}
     active_=false;modified_=false;return true;
 }
 bool MacRfkIo::oneshot(Kind kind,u8 phyMap,bool start){

@@ -8,10 +8,11 @@
 namespace r=rtl8852be::rfk;
 struct Owner {
     unsigned beginCount{},endCount{},shotCount{},recoverCount{},checkCount{},failCheckAt{};
-    bool failEnd{},failShot{},failRecover{};uint64_t deadline=UINT64_MAX;
+    bool failEnd{},failShot{},failRecover{},revokeOnEnd{};uint64_t deadline=UINT64_MAX;
     IOMemoryMap *resumeMap{};
     static bool begin(void *o,r::Kind){++static_cast<Owner *>(o)->beginCount;return true;}
     static bool end(void *o,r::Kind kind,bool success){auto &x=*static_cast<Owner *>(o);++x.endCount;
+        if(success&&x.revokeOnEnd)x.deadline=fakeRfk::time;
         if(kind==r::Kind::channel&&success&&x.resumeMap)x.resumeMap->set(r::R_AX_CTN_TXEN,1);return !x.failEnd;}
     static bool shot(void *o,r::Kind,uint8_t,bool){auto &x=*static_cast<Owner *>(o);++x.shotCount;return !x.failShot;}
     static bool recover(void *o,r::Kind){auto &x=*static_cast<Owner *>(o);++x.recoverCount;return !x.failRecover;}
@@ -30,6 +31,8 @@ struct Fixture {
         assert(io.writeBb(r::R_PMAC_TX_PRD,0x56780000|r::B_PMAC_CTX_EN|r::B_PMAC_PTX_EN));fakeRfk::accesses=0;}
 };
 int main(){
+    {Fixture f;assert(f.io.begin(r::Kind::channel));f.owner.revokeOnEnd=true;
+        assert(f.io.end(r::Kind::channel,true)&&!f.io.leaseActive()&&f.owner.endCount==1&&!f.owner.recoverCount);}
     {Fixture f;auto ctl=f.owner.control();ctl.check=nullptr;r::MacRfkIo io(&f.device,&f.map,ctl);
         assert(!io.begin(r::Kind::iqk)&&!f.owner.beginCount);}
     {Fixture f;assert(f.io.begin(r::Kind::dpk));assert(f.io.writeBb(r::R_NCTL_CFG,0x1019));
