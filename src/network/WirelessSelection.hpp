@@ -3,11 +3,13 @@
 #include <stddef.h>
 #include <stdint.h>
 namespace rtl8852be { namespace network { namespace selection {
-enum class Security : uint8_t { open, wpa2Psk };
+enum class Security : uint8_t { open, wpa2Psk, wpaPsk };
+enum class Cipher : uint8_t { ccmp, tkip };
 struct Join {
     uint8_t ssid[32]{}; uint32_t ssidLength{};
     uint8_t bssid[6]{}; bool specificBssid{};
     Security security{Security::open};
+    Cipher pairwise{Cipher::ccmp},group{Cipher::ccmp};
     uint8_t pmk[32]{}; uint32_t pmkLength{};
 };
 inline void wipe(void *p,size_t n){auto *q=static_cast<volatile uint8_t*>(p);while(n--)*q++=0;}
@@ -15,7 +17,10 @@ inline bool valid(const Join &j){
     if(!j.ssidLength||j.ssidLength>sizeof(j.ssid))return false;
     if(j.specificBssid){unsigned any=0;for(auto b:j.bssid)any|=b;if(!any||(j.bssid[0]&1))return false;}
     if(j.security==Security::open)return j.pmkLength==0;
-    return j.security==Security::wpa2Psk&&j.pmkLength==sizeof(j.pmk);
+    if(j.security!=Security::wpa2Psk&&j.security!=Security::wpaPsk)return false;
+    if(j.pairwise!=Cipher::ccmp&&j.pairwise!=Cipher::tkip)return false;
+    if(j.group!=Cipher::ccmp&&j.group!=Cipher::tkip)return false;
+    return j.pmkLength==sizeof(j.pmk);
 }
 // The native interface and hardware work loop share this single pending request.
 // An accepted request is NOT an association-success notification.

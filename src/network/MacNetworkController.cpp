@@ -303,23 +303,57 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         savedState=ic.ic_newstate;ic.ic_newstate=newState;ieee80211_media_init(&ifp);
         return savedState&&ic.ic_bss&&ifp.if_snd.queue;
     }
+    static void fillJoin(const selection::Join &selected,ieee80211_join &join){
+        memset(&join,0,sizeof(join));join.i_len=selected.ssidLength;
+        memcpy(join.i_nwid,selected.ssid,selected.ssidLength);
+        if(selected.security==selection::Security::wpa2Psk||selected.security==selection::Security::wpaPsk){
+            join.i_flags=IEEE80211_JOIN_WPAPSK|IEEE80211_JOIN_WPA;
+            join.i_wpaparams.i_enabled=1;
+            join.i_wpaparams.i_protos=selected.security==selection::Security::wpaPsk?
+                IEEE80211_WPA_PROTO_WPA1:IEEE80211_WPA_PROTO_WPA2;
+            join.i_wpaparams.i_akms=IEEE80211_WPA_AKM_PSK;
+            join.i_wpaparams.i_ciphers=selected.pairwise==selection::Cipher::tkip?
+                IEEE80211_WPA_CIPHER_TKIP:IEEE80211_WPA_CIPHER_CCMP;
+            join.i_wpaparams.i_groupcipher=selected.group==selection::Cipher::tkip?
+                IEEE80211_WPA_CIPHER_TKIP:IEEE80211_WPA_CIPHER_CCMP;
+            join.i_wpapsk.i_enabled=1;memcpy(join.i_wpapsk.i_psk,selected.pmk,32);
+        }else{join.i_flags=IEEE80211_JOIN_NWKEY;join.i_nwkey.i_wepon=IEEE80211_NWKEY_OPEN;}
+    }
     bool loadCredentials(){
-        // Pre-derived PSK only: no passphrase PBKDF2 under a kernel command gate.
+        // Existing WPA2-CCMP startup remains the default; optional settings never
+        // widen the negotiated protocol/cipher set or silently fall back.
         auto *ssid=OSDynamicCast(OSData,owner.getProperty("R16SSID"));
         if(!ssid)return true;
         if(!ssid->getLength()||ssid->getLength()>32)return false;
-        ieee80211_join join{};join.i_len=ssid->getLength();memcpy(join.i_nwid,ssid->getBytesNoCopy(),join.i_len);
+        selection::Join selected;selected.ssidLength=ssid->getLength();
+        memcpy(selected.ssid,ssid->getBytesNoCopy(),selected.ssidLength);
         auto *psk=OSDynamicCast(OSData,owner.getProperty("R16PSK"));
-        if(psk){
-            if(psk->getLength()!=32)return false;
-            join.i_flags=IEEE80211_JOIN_WPAPSK|IEEE80211_JOIN_WPA;
-            join.i_wpaparams.i_enabled=1;join.i_wpaparams.i_protos=IEEE80211_WPA_PROTO_WPA2;
-            join.i_wpaparams.i_akms=IEEE80211_WPA_AKM_PSK;
-            join.i_wpaparams.i_ciphers=IEEE80211_WPA_CIPHER_CCMP;
-            join.i_wpaparams.i_groupcipher=IEEE80211_WPA_CIPHER_CCMP;
-            join.i_wpapsk.i_enabled=1;memcpy(join.i_wpapsk.i_psk,psk->getBytesNoCopy(),32);
-        }else{join.i_flags=IEEE80211_JOIN_NWKEY;join.i_nwkey.i_wepon=IEEE80211_NWKEY_OPEN;}
-        if(ieee80211_add_ess(&ic,&join))return false;ic.ic_flags|=IEEE80211_F_AUTO_JOIN;credentials=true;return true;
+        selected.security=psk?selection::Security::wpa2Psk:selection::Security::open;
+        auto *modeObject=owner.getProperty("R16Security");
+        auto *mode=OSDynamicCast(OSString,modeObject);
+        if(modeObject&&!mode)return false;
+        if(mode){
+            if(mode->isEqualTo("open"))selected.security=selection::Security::open;
+            else if(mode->isEqualTo("wpa-psk"))selected.security=selection::Security::wpaPsk;
+            else if(mode->isEqualTo("wpa2-psk"))selected.security=selection::Security::wpa2Psk;
+            else return false;
+        }
+        if((selected.security==selection::Security::open&&psk)||
+           (selected.security!=selection::Security::open&&(!psk||psk->getLength()!=32)))return false;
+        auto parseCipher=[&](const char *key,selection::Cipher &out){
+            auto *object=owner.getProperty(key);if(!object)return true;
+            auto *text=OSDynamicCast(OSString,object);if(!text)return false;
+            if(text->isEqualTo("ccmp")){out=selection::Cipher::ccmp;return true;}
+            if(text->isEqualTo("tkip")){out=selection::Cipher::tkip;return true;}
+            return false;
+        };
+        if(!parseCipher("R16PairwiseCipher",selected.pairwise)||
+           !parseCipher("R16GroupCipher",selected.group))return false;
+        if(psk){selected.pmkLength=32;memcpy(selected.pmk,psk->getBytesNoCopy(),32);}
+        if(!selection::valid(selected)){selection::wipe(&selected,sizeof(selected));return false;}
+        ieee80211_join join;fillJoin(selected,join);selection::wipe(&selected,sizeof(selected));
+        const int error=ieee80211_add_ess(&ic,&join);selection::wipe(&join,sizeof(join));
+        if(error)return false;ic.ic_flags|=IEEE80211_F_AUTO_JOIN;credentials=true;return true;
     }
     bool copyNode(const ieee80211_node *node,wireless::Network &out){
         if(!node||node->ni_esslen>sizeof(out.ssid))return false;
@@ -381,16 +415,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         ieee80211_del_ess(&ic,nullptr,0,1);ieee80211_deselect_ess(&ic);
         ieee80211_disable_rsn(&ic);ieee80211_disable_wep(&ic);
         selection::wipe(ic.ic_psk,sizeof(ic.ic_psk));
-        ieee80211_join join{};join.i_len=selected.ssidLength;
-        memcpy(join.i_nwid,selected.ssid,selected.ssidLength);
-        if(selected.security==selection::Security::wpa2Psk){
-            join.i_flags=IEEE80211_JOIN_WPAPSK|IEEE80211_JOIN_WPA;
-            join.i_wpaparams.i_enabled=1;join.i_wpaparams.i_protos=IEEE80211_WPA_PROTO_WPA2;
-            join.i_wpaparams.i_akms=IEEE80211_WPA_AKM_PSK;
-            join.i_wpaparams.i_ciphers=IEEE80211_WPA_CIPHER_CCMP;
-            join.i_wpaparams.i_groupcipher=IEEE80211_WPA_CIPHER_CCMP;
-            join.i_wpapsk.i_enabled=1;memcpy(join.i_wpapsk.i_psk,selected.pmk,32);
-        }else{join.i_flags=IEEE80211_JOIN_NWKEY;join.i_nwkey.i_wepon=IEEE80211_NWKEY_OPEN;}
+        ieee80211_join join;fillJoin(selected,join);
         const int error=ieee80211_add_ess(&ic,&join);
         if(selected.specificBssid){memcpy(ic.ic_des_bssid,selected.bssid,6);ic.ic_flags|=IEEE80211_F_DESBSSID;}
         else{memset(ic.ic_des_bssid,0,6);ic.ic_flags&=~IEEE80211_F_DESBSSID;}

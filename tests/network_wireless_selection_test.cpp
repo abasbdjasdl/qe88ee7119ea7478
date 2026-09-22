@@ -17,5 +17,13 @@ int main(){
     a.specificBssid=true;assert(!p.submit(a));a.bssid[0]=1;assert(!p.submit(a));
     a.bssid[0]=2;assert(p.submit(a));assert(p.generation()==4);p.clear();
     a.security=static_cast<Security>(255);assert(!p.submit(a));
+    a.security=Security::wpaPsk;a.pairwise=Cipher::tkip;a.group=Cipher::tkip;
+    assert(p.submit(a));assert(p.take(true,true,false,out));
+    assert(out.security==Security::wpaPsk&&out.pairwise==Cipher::tkip&&out.group==Cipher::tkip);
+    a.security=Security::wpa2Psk;a.pairwise=Cipher::ccmp;
+    assert(p.submit(a));assert(p.take(true,true,false,out));assert(out.group==Cipher::tkip);
+    a.pairwise=static_cast<Cipher>(255);assert(!p.submit(a));
+    a.pairwise=Cipher::ccmp;a.group=static_cast<Cipher>(255);assert(!p.submit(a));
+    wipe(&out,sizeof(out));
     puts("PASS: validation, binary SSID, PMK size, BSSID, single pending join, drain/action gate, cancellation and wipe");
 }
