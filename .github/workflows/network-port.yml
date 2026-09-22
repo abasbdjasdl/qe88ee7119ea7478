@@ -66,6 +66,14 @@ jobs:
           ./build/network_radio_test | tee build/network-stack/radio-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_efuse_reader_test.cpp -o build/network_efuse_reader_test
           ./build/network_efuse_reader_test | tee build/network-stack/efuse-reader-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_dav_efuse_test.cpp -o build/network_dav_efuse_test
+          ./build/network_dav_efuse_test | tee build/network-stack/dav-efuse-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_device_calibration_test.cpp -o build/network_device_calibration_test
+          ./build/network_device_calibration_test | tee build/network-stack/device-calibration-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_bt_rfk_test.cpp -o build/network_bt_rfk_test
+          ./build/network_bt_rfk_test | tee build/network-stack/bt-rfk-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_station_controller_test.cpp -o build/network_station_controller_test
+          ./build/network_station_controller_test | tee build/network-stack/station-controller-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_dma_fakes tests/network_dma_test.cpp -o build/network_dma_test
           ./build/network_dma_test | tee build/network-stack/dma-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_rx_dma_test.cpp -o build/network_rx_dma_test

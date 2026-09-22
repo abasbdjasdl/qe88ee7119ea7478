@@ -503,11 +503,38 @@ planned register in both bands; masked preservation; deadline/fault cleanup;
 and native MMIO restrictions/live-status checks. These are software models, not
 measured RF output, regulatory certification or proof of association.
 
+### Calibration data and asynchronous station coordination
+
+`MacDeviceCalibration` now composes the native DDV and DAV readers with the PHY
+capability bank. It publishes one immutable `CalibrationSnapshot` only after
+all physical reads, bounded logical decoding, board identity validation and
+reader cleanup succeed. DDV is 1,216 physical bytes, DAV is 96 physical bytes
+and 16 logical bytes, and PHY capability is 128 bytes at 0x580. Partial data is
+never exposed as a usable board configuration. The object and its snapshot are
+heap-owned by the future controller, which must serialize XTAL-SI accesses.
+See [DAV reader](dav-efuse.md) for physical register and timeout evidence.
+
+The new [BT/RFK coordinator](bt-rfk-coordination.md) implements scoreboard
+arbitration, LTE grant access, acknowledged calibration-policy acquisition and
+restoration with a 300 ms absolute lease. It still needs a native adapter and
+lease validation inside synchronous RFK polling, plus physical reset recovery.
+
+The [station controller](station-controller.md) implements asynchronous role,
+join, scan, association and disconnect ordering. Real firmware ACKs and backend
+completion tokens are mandatory. CMAC/CAM actions, net80211 authentication and
+controlled-port callbacks, and device lifecycle bindings remain to be supplied;
+the state machine does not supply fake successful hardware actions.
+
+The workflow now exercises DAV physical faults and cleanup, atomic calibration
+publication, BT arbitration/ACK faults, and station lifecycle faults using ASan
+and UBSan in addition to compiling native calibration sources for the kernel.
+These are software checks, not physical scan, association or networking proof.
+
 ### Remaining integration
 
 1. Complete and preserve the RTL8852B power/MAC/PHY/RF/efuse/calibration sequence;
-   the diagnostic subset currently shuts the chip down after probing. Physical
-   DAV eFuse reads and binding the implemented MAC/channel/power/RFK stages to
+   the diagnostic subset currently shuts the chip down after probing. Binding
+   the implemented calibration-data/MAC/channel/power/RFK stages to
    actual firmware/BT coordination and verified recovery remain.
 2. Connect the new RXQ/RPQ/data/management/firmware queue components to native
    allocation and cache synchronization adapters, hardware start/stop, interrupts and recovery.
