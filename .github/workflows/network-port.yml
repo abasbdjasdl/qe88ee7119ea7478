@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tests/network_irq_fakes/**', 'tests/network_rfk_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', 'tools/import_mac_reference.py', 'tools/import_rfk_reference.py', 'tools/import_channel_reference.py', '.github/workflows/network-port.yml']
+    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tests/network_irq_fakes/**', 'tests/network_rfk_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', 'tools/import_mac_reference.py', 'tools/import_rfk_reference.py', 'tools/import_channel_reference.py', 'tools/import_power_reference.py', '.github/workflows/network-port.yml']
 permissions:
   contents: read
 jobs:
@@ -42,11 +42,15 @@ jobs:
           git diff --exit-code -- src/network/Rtw8852bRfkConstants.hpp src/network/Rtw8852bRfkFunctions.inc src/network/rfk-reference-provenance.json
           python3 tools/import_channel_reference.py build-rtw89
           git diff --exit-code -- src/network/Rtw8852bChannelConstants.hpp src/network/Rtw8852bChannelFunctions.inc src/network/channel-reference-provenance.json
-          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_channel_test.cpp -o build/network_channel_test
+          python3 tools/import_power_reference.py build-rtw89
+          git diff --exit-code -- src/network/Rtw8852bPowerTables.hpp src/network/Rtw8852bPowerTables.cpp src/network/Rtw8852bPowerFunctions.inc src/network/power-reference-provenance.json
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_power_test.cpp src/network/Rtw8852bPowerTables.cpp -o build/network_power_test
+          ./build/network_power_test | tee build/network-stack/power-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_channel_test.cpp src/network/Rtw8852bPowerTables.cpp -o build/network_channel_test
           ./build/network_channel_test | tee build/network-stack/channel-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_rfk_test.cpp -o build/network_rfk_test
           ./build/network_rfk_test | tee build/network-stack/rfk-tests.txt
-          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_rfk_native_test.cpp src/network/Rtw8852bRadioTables.cpp -o build/network_rfk_native_test
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_rfk_native_test.cpp src/network/Rtw8852bRadioTables.cpp src/network/Rtw8852bPowerTables.cpp -o build/network_rfk_native_test
           ./build/network_rfk_native_test | tee build/network-stack/rfk-native-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_runtime_test.cpp -o build/network_runtime_test
           ./build/network_runtime_test | tee build/network-stack/runtime-tests.txt
@@ -82,7 +86,7 @@ jobs:
           set -o pipefail
           python3 tools/build_network_stack.py build-itlwm 2>&1 | tee build/network-stack/build.log
           tar -czf build/network-stack/itlwm-stack-source.tar.gz -C build-itlwm itl80211 include itlwm/PrivateSPI.pch LICENSE
-          tar -czf build/network-stack/port-source.tar.gz src/network tools/build_network_stack.py tools/check_network_reference.py tools/import_network_reference.py tools/import_radio_reference.py tools/import_mac_reference.py tools/import_rfk_reference.py tools/import_channel_reference.py tests/network_* LICENSE
+          tar -czf build/network-stack/port-source.tar.gz src/network tools/build_network_stack.py tools/check_network_reference.py tools/import_network_reference.py tools/import_radio_reference.py tools/import_mac_reference.py tools/import_rfk_reference.py tools/import_channel_reference.py tools/import_power_reference.py tests/network_* LICENSE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

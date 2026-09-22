@@ -114,6 +114,21 @@ bool MacRfkIo::writeChannelMac32(u32 a,u32 v){
     modified_=true;OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),a,v);
     __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
 }
+bool MacRfkIo::readPowerMac32(u32 a,u32 &v){
+    v=0;u32 cmac=0,tx=0;
+    if(!active_||kind_!=Kind::channel||!power::macAddress(a)||
+       !macRead(R_AX_CMAC_FUNC_EN,cmac)||!(cmac&B_AX_CMAC_EN)||
+       !macRead(R_AX_CTN_TXEN,tx)||(tx&B_AX_CTN_TXEN_ALL_MASK))return false;
+    OSSynchronizeIO();v=OSReadLittleInt32(reinterpret_cast<const volatile void *>(mapping_->getVirtualAddress()),a);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    return macRead(R_AX_CMAC_FUNC_EN,cmac)&&(cmac&B_AX_CMAC_EN)&&
+        macRead(R_AX_CTN_TXEN,tx)&&!(tx&B_AX_CTN_TXEN_ALL_MASK);
+}
+bool MacRfkIo::writePowerMac32(u32 a,u32 v){
+    u32 old=0;if(!readPowerMac32(a,old))return false;
+    modified_=true;OSWriteLittleInt32(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),a,v);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);OSSynchronizeIO();return true;
+}
 bool MacRfkIo::drain(){return active_&&accessible()&&radio_.drain();}
 uint64_t MacRfkIo::nowUs(){uint64_t t=0,n=0;clock_get_uptime(&t);absolutetime_to_nanoseconds(t,&n);return n/1000;}
 bool MacRfkIo::delayUs(unsigned us){return active_&&accessible()&&radioIo_.delayUs(us);}

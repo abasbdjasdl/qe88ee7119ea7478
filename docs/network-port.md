@@ -433,13 +433,13 @@ channel settings are read back. The PLL path retains upstream recovery attempts
 but fails if the final lock indication is still absent; busy timeout also latches
 failure instead of continuing from a warning.
 
-Successful programming leaves the lease held and reports `prepared`. The
-controller must apply the actual by-rate/offset/shape/limit/RU power configuration
-in this interval, then call `finish()` to restore receivers/PPDU/tracking. Power
-tables and regulatory policy are **not supplied by this channel component**.
-Both phases have a shared bounded deadline. `abort()` is available when external
-power work fails, including after a native preflight acquired a lease whose
-cleanup failed. Partial failures require the native owner's verified recovery.
+Successful programming leaves the lease held and reports `prepared`.
+`programPower(policy)` now programs reference, by-rate, offset, shape, limit and
+RU limit registers; `finish()` refuses to restore receivers until that stage
+succeeds. A controller-supplied immutable policy snapshot remains mandatory.
+The transaction shares a bounded deadline. `abort()` retries cleanup, including
+after a native preflight acquired a lease whose cleanup failed. Partial failures
+require the native owner's verified recovery.
 
 Neither `registersProgrammed` nor `receiversRestored` authorizes TX. A channel
 lease release must keep scheduler TX paused until power, RFK and controller
@@ -449,19 +449,62 @@ are restricted to two byte registers and three word registers, with CMAC state
 read-only; this interface cannot write the scheduler mask, PCI or unrelated MAC
 registers. The same native RF/BB transport and recovery owner are reused.
 
-Tests cover valid primary placements in both bands, signed gain values, 297 I/O
+Tests cover valid primary placements in both bands, signed gain values, 515 I/O
 and four delay faults, cancellation/deadline/clock anomalies, all PLL retry
 levels and final failure, ignored programming and receiver-restoration writes,
 retained abort/recovery ownership and 128 consecutive channel changes. Native
 tests verify byte-width isolation, register/kind restrictions, detection of a
 release callback that resumes TX, and recovery of a lease retained after failed
 preflight cleanup. These are register/IOKit models and cross-compilation, not
-real channel tuning, implemented power limits or network readiness.
+real channel tuning or network readiness.
+
+### Transmit power programming
+
+`import_power_reference.py` imports 8,159 sparse power/shape records, the expanded
+AX by-rate data, three DFIR coefficient sets and six 20/40/80 MHz page-fill
+functions from the same pinned source. Source hashes, generated hashes and dense
+table hashes are recorded. Zero entries retain the upstream meaning: limit/RU
+lookups fall back to the world-domain entry, which may also be zero. The original
+8852B selects its default parameter table with no RFE-specific override. Importing
+the table's unused 160 MHz/6 GHz dimensions does not enable those modes.
+
+`TxPowerPlan` computes a complete bounded register-write plan before touching
+hardware. It preserves the 40-byte per-NTX AX limit and 24-byte RU page layouts,
+both RF paths, primary/subchannel selection, CCK-on-2G by-rate lookup, signed
+RF-quarter-dBm to MAC-half-dBm rounding, and nibble/byte packing. Reference power
+uses the pinned 0 dBm reference and CW constants. DFIR selection includes the
+special channel-14 coefficients. Ordinary 8852B programming uses the OFDM shape
+field; the imported RU shape table is retained but is not written to an invented
+register that the original routine does not use.
+
+Policy supplies the domain and a generation plus a per-channel conducted-power
+ceiling in half-dBm units, incorporating SAR/platform/user/regulatory constraints.
+Missing, out-of-range or failed policy lookups are terminal. Values are cached
+once per frequency for the plan. The caller must hold its immutable policy
+snapshot in the workloop gate; callbacks must not reenter channel operations.
+This interface does not implement country selection, DFS/no-IR authorization or
+platform ACPI SAR discovery. Those remain controller/regulatory work.
+
+Power writes preserve masked neighbors, read back immediately, and are checked
+again before and after receiver restoration. Native MAC accesses allow only the
+power registers and require the channel lease, live CMAC and paused TX. Packed
+negative powers can legitimately be `0xffffffff`; separate status reads detect
+device loss instead of rejecting that data. Partial programming enters the same
+mandatory recovery path and never resumes scheduler TX.
+
+Tests check 7,424 plans across all supported geometries, 16 domains and signed
+ceilings; independent AX page offsets and golden rate/shape values; missing
+policy, stale readiness on a new channel, ignored writes and corruption of every
+planned register in both bands; masked preservation; deadline/fault cleanup;
+and native MMIO restrictions/live-status checks. These are software models, not
+measured RF output, regulatory certification or proof of association.
+
+### Remaining integration
 
 1. Complete and preserve the RTL8852B power/MAC/PHY/RF/efuse/calibration sequence;
    the diagnostic subset currently shuts the chip down after probing. Physical
-   DAV eFuse reads, applying gain state to channel registers, full BB reset/TX power
-   and RFK remain.
+   DAV eFuse reads and binding the implemented MAC/channel/power/RFK stages to
+   actual firmware/BT coordination and verified recovery remain.
 2. Connect the new RXQ/RPQ/data/management/firmware queue components to native
    allocation and cache synchronization adapters, hardware start/stop, interrupts and recovery.
    The one-shot diagnostic CH12 bank remains separate from this runtime path.

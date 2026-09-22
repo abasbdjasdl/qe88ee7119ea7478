@@ -41,6 +41,7 @@ public:
     // Narrow channel MAC interface, available only inside Kind::channel.
     bool readChannelMac8(u32,u8 &);bool writeChannelMac8(u32,u8);
     bool readChannelMac32(u32,u32 &);bool writeChannelMac32(u32,u32);
+    bool readPowerMac32(u32,u32 &);bool writePowerMac32(u32,u32);
 };
 extern template class Initialization<MacRfkIo>;
 } }

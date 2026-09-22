@@ -81,5 +81,23 @@ int main(){
         f.map.set(r::R_AX_WCPU_FW_CTRL,0);f.owner.failEnd=true;
         assert(!channel.program({1,2,42,36})&&f.io.leaseActive()&&!channel.result.ownershipReleased);
         f.owner.failEnd=false;assert(channel.abort()&&!f.io.leaseActive());}
-    puts("PASS: native MacRfkIo PMAC stop after cancellation, read/write/readback failures, device loss, mandatory recovery before releasing modified calibration/coexistence ownership; modeled MMIO");
+    {Fixture f;namespace p=rtl8852be::power;uint32_t v=0;
+        assert(!f.io.readPowerMac32(p::R_AX_PWR_LMT,v)&&!f.io.writePowerMac32(p::R_AX_PWR_LMT,1));
+        assert(f.io.begin(r::Kind::iqk));assert(!f.io.writePowerMac32(p::R_AX_PWR_LMT,1));assert(f.io.end(r::Kind::iqk,true));
+        assert(f.io.begin(r::Kind::channel));
+        for(auto address:{p::R_AX_PWR_LMT,p::R_AX_PWR_BY_RATE,p::R_AX_PWR_RU_LMT}){
+            assert(f.io.writePowerMac32(address,0xffffffff));assert(f.io.readPowerMac32(address,v)&&v==0xffffffff);}
+        for(auto address:{p::R_AX_PWR_LMT+1,p::R_AX_PWR_RATE_CTRL+8,p::R_AX_PWR_RU_LMT+48,r::R_AX_CTN_TXEN,0xf200u})
+            assert(!f.io.readPowerMac32(address,v)&&!f.io.writePowerMac32(address,0));
+        f.map.set(r::R_AX_CTN_TXEN,1);assert(!f.io.writePowerMac32(p::R_AX_PWR_LMT,0));f.map.set(r::R_AX_CTN_TXEN,0);
+        f.map.set(r::R_AX_CMAC_FUNC_EN,0);assert(!f.io.readPowerMac32(p::R_AX_PWR_LMT,v));f.map.set(r::R_AX_CMAC_FUNC_EN,r::B_AX_CMAC_EN);
+        f.device.command=0xffff;assert(!f.io.writePowerMac32(p::R_AX_PWR_LMT,0));f.device.command=2;
+        f.owner.failRecover=true;assert(!f.io.end(r::Kind::channel,false)&&f.io.leaseActive());
+        f.owner.failRecover=false;assert(f.io.end(r::Kind::channel,false));}
+    // A missing sentinel in power data is not device loss. Independent status
+    // reads before AND after that data still detect a lost device.
+    for(unsigned failedRead:{1u,2u,4u,5u}){Fixture f;namespace p=rtl8852be::power;uint32_t v=0;
+        assert(f.io.begin(r::Kind::channel));fakeRfk::accesses=0;fakeRfk::badRead=failedRead;
+        assert(!f.io.readPowerMac32(p::R_AX_PWR_LMT,v));fakeRfk::badRead=0;assert(f.io.end(r::Kind::channel,false));}
+    puts("PASS: native MacRfkIo calibration cleanup and power MMIO permissions, all-one signed power data, independent live-CMAC/TX checks, device loss and retained recovery ownership; modeled MMIO");
 }

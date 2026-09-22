@@ -1,0 +1,104 @@
+{
+  "repository": "https://github.com/lwfinger/rtw89",
+  "commit": "d1fced1b8a741dc9f92b47c69489c24385945f6e",
+  "license": "BSD-3-Clause option",
+  "sources": {
+    "rtw8852b_table.c": "8b9b5fc32628037d8dec86cff976913164723d87abe38fd09d229c57b509b42f",
+    "rtw8852b.c": "be0fbd13013d64835742c089f5c66963e4154cf1d78723dd7b88f2c5e28df3c2",
+    "phy.c": "8d0e06bdc14878648f2be84e4ec67de76ad20718202e1d00199618d356b9fd72",
+    "phy.h": "ceac88b387d211f48b07a8e94466d6968a28ed23fd88ee9b0e21aa214f95e5dd",
+    "core.h": "ec8c6d32fe8f86620ed23190b26d8f4aaa11238fb195bba4c4e66ee01d5e2366",
+    "reg.h": "9609382125b396708d52f2d64a4e8a1e7abb080690ea2776308323834b725d03"
+  },
+  "original": {
+    "tx_shape_lmt": "1a64a6436f0515a45cf3966bdb713370ed0ac7d7416f2a3a02da0b7b7df75617",
+    "tx_shape_lmt_ru": "44d629510c6d2f8e9277a10cf90243fbc47e31c2a308d793ace3874ea8c652da",
+    "txpwr_lmt_2g": "e3d5d506dc73fa2c67da3dd6e3e5a1591e983cee596d5578cd72b6e0331be594",
+    "txpwr_lmt_5g": "8e0f1a8dd51bb61e9e7d1a432a50c2548df63f8c071da5bfc4c4e029b14f0f68",
+    "txpwr_lmt_ru_2g": "fd532099888288eb5df56deb7e0f09dc5f8db563cfbae540507152a85e48222c",
+    "txpwr_lmt_ru_5g": "9181cd3647944d6f9f523803941b983e08cb1805b02faefd95b25849c1933931",
+    "byrate": "8f04feab562b45fa688918e83a97385587792d7aaa2994c134f227f14e6e61b9",
+    "dfir": "866cd117afc4992e94b3da93682056324ccc00a4f80d08853aa97cd6fb5b6be1",
+    "rtw89_phy_fill_txpwr_limit_20m_ax": "4e1e289e7282c7d4a6dfc459dda27e0eff7fccec68d10b9a96aad39e52e3adbe",
+    "rtw89_phy_fill_txpwr_limit_40m_ax": "caf36f80f92d9140375d624579012002713dbe36e5a9f74dfc30a5d6680d4d16",
+    "rtw89_phy_fill_txpwr_limit_80m_ax": "d51afb31d00f43128f8866fa84aa42b344f4c1b7340baa7175d7f12bb8fcacf7",
+    "rtw89_phy_fill_txpwr_limit_ru_20m_ax": "8120abe4594839f22579e37f5ecce9dd3e9335022904e01e99860377953a10cc",
+    "rtw89_phy_fill_txpwr_limit_ru_40m_ax": "d09dfa56262140b1b94c5c1ed0c8542a186e9dee68f3808ee7279127d041b0f9",
+    "rtw89_phy_fill_txpwr_limit_ru_80m_ax": "8b758de893beaf288f4cbdae30145172b08204fd47d6c14ba2015b1b959711b6"
+  },
+  "tables": {
+    "tx_shape_lmt": {
+      "dimensions": [
+        3,
+        2,
+        16
+      ],
+      "explicit_entries": 36,
+      "dense_sha256": "12d387e0449e9763fc6d72fbfbd3db40a5b2711ca7e794215f45656f9165cf6c"
+    },
+    "tx_shape_lmt_ru": {
+      "dimensions": [
+        3,
+        16
+      ],
+      "explicit_entries": 24,
+      "dense_sha256": "3ce7a6b08e1f910e7560bd407b1588ae26d37339ac3161d8f5b6fdab000938c1"
+    },
+    "txpwr_lmt_2g": {
+      "dimensions": [
+        2,
+        2,
+        3,
+        2,
+        16,
+        14
+      ],
+      "explicit_entries": 2184,
+      "dense_sha256": "b49bc6e72ab714a902afa5872331b60ff42e2d5ca9e3cd6ade4517da965da0fc"
+    },
+    "txpwr_lmt_5g": {
+      "dimensions": [
+        4,
+        2,
+        3,
+        2,
+        16,
+        53
+      ],
+      "explicit_entries": 2639,
+      "dense_sha256": "07b5981342be9dd63d4dc6212fc6a40b8e124580b374aa9d6196ca405f5c4203"
+    },
+    "txpwr_lmt_ru_2g": {
+      "dimensions": [
+        5,
+        2,
+        16,
+        14
+      ],
+      "explicit_entries": 1092,
+      "dense_sha256": "7d526dd66e15f519a6930cfd4751d5f7fa342f60a3131658fdf121e535f372ba"
+    },
+    "txpwr_lmt_ru_5g": {
+      "dimensions": [
+        5,
+        2,
+        16,
+        53
+      ],
+      "explicit_entries": 2184,
+      "dense_sha256": "f9fba9a5206a97e8ff3516299b5a881d7f37595a8330c40ffb180c064a527630"
+    }
+  },
+  "generated": {
+    "Rtw8852bPowerTables.hpp": "d01db381348d6b250bf1c4488e106cf87453aa9c7933645fc0389dac79d3eaae",
+    "Rtw8852bPowerTables.cpp": "aee44298db1871f600a21d19ad627933535b8bbd48acde38f8880f97035a5ae4",
+    "Rtw8852bPowerFunctions.inc": "b9b72497eddd908cc0672f3ef8a5991a46f921ef94af32884cdd6d3825ed0efa"
+  },
+  "adaptations": [
+    "C designated sparse tables flattened with exact zero initialization",
+    "AX byrate expanded to two RF paths, preserving missing zeros",
+    "20/40/80 MHz page-fill functions use bounded lookup Context",
+    "No 6 GHz or 160 MHz programming on RTL8852B"
+  ],
+  "hardware_tested": false
+}

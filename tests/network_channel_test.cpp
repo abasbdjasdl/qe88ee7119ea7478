@@ -32,6 +32,8 @@ struct Backend {
         if(a!=ignoredRf||p!=ignoredPath)radio[p][a]=(radio[p][a]&~m)|c::fieldPrep(m,v);return true;}
     bool readBb(unsigned a,unsigned &v){if(!step())return false;v=bb[a];return true;}
     bool writeBb(unsigned a,unsigned v){if(!step())return false;if(a!=ignoredBb)bb[a]=v;return true;}
+    bool readPowerMac32(unsigned a,unsigned &v){assert(rtl8852be::power::macAddress(a));if(!step())return false;v=mac[a];return true;}
+    bool writePowerMac32(unsigned a,unsigned v){assert(rtl8852be::power::macAddress(a));if(!step())return false;if(a!=ignoredMac)mac[a]=v;return true;}
     bool readChannelMac8(unsigned a,uint8_t &v){assert(c::macByteAddress(a));if(!step())return false;v=mac[a];return true;}
     bool writeChannelMac8(unsigned a,uint8_t v){assert(c::macByteAddress(a));if(!step())return false;if(a!=ignoredMac)mac[a]=v;return true;}
     bool readChannelMac32(unsigned a,unsigned &v){assert(c::macWordAddress(a,false));if(!step())return false;v=mac[a];return true;}
@@ -51,8 +53,10 @@ void configure(c::ChannelProgramming<Backend> &p,bool monitor=false){
     assert(p.configure(gain,board,phy,-17,23,3,monitor));
     assert(!p.configure(gain,board,phy,-17,23,3,monitor));
 }
+rtl8852be::power::Policy policy(){return {0,1,nullptr,[](void *,uint8_t,uint8_t,int16_t &v){v=63;return true;}};}
+bool finish(c::ChannelProgramming<Backend> &p){return p.programPower(policy())&&p.finish();}
 bool run(Backend &b,c::Result &result,c::Channel ch={1,2,42,36}){
-    c::ChannelProgramming<Backend> p(b);configure(p);const bool ok=p.program(ch)&&p.finish();result=p.result;return ok;
+    c::ChannelProgramming<Backend> p(b);configure(p);const bool ok=p.program(ch)&&finish(p);result=p.result;return ok;
 }
 int main(){
     Backend golden;c::ChannelProgramming<Backend> p(golden);configure(p);
@@ -68,7 +72,7 @@ int main(){
     assert(c::fieldGet(0x00ff0000,golden.bb[0x45dc])==253);
     assert(c::fieldGet(c::B_P0_RPL1_20_MASK,golden.bb[c::R_P0_RPL1])==244);
     assert(!p.program({0,0,6,6})&&golden.operations==programCount);
-    assert(p.finish()&&!golden.active&&p.result.ownershipReleased&&p.result.receiversRestored);
+    assert(finish(p)&&!golden.active&&p.result.ownershipReleased&&p.result.receiversRestored);
     const auto count=golden.operations,delayCount=golden.delays;
     assert(golden.mac[c::R_AX_HW_RPT_FWD]==0xaaaa0001);
     assert(c::fieldGet(c::B_ADC_FIFO_RST,golden.bb[c::R_ADC_FIFO])==0);
@@ -76,7 +80,7 @@ int main(){
         {1,0,36,36},{1,0,177,177},{1,1,38,36},{1,1,175,177},
         {1,2,42,36},{1,2,42,40},{1,2,42,44},{1,2,42,48},{1,2,171,177}};
     for(auto ch:channels){Backend b;c::ChannelProgramming<Backend> x(b);configure(x,true);
-        assert(x.program(ch)&&x.finish());
+        assert(x.program(ch)&&finish(x));
         assert(c::fieldGet(c::B_PATH0_BAND_SEL_MSK_V1,b.bb[c::R_PATH0_BAND_SEL_V1])==unsigned(ch.band==0));
         assert(c::fieldGet(c::B_ENABLE_CCK,b.bb[c::R_UPD_CLK_ADC])==unsigned(ch.band==0));
         assert(!(b.bb[c::R_PKT_CTRL]&c::B_PKT_POP_EN));
@@ -106,11 +110,11 @@ int main(){
         assert(!run(b,result)&&result.error==c::Error::readback&&!b.active);}
     for(auto a:{c::R_ADC_FIFO,c::R_PD_CTRL,c::R_P0_TSSI_TRK,c::R_P1_TSSI_TRK,c::R_P0_TXPW_RSTB,c::R_P1_TXPW_RSTB}){
         Backend b;c::ChannelProgramming<Backend> x(b);configure(x);assert(x.program({1,2,42,36}));
-        b.ignoredBb=a;assert(!x.finish()&&x.result.error==c::Error::readback&&!b.active);}
+        b.ignoredBb=a;assert(!finish(x)&&x.result.error==c::Error::readback&&!b.active);}
     for(auto a:{c::R_AX_PPDU_STAT,c::R_AX_HW_RPT_FWD}){Backend b;c::ChannelProgramming<Backend> x(b);configure(x);
         assert(x.program({1,2,42,36}));b.ignoredMac=a;
-        assert(!x.finish()&&x.result.error==c::Error::readback&&!b.active);}
-    {Backend b;c::ChannelProgramming<Backend> x(b);assert(!x.program({0,0,1,1})&&!x.finish()&&!b.operations);
+        assert(!finish(x)&&x.result.error==c::Error::readback&&!b.active);}
+    {Backend b;c::ChannelProgramming<Backend> x(b);assert(!x.program({0,0,1,1})&&!finish(x)&&!b.operations);
         configure(x);for(auto ch:{c::Channel{2,0,1,1},c::Channel{0,2,6,6},c::Channel{0,0,6,7},c::Channel{0,1,11,14},
             c::Channel{1,2,42,52},c::Channel{1,1,38,44},c::Channel{1,2,36,36}})
             assert(!x.program(ch)&&!b.operations);}
@@ -118,8 +122,40 @@ int main(){
         b.failRecovery=true;assert(!x.abort()&&b.active&&!x.result.ownershipReleased);
         b.failRecovery=false;assert(x.abort()&&!b.active&&!x.result.receiversRestored);}
     {Backend b;c::ChannelProgramming<Backend> x(b);configure(x);assert(x.program({1,2,42,36}));b.clock+=3000000;
-        assert(!x.finish()&&x.result.error==c::Error::timeout&&!b.active);}
-    for(unsigned i=0;i<128;++i){golden.clock+=3000000;assert(p.program(channels[i%13])&&p.finish());}
+        assert(!finish(x)&&x.result.error==c::Error::timeout&&!b.active);}
+    for(unsigned i=0;i<128;++i){golden.clock+=3000000;assert(p.program(channels[i%13])&&finish(p));}
     assert(p.result.operations>20000);
-    printf("PASS: MAC/BB/DAV-DDV RF channel model, primary geometry, signed gain, held power-programming phase, %u I/O and %u delay faults, PLL retries/final failure and critical readback; not TX power or hardware tuning\n",count,delayCount);
+    {Backend b;c::ChannelProgramming<Backend> x(b);configure(x);assert(x.program({0,0,6,6}));const auto ops=b.operations;
+        assert(!x.finish()&&b.operations==ops&&b.active&&!x.result.powerProgrammed);
+        b.mac[rtl8852be::power::R_AX_PWR_RATE_OFST_CTRL]=0xabcfffff;
+        b.mac[rtl8852be::power::R_AX_PWR_RATE_CTRL]=0xf00003ff;
+        assert(x.programPower(policy())&&x.result.powerProgrammed&&x.result.powerPolicyGeneration==1);
+        assert(!x.programPower(policy()));
+        assert(b.mac[rtl8852be::power::R_AX_PWR_RATE_OFST_CTRL]==0xabc00000);
+        assert(b.mac[rtl8852be::power::R_AX_PWR_RATE_CTRL]==0xf00003ff);
+        assert(x.finish());
+        assert(x.program({1,0,36,36})&&!x.result.powerProgrammed&&!x.result.powerPolicyGeneration&&!x.finish());assert(x.abort());}
+    // Every planned register must tolerate ignored writes and later corruption:
+    // partial writes are terminal and go through the same retained recovery lease.
+    for(auto ch:{c::Channel{0,0,6,6},c::Channel{1,2,42,36}}){rtl8852be::power::TxPowerPlan plan;assert(plan.build(ch,policy()));
+        for(unsigned i=0;i<plan.size();++i){const auto w=plan[i];
+            {Backend b;c::ChannelProgramming<Backend> x(b);configure(x);assert(x.program(ch));
+                if(w.baseband){b.bb[w.address]=~w.value;b.ignoredBb=w.address;}else {b.mac[w.address]=~w.value;b.ignoredMac=w.address;}
+                assert(!x.programPower(policy())&&x.result.error==c::Error::readback&&!x.result.powerProgrammed&&!b.active);}
+            {Backend b;c::ChannelProgramming<Backend> x(b);configure(x);assert(x.program(ch)&&x.programPower(policy()));
+                if(w.baseband)b.bb[w.address]^=w.mask;else b.mac[w.address]^=w.mask;
+                assert(!x.finish()&&x.result.error==c::Error::readback&&!x.result.powerProgrammed&&!b.active);}
+        }
+    }
+    for(unsigned which=0;which<3;++which){Backend b;c::ChannelProgramming<Backend> x(b);configure(x);assert(x.program({1,2,42,36}));
+        auto pol=policy();if(which==0)pol.query=nullptr;if(which==1)pol.domain=16;if(which==2)pol.generation=0;
+        b.failRecovery=true;assert(!x.programPower(pol)&&x.result.error==c::Error::powerPolicy&&b.active&&!x.result.powerProgrammed);
+        b.failRecovery=false;assert(x.abort()&&!b.active);}
+    {Backend b;c::ChannelProgramming<Backend> x(b);configure(x);assert(x.program({1,2,42,36}));auto pol=policy();
+        pol.context=&b;pol.query=[](void *v,uint8_t,uint8_t,int16_t &cap){static_cast<Backend *>(v)->clock+=3000000;cap=63;return true;};
+        assert(!x.programPower(pol)&&x.result.error==c::Error::timeout&&!b.active);}
+    {Backend b;c::ChannelProgramming<Backend> x(b);configure(x);assert(x.program({1,2,42,36}));auto pol=policy();
+        pol.query=[](void *,uint8_t,uint8_t,int16_t &cap){cap=-1;return true;};assert(x.programPower(pol)&&x.finish());
+        assert(b.mac[rtl8852be::power::R_AX_PWR_LMT+4]==0xffffffff);}
+    printf("PASS: MAC/BB/DAV-DDV RF channel model, primary geometry, signed gain, held power-programming phase, %u I/O and %u delay faults, PLL retries/final failure and critical readback; power writes/readback included; not hardware tuning\n",count,delayCount);
 }

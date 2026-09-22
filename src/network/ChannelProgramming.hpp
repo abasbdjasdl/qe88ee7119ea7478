@@ -3,24 +3,18 @@
 #include "Rtw8852bChannelConstants.hpp"
 #include "RfkInitialization.hpp"
 #include "BasebandGain.hpp"
+#include "TxPowerPlan.hpp"
 namespace rtl8852be { namespace channel {
-struct Channel {u8 band{},width{},center{},primary{};};
-inline bool validChannel(Channel c){
-    if(!rfk::validChannel({c.band,c.width,c.center})||!rfk::validChannel({c.band,0,c.primary}))return false;
-    const int distance=int(c.primary)-c.center;
-    if(c.width==0)return distance==0;
-    if(c.band==0&&c.primary==14)return false;
-    return c.width==1?(distance==2||distance==-2):(distance==2||distance==-2||distance==6||distance==-6);
-}
-enum class Error {none,precondition,io,timeout,clock,cancelled,pllUnlocked,readback};
+enum class Error {none,precondition,io,timeout,clock,cancelled,pllUnlocked,readback,powerPolicy};
 enum class Stage {idle,programming,prepared,complete,failed};
 struct Result {
     Error error{Error::none};Stage stage{Stage::idle};Channel channel{};
     u32 address{},mask{},value{};u8 path{};unsigned operations{},polls{};
-    bool registersProgrammed{},receiversRestored{},ownershipReleased{},requiresReset{};
+    bool registersProgrammed{},powerProgrammed{},receiversRestored{},ownershipReleased{},requiresReset{};
+    uint64_t powerPolicyGeneration{};
 };
 // Workloop-serialized, off-stack state. program() leaves the channel lease held:
-// controller programs by-rate/offset/shape/limit/RU power before finish(). Neither
+// programPower() must apply by-rate/offset/shape/limit/RU power before finish(). Neither
 // phase authorizes TX. Kind::channel end must keep scheduler TX paused until
 // firmware, power, RFK and regulatory prerequisites have all been established.
 template<class Backend> class ChannelProgramming {
@@ -35,7 +29,8 @@ template<class Backend> class ChannelProgramming {
     static constexpr unsigned RTW89_DBG_RFK=0;
     static bool fail(Context *d,Error e){if(d->result.error==Error::none){d->result.error=e;
         d->result.stage=Stage::failed;d->result.requiresReset=d->result.operations!=0;
-        d->result.registersProgrammed=false;d->result.receiversRestored=false;}return false;}
+        d->result.registersProgrammed=false;d->result.powerProgrammed=false;d->result.powerPolicyGeneration=0;
+        d->result.receiversRestored=false;}return false;}
     static bool check(Context *d){
         if(d->result.error!=Error::none)return false;
         if(d->io.cancelled())return fail(d,Error::cancelled);
@@ -104,21 +99,33 @@ template<class Backend> class ChannelProgramming {
 public:
     Result result{};
 private:
-    Context context_;bool configured_{},owned_{};
+    Context context_;power::TxPowerPlan power_;bool configured_{},owned_{};
+    u32 readPower(const power::Write &w){
+        auto *d=&context_;u32 v=0;if(!op(d,w.address,w.mask))return 0;
+        if(!(w.baseband?d->io.readBb(w.address,v):d->io.readPowerMac32(w.address,v)))fail(d,Error::io);
+        // All-one signed power bytes are valid (-0.5 dBm). Native power reads
+        // verify live CMAC/TX status separately instead of using that sentinel.
+        return v;
+    }
+    bool verifyPower(){
+        for(unsigned i=0;i<power_.size()&&check(&context_);++i){const auto &w=power_[i];
+            if((readPower(w)&w.mask)!=w.value)fail(&context_,Error::readback);}
+        return check(&context_);
+    }
     bool release(bool success){
         if(!owned_)return false;result.ownershipReleased=context_.io.end(rfk::Kind::channel,success);
         if(result.ownershipReleased)owned_=false;else {fail(&context_,Error::io);result.requiresReset=true;}
         return success&&result.ownershipReleased;
     }
-    bool verifyQuiescent(){
+    bool verifyQuiescent(bool afterTune=false){
         auto *d=&context_;
         if((readMac(d,R_AX_PPDU_STAT)&B_AX_PPDU_STAT_RPT_EN)||
            rtw89_phy_read32_mask(d,R_ADC_FIFO,B_ADC_FIFO_RST)!=0xf||
-           rtw89_phy_read32_mask(d,R_RSTB_ASYNC,B_RSTB_ASYNC_ALL)!=0||
+           rtw89_phy_read32_mask(d,R_RSTB_ASYNC,B_RSTB_ASYNC_ALL)!=u32(afterTune)||
            rtw89_phy_read32_mask(d,R_PD_CTRL,B_PD_HIT_DIS)!=1||
-           rtw89_phy_read32_mask(d,R_RXCCA,B_RXCCA_DIS)!=1||
-           rtw89_phy_read32_mask(d,R_S0_HW_SI_DIS,B_S0_HW_SI_DIS_W_R_TRIG)!=7||
-           rtw89_phy_read32_mask(d,R_S1_HW_SI_DIS,B_S1_HW_SI_DIS_W_R_TRIG)!=7)
+           rtw89_phy_read32_mask(d,R_RXCCA,B_RXCCA_DIS)!=u32(!afterTune||d->chan.band_type==RTW89_BAND_5G)||
+           rtw89_phy_read32_mask(d,R_S0_HW_SI_DIS,B_S0_HW_SI_DIS_W_R_TRIG)!=(afterTune?0u:7u)||
+           rtw89_phy_read32_mask(d,R_S1_HW_SI_DIS,B_S1_HW_SI_DIS_W_R_TRIG)!=(afterTune?0u:7u))
             fail(d,Error::readback);
         for(u8 p=0;p<2&&check(d);++p)
             if(rtw89_phy_read32_mask(d,R_P0_TSSI_TRK+(p<<13),B_P0_TSSI_TRK_EN)!=1||
@@ -161,6 +168,7 @@ public:
     bool program(Channel c){
         if(!configured_||owned_||result.error!=Error::none||!validChannel(c))return false;
         result.channel=c;result.stage=Stage::programming;result.registersProgrammed=false;result.receiversRestored=false;
+        result.powerProgrammed=false;result.powerPolicyGeneration=0;
         context_.started=false;context_.base=result.operations;if(!check(&context_))return false;
         result.ownershipReleased=false;if(!context_.io.begin(rfk::Kind::channel)){
             // Native preflight can fail after acquiring the owner lease and its
@@ -177,11 +185,26 @@ public:
         if(!verify()){release(false);return false;}
         result.registersProgrammed=true;result.stage=Stage::prepared;return true;
     }
+    bool programPower(power::Policy policy){
+        if(!owned_||result.stage!=Stage::prepared||result.powerProgrammed)return false;
+        auto *d=&context_;
+        if(!check(d)){release(false);return false;}
+        if(!power_.build(result.channel,policy)){fail(d,Error::powerPolicy);release(false);return false;}
+        if(verifyQuiescent(true))for(unsigned i=0;i<power_.size()&&check(d);++i){
+            const auto &w=power_[i];const u32 old=w.mask==0xffffffff?0:readPower(w);
+            if(!op(d,w.address,w.mask,w.value))break;
+            const auto value=(old&~w.mask)|w.value;
+            if(!(w.baseband?d->io.writeBb(w.address,value):d->io.writePowerMac32(w.address,value)))fail(d,Error::io);
+            if(check(d)&&(readPower(w)&w.mask)!=w.value)fail(d,Error::readback);
+        }
+        if(!check(d)){release(false);return false;}
+        result.powerProgrammed=true;result.powerPolicyGeneration=policy.generation;return true;
+    }
     // Call only after successful power programming; this restores receivers,
     // not scheduler TX. The controller must still execute required RFK.
     bool finish(){
-        if(!owned_||result.stage!=Stage::prepared)return false;auto *d=&context_;
-        if(verify()){rtw89_channel_help_params params{};rtw8852b_set_channel_help(d,false,&params,&d->chan,RTW89_MAC_0,RTW89_PHY_0);}
+        if(!owned_||result.stage!=Stage::prepared||!result.powerProgrammed)return false;auto *d=&context_;
+        if(verify()&&verifyPower()){rtw89_channel_help_params params{};rtw8852b_set_channel_help(d,false,&params,&d->chan,RTW89_MAC_0,RTW89_PHY_0);}
         if(check(d)&&!d->io.drain())fail(d,Error::io);
         const u32 ppdu=B_AX_PPDU_STAT_RPT_EN|B_AX_APP_MAC_INFO_RPT|B_AX_APP_RX_CNT_RPT|B_AX_APP_PLCP_HDR_RPT|B_AX_PPDU_STAT_RPT_CRC32;
         if(check(d)&&((readMac(d,R_AX_PPDU_STAT)&ppdu)!=ppdu||
@@ -196,6 +219,7 @@ public:
         for(u8 p=0;p<2&&check(d);++p)
             if(rtw89_phy_read32_mask(d,R_P0_TSSI_TRK+(p<<13),B_P0_TSSI_TRK_EN)!=0||
                rtw89_phy_read32_mask(d,R_P0_TXPW_RSTB+(p<<13),B_P0_TXPW_RSTB_MANON)!=0)fail(d,Error::readback);
+        if(check(d))verifyPower(); // Receiver reset/release must not discard programmed limits.
         if(!release(check(d)))return false;
         result.receiversRestored=true;result.stage=Stage::complete;return true;
     }
