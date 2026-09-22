@@ -5,8 +5,8 @@
   <key>CFBundleExecutable</key><string>RTL8852BENetwork</string>
   <key>CFBundleName</key><string>RTL8852BE experimental network driver</string>
   <key>CFBundlePackageType</key><string>KEXT</string>
-  <key>CFBundleVersion</key><string>0.1.17</string>
-  <key>CFBundleShortVersionString</key><string>0.1.17</string>
+  <key>CFBundleVersion</key><string>0.1.18</string>
+  <key>CFBundleShortVersionString</key><string>0.1.18</string>
   <key>OSBundleRequired</key><string>Network-Root</string>
   <key>OSBundleLibraries</key><dict>
     <key>com.apple.kpi.bsd</key><string>20.0.0</string>

@@ -36,6 +36,14 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     bool bound{},attached{},visible{},runtimeAttempted{},prepared{},bootStarted{},stationStarted{},interruptAttached{},credentials{};
     bool enabled{},faulted{},stopping{},scanDone{},authPending{},probePending{},runPending{},resetPending{};
     bool stateDeferred{};int deferredState{},deferredArgument{};
+    uint64_t stateRequests[5]{},runCommitted{},portAuthorizations{},rxBridgeOk{},rxBridgeError{},txPrepareErrors{};
+    uint64_t lastStateRequest{},lastRxBridgeError{},lastTxPrepareError{};
+    void deliver(const uint8_t *data,size_t length,uint8_t channel,int rssi){
+        receivingProtocol=true;++rxDeliveryAttempts;
+        const int error=deliverRealtekRx(&ic,data,length,4,channel,rssi);
+        receivingProtocol=false;
+        if(error){++rxBridgeError;lastRxBridgeError=unsigned(error);}else ++rxBridgeOk;
+    }
     bool outputPumping{},receivingProtocol{},actionInFlight{},actionDeferred{};TxLease pendingTx{};
     station::ActionRequest activeAction{};MacProtocolPeer activePeer{};uint64_t lastWatchdog{};
     struct ActionCompletion {station::Token token;station::Action action;bool success;};
@@ -128,6 +136,9 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     static int newState(ieee80211com *ic,enum ieee80211_state next,int arg){
         auto &s=*from(ic);if(s.stopping||s.faulted)return ENETDOWN;
         if(!s.inGate()){s.fail("net80211 state outside gate");return EIO;}
+        if(unsigned(next)<5)++s.stateRequests[unsigned(next)];
+        // State/argument only, no frame contents, network names or key material.
+        s.lastStateRequest=(uint64_t(unsigned(ic->ic_state))<<40)|(uint64_t(unsigned(next))<<32)|uint32_t(arg);
         if(next==IEEE80211_S_INIT){
             s.stateDeferred=true;s.deferredState=next;s.deferredArgument=arg;
             if(s.stationStarted)s.station.disconnect(s.now());return 0;
@@ -181,7 +192,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
                 // Preserve EAPOL in RUN; the protocol itself enforces port validity.
                 const int error=prepareNextTx(&ic,pendingTx);
                 if(error==EAGAIN)break;
-                if(error)continue;
+                if(error){++txPrepareErrors;lastTxPrepareError=unsigned(error);continue;}
             }
             TxInfo info{};unsigned ring=9;
             if(!boot->txInfo(pendingTx,info,ring)||ring>=6){releaseTx(&ic,pendingTx);fail("TX descriptor policy unavailable");break;}
@@ -211,8 +222,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
                 uint8_t channel=0;int rssi=0;
                 if(s.boot->rxInfo(channel,rssi)&&(!report.channelKnown||report.channel==channel)){
                     const auto *pending=s.phyWait.take(frame.packet.info.ppdu_cnt,frame.packet.info.data_rate,s.now());
-                    if(pending){s.receivingProtocol=true;
-                        ++s.rxDeliveryAttempts;deliverRealtekRx(&s.ic,pending->bytes,pending->length,4,channel,rssi);s.receivingProtocol=false;}
+                    if(pending)s.deliver(pending->bytes,pending->length,channel,rssi);
                 }
             }
             return !s.faulted;
@@ -220,7 +230,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(frame.packet.info.pkt_type==0&&s.attached&&s.owner.interface_&&s.enabled&&!s.actionInFlight){
             uint8_t channel=0;int rssi=0;
             if(s.boot->rxInfo(channel,rssi)){
-                s.receivingProtocol=true;++s.rxDeliveryAttempts;deliverRealtekRx(&s.ic,frame.data,frame.bytes,4,channel,rssi);s.receivingProtocol=false;
+                s.deliver(frame.data,frame.bytes,channel,rssi);
             }else s.phyWait.store(frame.packet.info.ppdu_cnt,frame.packet.info.data_rate,frame.data,frame.bytes,s.now());
         }
         return !s.faulted;
@@ -316,6 +326,41 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     uint64_t lastStatus{};
     void publishStatus(){
         if(!owner.pci_)return;
+        owner.pci_->setProperty("R16TraceRequestInit",uint64_t(stateRequests[0]),64);
+        owner.pci_->setProperty("R16TraceRequestScan",uint64_t(stateRequests[1]),64);
+        owner.pci_->setProperty("R16TraceRequestAuth",uint64_t(stateRequests[2]),64);
+        owner.pci_->setProperty("R16TraceRequestAssoc",uint64_t(stateRequests[3]),64);
+        owner.pci_->setProperty("R16TraceRequestRun",uint64_t(stateRequests[4]),64);
+        owner.pci_->setProperty("R16TraceLastRequest",uint64_t(lastStateRequest),64);
+        owner.pci_->setProperty("R16TraceRunCommitted",uint64_t(runCommitted),64);
+        owner.pci_->setProperty("R16TracePortAuthorizations",uint64_t(portAuthorizations),64);
+        owner.pci_->setProperty("R16TraceRxBridgeOk",uint64_t(rxBridgeOk),64);
+        owner.pci_->setProperty("R16TraceRxBridgeError",uint64_t(rxBridgeError),64);
+        owner.pci_->setProperty("R16TraceRxLastError",uint64_t(lastRxBridgeError),64);
+        owner.pci_->setProperty("R16TraceTxPrepareErrors",uint64_t(txPrepareErrors),64);
+        owner.pci_->setProperty("R16TraceTxLastError",uint64_t(lastTxPrepareError),64);
+        owner.pci_->setProperty("R16TraceStationError",uint64_t(unsigned(station.error())),64);
+        owner.pci_->setProperty("R16TraceSupplicant",uint64_t(ic.ic_bss?unsigned(ic.ic_bss->ni_rsn_supp_state):0),64);
+        owner.pci_->setProperty("R16TracePortValid",uint64_t(ic.ic_bss?unsigned(ic.ic_bss->ni_port_valid):0),64);
+        owner.pci_->setProperty("R16TraceRsnEnabled",uint64_t((ic.ic_flags&IEEE80211_F_RSNON)!=0),64);
+        owner.pci_->setProperty("R16TraceActionDeferred",uint64_t(actionDeferred),64);
+        owner.pci_->setProperty("R16TraceDataDrained",uint64_t(dataDrained()),64);
+        owner.pci_->setProperty("R16TracePendingTx",uint64_t(pendingTx.frame!=nullptr),64);
+        owner.pci_->setProperty("R16TraceEapolKey",uint64_t(ic.ic_stats.is_rx_eapol_key),64);
+        owner.pci_->setProperty("R16TraceEapolReplay",uint64_t(ic.ic_stats.is_rx_eapol_replay),64);
+        owner.pci_->setProperty("R16TraceEapolBadMic",uint64_t(ic.ic_stats.is_rx_eapol_badmic),64);
+        owner.pci_->setProperty("R16TraceDeauth",uint64_t(ic.ic_stats.is_rx_deauth),64);
+        owner.pci_->setProperty("R16TraceDisassoc",uint64_t(ic.ic_stats.is_rx_disassoc),64);
+        owner.pci_->setProperty("R16TraceRxNotAssoc",uint64_t(ic.ic_stats.is_rx_notassoc),64);
+        owner.pci_->setProperty("R16TraceRxWrongBss",uint64_t(ic.ic_stats.is_rx_wrongbss),64);
+        owner.pci_->setProperty("R16TraceRxDuplicate",uint64_t(ic.ic_stats.is_rx_dup),64);
+        owner.pci_->setProperty("R16TraceRxUnauth",uint64_t(ic.ic_stats.is_rx_unauth),64);
+        owner.pci_->setProperty("R16TraceTxNoAuth",uint64_t(ic.ic_stats.is_tx_noauth),64);
+        owner.pci_->setProperty("R16TraceRxUnencrypted",uint64_t(ic.ic_stats.is_rx_unencrypted),64);
+        owner.pci_->setProperty("R16TraceRxDecap",uint64_t(ic.ic_stats.is_rx_decap),64);
+        owner.pci_->setProperty("R16TraceCcmpDecrypt",uint64_t(ic.ic_stats.is_ccmp_dec_errs),64);
+        owner.pci_->setProperty("R16TraceCcmpReplay",uint64_t(ic.ic_stats.is_ccmp_replays),64);
+        owner.pci_->setProperty("R16TraceRxMgmtDiscard",uint64_t(ic.ic_stats.is_rx_mgtdiscard),64);
         owner.pci_->setProperty("R16LiveTxSubmitted",uint64_t(txSubmitted),64);
         owner.pci_->setProperty("R16LiveRxComplete",uint64_t(rxComplete),64);
         owner.pci_->setProperty("R16LiveRxWireless",uint64_t(rxWireless),64);
@@ -367,14 +412,14 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(probePending){probePending=false;savedState(&ic,IEEE80211_S_SCAN,-1);}
         if(scanDone){scanDone=false;ieee80211_next_scan(&ic.ic_if);}
         if(runPending&&station.state()==station::State::associated){
-            runPending=false;savedState(&ic,IEEE80211_S_RUN,-1);
+            runPending=false;if(!savedState(&ic,IEEE80211_S_RUN,-1)&&ic.ic_state==IEEE80211_S_RUN)++runCommitted;
         }
         if(enabled&&credentials&&station.state()==station::State::idle&&ic.ic_state==IEEE80211_S_INIT&&!stateDeferred)
             newState(&ic,IEEE80211_S_SCAN,-1);
         if(ic.ic_state==IEEE80211_S_RUN&&station.state()==station::State::associated&&
            (!(ic.ic_flags&IEEE80211_F_RSNON)||ic.ic_bss->ni_port_valid)){
             if(!station.authorizePort(auth,now())){fail("controlled port authorization failed");return;}
-            owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid|kIONetworkLinkActive);
+            ++portAuthorizations;owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid|kIONetworkLinkActive);
         }
         if(station.state()==station::State::authorized&&(ic.ic_flags&IEEE80211_F_RSNON)&&!ic.ic_bss->ni_port_valid)
             station.revokePort(auth,now());
