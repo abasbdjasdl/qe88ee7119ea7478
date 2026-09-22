@@ -1,0 +1,15 @@
+name: Test managed recovery entry
+on:
+  push:
+    branches: [main]
+    paths: ['recovery-autolog/managed-*', 'recovery-autolog/test-managed-entry.py', '.github/workflows/recovery-entry.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  entry:
+    runs-on: macos-15-intel
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: python3 recovery-autolog/test-managed-entry.py
