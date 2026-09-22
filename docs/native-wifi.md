@@ -30,3 +30,9 @@ All native control requests must enter the existing hardware command gate. A net
 ## Actual recovery inventory
 
 Offline inspection of the user's macOS15 recovery BootKernelExtensions.kc found com.apple.iokit.IO80211Family and com.apple.iokit.IOSkywalkFamily, plus IO80211Controller, IO80211InfraProtocol and Skywalk symbols. This avoids assuming that absent standalone kext files mean the dependency is absent: the components are inside the boot collection. Private method offsets and structure sizes still require checking against the exact kernel collection before deployment.
+
+## Gated status and Apple data translation
+
+`copyWirelessStatus` reads the current protocol state and bounded node cache under the hardware command gate. It returns copies, never node pointers or key material. The snapshot distinguishes a pending selection, scanning, authentication and an authorized link; protocol RUN alone is insufficient for a connected status. SSIDs preserve their explicit binary length. Cached observations are marked as cached, with truncation when the bounded list fills. Reading the list does not start a new scan or interrupt an existing connection. RSSI is the existing PHY-normalized percentage, not an invented dBm value.
+
+`NativeWirelessData.hpp` translates these snapshots into Apple SSID, BSSID, channel and RSSI response structures and is compiled against the pinned private declarations by native-contract CI. It clears response buffers on failure and does not advertise channel widths beyond the current 20MHz path. These are adapter building blocks, not a registered IO80211 interface. Fresh user-triggered/background scans, Apple association request conversion, native notifications and the exact Sequoia subclass ABI are still outstanding. No native UI functionality is claimed by these tests.

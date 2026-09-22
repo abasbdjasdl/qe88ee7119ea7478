@@ -321,6 +321,44 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         }else{join.i_flags=IEEE80211_JOIN_NWKEY;join.i_nwkey.i_wepon=IEEE80211_NWKEY_OPEN;}
         if(ieee80211_add_ess(&ic,&join))return false;ic.ic_flags|=IEEE80211_F_AUTO_JOIN;credentials=true;return true;
     }
+    bool copyNode(const ieee80211_node *node,wireless::Network &out){
+        if(!node||node->ni_esslen>sizeof(out.ssid))return false;
+        memset(&out,0,sizeof(out));out.ssidLength=node->ni_esslen;
+        memcpy(out.ssid,node->ni_essid,out.ssidLength);memcpy(out.bssid,node->ni_bssid,6);
+        if(node->ni_chan&&node->ni_chan!=IEEE80211_CHAN_ANYC){
+            const auto channel=channelOf(&ic,node->ni_chan);
+            out.channel=channel.primary;out.fiveGhz=channel.band==1;
+        }
+        // Rtw8852bHardware feeds PHY normalized 0..100 RSSI to net80211.
+        out.signalPercent=node->ni_rssi>100?100:node->ni_rssi;
+        out.privacy=(node->ni_capinfo&IEEE80211_CAPINFO_PRIVACY)!=0;
+        out.protocols=node->ni_rsnprotos;out.akms=node->ni_rsnakms;
+        out.ciphers=node->ni_rsnciphers;out.rsnCapabilities=node->ni_rsncaps;
+        return true;
+    }
+    IOReturn copyWirelessStatus(wireless::Snapshot &out){
+        memset(&out,0,sizeof(out));out.sampledAtUs=now();
+        out.selectionGeneration=pendingSelection.generation();
+        out.selectionPending=pendingSelection.waiting();
+        out.scanInProgress=attached&&ic.ic_state==IEEE80211_S_SCAN;
+        const bool run=attached&&ic.ic_state==IEEE80211_S_RUN;
+        const bool authorized=station.state()==station::State::authorized&&
+            (!(ic.ic_flags&IEEE80211_F_RSNON)||(ic.ic_bss&&ic.ic_bss->ni_port_valid));
+        out.link=wireless::linkState(enabled,faulted,stopping,out.selectionPending,
+            out.scanInProgress,run,authorized,attached&&
+            (ic.ic_state==IEEE80211_S_AUTH||ic.ic_state==IEEE80211_S_ASSOC));
+        if(!attached)return kIOReturnNotReady;
+        if(run&&!out.selectionPending&&enabled&&!faulted&&!stopping)
+            out.currentValid=copyNode(ic.ic_bss,out.current);
+        // Iterate under the same gate as RX and cache expiry; never retain nodes.
+        unsigned visited=0;ieee80211_node *node;
+        RB_FOREACH(node,ieee80211_tree,&ic.ic_tree){
+            if(++visited>256){out.cacheTruncated=true;break;}
+            wireless::Network entry;
+            if(copyNode(node,entry)&&!wireless::append(out,entry))break;
+        }
+        return kIOReturnSuccess;
+    }
     IOReturn queueSelection(const selection::Join *requested){
         if(!attached||!stationStarted||faulted||stopping||!enabled)return kIOReturnNotReady;
         if(requested){
@@ -657,6 +695,15 @@ IOReturn R16NetworkController::selectWirelessNetwork(const selection::Join &requ
     return gate_?gate_->runAction(selectionGated,const_cast<selection::Join*>(&request)):kIOReturnNotReady;
 }
 IOReturn R16NetworkController::disconnectWirelessNetwork(){return gate_?gate_->runAction(selectionGated):kIOReturnNotReady;}
+IOReturn R16NetworkController::wirelessStatusGated(OSObject *o,void *output,void*,void*,void*){
+    auto *self=static_cast<R16NetworkController*>(o);
+    if(!output)return kIOReturnBadArgument;
+    return self->state_?self->state_->copyWirelessStatus(*static_cast<wireless::Snapshot*>(output)):kIOReturnNotReady;
+}
+IOReturn R16NetworkController::copyWirelessStatus(wireless::Snapshot &out){
+    memset(&out,0,sizeof(out));
+    return gate_?gate_->runAction(wirelessStatusGated,&out):kIOReturnNotReady;
+}
 IOReturn R16NetworkController::outputGated(OSObject *o,void *p,void *out,void*,void*){
     auto &owner=*static_cast<R16NetworkController*>(o);auto *s=owner.state_;auto m=static_cast<mbuf_t>(p);
     auto &result=*static_cast<UInt32*>(out);result=kIOReturnOutputDropped;

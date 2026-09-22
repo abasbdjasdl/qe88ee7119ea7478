@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['tools/build_native_contract.py', '.github/workflows/native-contract.yml', 'src/network/WirelessSelection.hpp', 'tests/network_wireless_selection_test.cpp']
+    paths: ['tools/build_native_contract.py', '.github/workflows/native-contract.yml', 'src/network/Wireless*.hpp', 'src/network/NativeWirelessData.hpp', 'tests/network_wireless_*']
 permissions:
   contents: read
 jobs:

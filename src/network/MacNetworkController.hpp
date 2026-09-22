@@ -8,6 +8,7 @@
 #include "StationController.hpp"
 #include "StationIoCore.hpp"
 #include "WirelessSelection.hpp"
+#include "WirelessStatus.hpp"
 struct ieee80211com;
 class IOEthernetInterface;
 namespace rtl8852be { namespace network {
@@ -62,6 +63,7 @@ class R16NetworkController : public IOEthernetController {
     static IOReturn enableGated(OSObject*,void*,void*,void*,void*);
     static IOReturn outputGated(OSObject*,void*,void*,void*,void*);
     static IOReturn selectionGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn wirelessStatusGated(OSObject*,void*,void*,void*,void*);
     static void timer(OSObject*,IOTimerEventSource*);
     void releaseResources();
     unsigned startupStage_{};
@@ -87,4 +89,5 @@ public:
     // They never publish credentials through IORegistry or a property setter.
     IOReturn selectWirelessNetwork(const rtl8852be::network::selection::Join&);
     IOReturn disconnectWirelessNetwork();
+    IOReturn copyWirelessStatus(rtl8852be::network::wireless::Snapshot&);
 };
