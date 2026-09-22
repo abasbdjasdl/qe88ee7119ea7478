@@ -1,0 +1,72 @@
+{
+  "repository": "https://github.com/lwfinger/rtw89",
+  "commit": "d1fced1b8a741dc9f92b47c69489c24385945f6e",
+  "license": "BSD-3-Clause option",
+  "roots": [
+    "_set_dpd_backoff",
+    "_rck",
+    "_dac_cal",
+    "_wait_rx_mode",
+    "_rx_dck"
+  ],
+  "original_functions": {
+    "_kpath": "6549a72d4d4057b4463d8202d704dbcfaf64c89be1e2d62fcde139faf64b93e8",
+    "_set_rx_dck": "12188efc903b5a8c71a7939ffc7d6a4a2c741ce1f627f25ee0f3d2ac21486297",
+    "_rx_dck": "ad76c4a7c94e85fc78511880bd31ac690afc6aace316e92a394f106c9343f946",
+    "_rck": "868c18d4664179161852b4f612f1a4582be64b97beb21b517279332e5ab6afd3",
+    "_afe_init": "30fb5f74b53115e36b5bffb1f06e2d17946df96937048c55263041b5456a0007",
+    "_drck": "a1628d55d8c723d8382ce3ce1ec0077e870af2f427b7b670fe49e23f9f88c5e1",
+    "_addck_backup": "9873edd9fba79b04b6bb1b7da68fb5a2a99e2cddab940aa0eeaf4a43587f432a",
+    "_addck_reload": "21c64b82fb0ea3d0122634e8ae06dfccca0bf105452aed821f8bfb7400cf2866",
+    "_dack_backup_s0": "54612624ead1e4ff1a59bd8fd9cb98c744c37d4ac7a88d1fc181b0756ad06f90",
+    "_dack_backup_s1": "e282b13c5b7274ac25375bb411c35263e45b04599b61cf456a98ab8a61e7f524",
+    "_check_addc": "5b93d23becae636f6decb59dd5eb6facfbee2b4029d0a5187ba9ec91b2dfe744",
+    "_addck": "6be08a0c4863a8cce9a81214a69cdca558d7868e258f0f2d05e0fcb4dfb7c78e",
+    "_check_dadc": "f9fc624325a8fc614e97682f6c9ac8f364be511a0533f06b6f233d36cb990d2d",
+    "_dack_s0_check_done": "21d2134f2d23669a786f20495282fd5ed2d177bbddf377eb4c4c21c6af1297cf",
+    "_dack_s0": "9ef372d555979180df17f15c66714f2cc88af1d6893c035c459021f079e96459",
+    "_dack_s1_check_done": "9d9bda739f09ab6c48e11fddcc368911685ee2186a404e1578fab77887dd1bae",
+    "_dack_s1": "b8fa1e214b24792733466a2b6bfcce0fe20a45c6fc99aa031ff552a92d1e12ed",
+    "_dack": "6f9d835842324f66325e92c73f7b8614d88cf02a9c73998344114e536bb3b6a9",
+    "_dack_dump": "b04b4795367bdef889744e3c774868cac89e98cfdf1bade4b76a39b7649d50e4",
+    "_dac_cal": "8e11e5557b22a798cf5f6b00cac528b43814ceacae59346c202679845f7aca3f",
+    "_wait_rx_mode": "d726c74478a22f8c853a2a2e9c58c0e2c82c201734cab6d05894767685e88e60",
+    "_set_dpd_backoff": "58d76da56fef459658c346a8802715d8de8a48403b18b36b188074bbad7fdae7"
+  },
+  "original_tables": {
+    "rtw8852b_afe_init_defs": "4c5b7b4e9f523aaaccc78892076a2f41142cc6624158fff87a5af12f6eaf4be0",
+    "rtw8852b_check_addc_defs_a": "2376f28889d388d01561a75003e71289aa552b8a1d3cb93e2ed2153e62615330",
+    "rtw8852b_check_addc_defs_b": "2468b79a62a07814f5043c689202e6adfb71ea64474fd3273c7bb83031803ded",
+    "rtw8852b_check_dadc_dis_defs_a": "8ef945fea4029395066cdc1bb7cbc2abd7d9adc6df382706e162048f5036e0d2",
+    "rtw8852b_check_dadc_dis_defs_b": "3f63dd9300253136f4f1e965f60eac5806e54118e66707f5a5041cee5acc7d5c",
+    "rtw8852b_check_dadc_en_defs_a": "9f0bf22d030f6e920c2e6692d24db10c757f7389276ecb5aa72006450d344d6d",
+    "rtw8852b_check_dadc_en_defs_b": "8d84ca32bd2b30e1533f055d6b1533c797615d6f1ecd034755e3b959a87233bf",
+    "rtw8852b_dack_s0_1_defs": "08e56d10bea15a0ffe2795b5faf72429e46b268bbbb232915bd455926e88075b",
+    "rtw8852b_dack_s0_2_defs": "69108042af03075b6ce11853fc0d9088e237ad78ae2505878b833ce540256623",
+    "rtw8852b_dack_s0_3_defs": "6137b5f0b685bb7dec3d6137c231f40698700e14a922facc40bca6c8fbdcd144",
+    "rtw8852b_dack_s1_1_defs": "4d87bdfaf18bb53b789462fd2af8868fdd07da536d231423f049c2e3571f4338",
+    "rtw8852b_dack_s1_2_defs": "06cd9e1e0b5e318687c6f08a072170ac086cadbf1df5ae5c1a42fc17b7a789ca",
+    "rtw8852b_dack_s1_3_defs": "a034446d9b6faf1b1e54402b63edd4ca05308fc964c3024a350ae4954ab6bed2"
+  },
+  "sources": {
+    "rtw8852b_rfk.c": "a8f96bd5d4f7b319443e9f327e07eda5e4f37f3454d9d88b343a4b2600cb88ba",
+    "rtw8852b_rfk_table.c": "ebc6840d2e15c7a9f12fb7d7121ca19bb8acff93524d3902a7ce892e0714fc21",
+    "rtw8852b.h": "fe243e53bdc4fdf8ca5df118dcb82dfdbe4550dfbf83e589254a8a5997acd26d",
+    "core.h": "ec8c6d32fe8f86620ed23190b26d8f4aaa11238fb195bba4c4e66ee01d5e2366",
+    "phy.h": "ceac88b387d211f48b07a8e94466d6968a28ed23fd88ee9b0e21aa214f95e5dd",
+    "reg.h": "9609382125b396708d52f2d64a4e8a1e7abb080690ea2776308323834b725d03"
+  },
+  "adaptations": [
+    "typed Context",
+    "RF path arguments accept bounded u8",
+    "bounded failure-latching polling and delays",
+    "Linux bit and signed helpers replaced with local helpers",
+    "RFK table macros expanded in original order"
+  ],
+  "generated": {
+    "Rtw8852bRfkConstants.hpp": "0b0c76506acfbdda05dce9b918894d14e70f61b5ed4eac4fa524178a97fa5f5b",
+    "Rtw8852bRfkFunctions.inc": "148f234e56c2e95e4a78d9784e8184b5e673761cf64d267ad500406a844f8bb5"
+  },
+  "hardware_tested": false,
+  "full_rfk_implemented": false
+}

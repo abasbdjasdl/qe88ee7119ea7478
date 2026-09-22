@@ -219,6 +219,37 @@ read elsewhere. Generated functions/tables are reproducible and hash-recorded;
 CI checks regeneration and compiles the native adapter with the protocol stack.
 These are model/compile checks, with no physical MAC/RFK or network evidence.
 
+`rfk::Initialization` imports the original dependency closure for initial DPD
+backoff, both-path RCK, DRCK/ADDCK/DACK and RXDCK: 22 functions, 13 RFK command
+tables, and 127 referenced constants. It retains per-path ADC/DAC calibration
+values, MSBK arrays and original success-path restoration. Unlike the upstream
+warning-only timeout paths, a timeout latches an error, suppresses subsequent
+normal I/O and cannot expose `dack_done` as valid. Partially programmed hardware
+requires a controller power cycle; the engine does not claim full rollback.
+The two-second deadline and independent operation/poll bounds also handle
+frozen clocks. All calibration tables retain the original operation order.
+
+`MacRfkIo` connects this engine to native `RadioAccess<MacRadioIo>` and the
+single MAC PHYREG write required by AFE setup. Borrowed device/map and control
+callback owner must remain alive while a lease is outstanding. Every stage
+requires explicit controller calibration begin/end callbacks; absent callbacks
+are rejected. Those callbacks must coordinate firmware/BT and acknowledge the
+firmware scheduler pause. They are **not implemented by this component**.
+Once a lease is acquired, the adapter independently verifies firmware state 7,
+CMAC enable, BB reset-enable bits and zero scheduler TX mask. Firmware readiness
+requires scheduler control through the firmware register-message protocol,
+not a blind write to CTN_TXEN. The driver must program BB/RF/NCTL tables and
+device-specific calibration data before invoking this engine. On failure,
+end callbacks still run, must leave TX disabled, and may report incomplete
+cleanup; the borrowed owner cannot be destroyed while its lease remains active.
+
+Host tests verify calibration result arrays, RF state and DPD backoff values,
+all 1,070 I/O failures, every delay failure, all begin/end/drain failures,
+RCK/DRCK/ADDCK/DACK timeouts, cancellation and clock anomalies. These are register
+models, not real calibration measurements. Channel IQK/TSSI/DPK, RF tracking,
+firmware/BT control callbacks and controller lifecycle remain unimplemented;
+initial calibration success is not full RFK or network readiness.
+
 1. Complete and preserve the RTL8852B power/MAC/PHY/RF/efuse/calibration sequence;
    the diagnostic subset currently shuts the chip down after probing. Physical
    DAV eFuse reads, applying gain state to channel registers, full BB reset/TX power
