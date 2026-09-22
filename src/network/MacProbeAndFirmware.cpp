@@ -60,12 +60,32 @@ bool MacProbeAndFirmware::fail(ProbeFirmwareError error){
             state_->device.setProperty("R16ProbeStage",uint64_t(result_.failedStage),32);
             state_->device.setProperty("R16ProbeError",uint64_t(error),32);
             const auto &mac=state_->mac.result;
+            state_->device.setProperty("R16MacStage",uint64_t(mac.stage),32);
+            state_->device.setProperty("R16MacError",uint64_t(mac.error),32);
+            state_->device.setProperty("R16MacAddress",uint64_t(mac.address),32);
+            state_->device.setProperty("R16MacExpected",uint64_t(mac.expected),32);
+            state_->device.setProperty("R16MacActual",uint64_t(mac.actual),32);
             IOLog("RTL8852BE: probe MAC stage=%u error=%u address=0x%x wanted=0x%x actual=0x%x\n",
                 unsigned(mac.stage),unsigned(mac.error),mac.address,mac.expected,mac.actual);
             if(auto *cycle=state_->cycles[state_->currentCycle]){
                 const auto &prep=cycle->boot.result;const auto &fw=cycle->download.result;
                 const auto &pci=cycle->link.result;const auto &downloadPci=cycle->download.pciResult;
                 const auto &power=cycle->power.result.on;
+                state_->device.setProperty("R16PrepStage",uint64_t(prep.stage),32);
+                state_->device.setProperty("R16PrepError",uint64_t(prep.error),32);
+                state_->device.setProperty("R16PrepAddress",uint64_t(prep.address),32);
+                state_->device.setProperty("R16PrepWanted",uint64_t(prep.wanted),32);
+                state_->device.setProperty("R16PrepActual",uint64_t(prep.actual),32);
+                state_->device.setProperty("R16FwOperation",uint64_t(fw.operationStatus),32);
+                state_->device.setProperty("R16FwPhase",uint64_t(fw.phase),32);
+                state_->device.setProperty("R16FwFailedPhase",uint64_t(fw.failedPhase),32);
+                state_->device.setProperty("R16FwControl",uint64_t(fw.lastControl),32);
+                state_->device.setProperty("R16FwIndex",uint64_t(fw.lastIndex),32);
+                state_->device.setProperty("R16FwQuiesced",uint64_t(fw.quiesced),32);
+                state_->device.setProperty("R16FwReleased",uint64_t(fw.buffersReleased),32);
+                state_->device.setProperty("R16FwRetained",uint64_t(fw.retainBuffers),32);
+                state_->device.setProperty("R16BankStatus",uint64_t(cycle->download.bankResult.status),32);
+                state_->device.setProperty("R16BankSlot",uint64_t(cycle->download.bankResult.failedSlot),32);
                 state_->device.setProperty("R16ProbePciError",uint64_t(pci.error),32);
                 state_->device.setProperty("R16ProbePowerError",uint64_t(power.error),32);
                 state_->device.setProperty("R16ProbePowerAddress",uint64_t(power.address),32);
