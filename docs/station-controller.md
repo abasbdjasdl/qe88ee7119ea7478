@@ -4,9 +4,10 @@
 not a loadable network driver. It directly encodes the existing AX Role Maintain and
 Join Info H2C packets and accepts decoded real C2H DONE ACKs. It sequences software
 scanning, authentication/association evidence, firmware association programming,
-controlled-port authorization, disconnect, and role removal. There is **no native
-IOEthernetController/backend binding yet**. Tests exercise a recording/fault-injecting
-backend and do not prove radio operation or networking.
+controlled-port authorization, disconnect, and role removal. The concrete native
+binding is now `MacNetworkController` with `MacRTL8852BE`'s boot service; see
+`network-driver.md`. Component tests exercise a recording/fault-injecting backend
+and do not prove radio operation or networking.
 
 Ordering and field values come from the locally pinned `rtw89` commit
 `d1fced1b8a741dc9f92b47c69489c24385945f6e`:
@@ -31,7 +32,9 @@ methods cannot reenter the state machine; completion callbacks are queued for a
 later gate action. Timestamps are monotonic microseconds sampled at processing
 time. Each asynchronous action carries an original `(firmware epoch, operation)`
 token, copied when work is accepted. Completion must retain that token. Each action
-has a two-second deadline. Authentication plus association has a ten-second deadline;
+has a twelve-second deadline, including prior TX drain and the radio's full
+five-phase tune budget of ten seconds. Standalone Role/Join firmware DONE ACKs
+retain their separate two-second deadline. Authentication plus association has a ten-second deadline;
 scan dwell is 10–1000 ms per channel, at most 64 channels, with an overall bound.
 
 `beginAction` means **accepted**, not completed. A successful `actionComplete`
@@ -54,10 +57,10 @@ Every action has the following obligations:
 | `disconnectCam` | After disconnected Join DONE: CAM and station/BT bookkeeping updated; no stale station TX can enter a subsequent connection. |
 | `removeCam` | After role removal DONE: VIF CAM entries invalidated and firmware update complete; remaining host station resources released only under correct DMA ownership rules. |
 
-The current model does not encode CMAC/CAM payloads itself and does not substitute
-its action tokens for firmware acknowledgments. Those encoders and native action
-implementations are still required. Model tests therefore do not claim that these
-actions' hardware obligations are implemented.
+This component does not encode CMAC/CAM payloads itself and does not substitute
+its action tokens for firmware acknowledgments. `StationTables`, `MacStationIo`
+and the concrete boot service now provide those encoders and native actions.
+Model tests remain separate from hardware execution evidence.
 
 `publishH2c` must copy the transient 12-byte encoded command into the actual
 `MacFirmwareDmaQueue`/`Net80211FirmwareQueue` transport, cache-sync and ring CH12.

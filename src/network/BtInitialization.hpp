@@ -7,7 +7,7 @@
 
 namespace rtl8852be { namespace bt { namespace initialization {
 struct Board {
-    uint32_t firmwareVersion{};uint8_t rfe{},cut{};bool identityValid{};
+    uint32_t firmwareVersion{};uint8_t rfe{},cut{};bool identityValid{},wlanOnly{};
     bool valid()const{return identityValid&&rfe!=0xff&&cut<6&&Protocol::select(firmwareVersion).valid();}
     bool dedicated()const{return rfe>0&&!(rfe&1);}
     uint8_t antennas()const{return dedicated()?3:2;}
@@ -44,7 +44,7 @@ inline bool encodeInit(const Board &board,uint8_t (&out)[14]){
     // ant_info, bt_solo, diversity, kt_ver_adie, WA and unused fields start at
     // zero in _reset_btc_var and are not assigned by 8852B's btc_set_rfe.
     out[6]=board.rfe;out[7]=board.cut;out[8]=board.dedicated()?0:2;
-    out[10]=6;out[11]=2; // chip afh_guard_ch, WL_INITOK; normal, non-DBCC mode.
+    out[10]=6;out[11]=uint8_t(2|(board.wlanOnly?1:0)); // WL_INITOK + source BTC_MODE_WL, non-DBCC.
     return true;
 }
 inline void encodeControl(uint8_t (&out)[6]){
@@ -175,10 +175,11 @@ template<class Io> class Initialization {
         // Do not override a BT calibration that is already running/requested.
         if(bt&(btRfkRun|btRfkRequest))return fail(Error::btBusy,scoreboardRegister,bt);
         if(!readLte(grantRegister,grant))return false;
-        const uint32_t desired=(grant&~grantMask)|((bt&2)?0xdd00dd00:calibrationGrants);
-        // WINIT differs from WRFK: when BT is enabled it owns high grants.
+        const uint32_t desired=(grant&~grantMask)|((!board_.wlanOnly&&(bt&2))?0xdd00dd00:calibrationGrants);
+        // WINIT: enabled BT owns high grants. Explicit BTC_MODE_WL instead
+        // selects source ANT_WONLY: WL high, BT low, PLT_NONE, same OFF_BT policy.
         return writeLte(grantRegister,desired)&&m8(controlPathRegister,0,4)&&
-            m16(priorityRegister,0xffff,0x166); // PLT_EN + BT_TX/RX for TX and RX
+            m16(priorityRegister,0xffff,board_.wlanOnly?0x100:0x166); // WONLY: PLT_NONE; WINIT: PLT_BT
     }
     bool submit(Stage next,network::CommandId id,const uint8_t *bytes,size_t length){
         commandAttempted_=true;uint8_t seq=0;

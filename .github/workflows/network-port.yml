@@ -1,9 +1,9 @@
-name: Build reusable network components
+name: Build experimental network driver
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['src/network/**', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tests/network_irq_fakes/**', 'tests/network_rfk_fakes/**', 'tools/build_network_stack.py', 'tools/check_network_reference.py', 'tools/import_radio_reference.py', 'tools/import_mac_reference.py', 'tools/import_rfk_reference.py', 'tools/import_channel_reference.py', 'tools/import_power_reference.py', 'tools/import_device_power_reference.py', 'tools/import_station_tables_reference.py', '.github/workflows/network-port.yml']
+    paths: ['src/**', 'firmware/**', 'Info-Network.plist', 'tests/network_*', 'tests/network_timer_fakes/**', 'tests/network_dma_fakes/**', 'tests/network_irq_fakes/**', 'tests/network_rfk_fakes/**', 'tools/**', '.github/workflows/network-port.yml']
 permissions:
   contents: read
 jobs:
@@ -34,6 +34,18 @@ jobs:
           python3 tools/check_network_reference.py build-rtw89 | tee build/network-stack/wire-reference-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_mailbox_test.cpp -o build/network_mailbox_test
           ./build/network_mailbox_test | tee build/network-stack/mailbox-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_firmware_capabilities_test.cpp -o build/network_firmware_capabilities_test
+          ./build/network_firmware_capabilities_test | tee build/network-stack/firmware-capabilities-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_firmware_boot_test.cpp -o build/network_firmware_boot_test
+          ./build/network_firmware_boot_test | tee build/network-stack/firmware-boot-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_pci_link_test.cpp -o build/network_pci_link_test
+          ./build/network_pci_link_test | tee build/network-stack/pci-link-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_radio_boot_test.cpp -o build/network_radio_boot_test
+          ./build/network_radio_boot_test | tee build/network-stack/radio-boot-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_station_io_test.cpp -o build/network_station_io_test
+          ./build/network_station_io_test | tee build/network-stack/station-io-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_initial_channel_policy_test.cpp src/network/Rtw8852bPowerTables.cpp -o build/network_initial_channel_policy_test
+          ./build/network_initial_channel_policy_test | tee build/network-stack/initial-channel-policy-tests.txt
           python3 tools/import_mac_reference.py build-rtw89
           git diff --exit-code -- src/network/Rtw8852bMacConstants.hpp src/network/Rtw8852bMacFunctions.inc src/network/mac-reference-provenance.json
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_mac_init_test.cpp -o build/network_mac_init_test
@@ -70,6 +82,10 @@ jobs:
           git diff --exit-code -- src/network/Rtw8852bRadioTables.cpp src/network/Rtw8852bEfuseLayout.hpp src/network/radio-reference-provenance.json tests/network_radio_reference.inc
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_radio_test.cpp src/network/Rtw8852bRadioTables.cpp -o build/network_radio_test
           ./build/network_radio_test | tee build/network-stack/radio-tests.txt
+          python3 tools/import_phy_init_constants.py build-rtw89
+          git diff --exit-code -- src/network/Rtw8852bPhyInitConstants.hpp src/network/phy-init-reference-provenance.json
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_phy_initialization_native_test.cpp src/network/Rtw8852bRadioTables.cpp -o build/network_phy_initialization_native_test
+          ./build/network_phy_initialization_native_test | tee build/network-stack/phy-initialization-native-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_efuse_reader_test.cpp -o build/network_efuse_reader_test
           ./build/network_efuse_reader_test | tee build/network-stack/efuse-reader-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_dav_efuse_test.cpp -o build/network_dav_efuse_test
@@ -106,7 +122,7 @@ jobs:
           ./build/network_timers_test | tee build/network-stack/timer-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_ring_setup_test.cpp -o build/network_ring_setup_test
           ./build/network_ring_setup_test | tee build/network-stack/ring-setup-tests.txt
-      - name: Compile existing macOS 802.11 and WPA stack
+      - name: Compile protocol stack and link native networking kext
         shell: bash
         env:
           MAC_KERNEL_SDK: ${{ github.workspace }}/MacKernelSDK
@@ -114,7 +130,7 @@ jobs:
           set -o pipefail
           python3 tools/build_network_stack.py build-itlwm 2>&1 | tee build/network-stack/build.log
           tar -czf build/network-stack/itlwm-stack-source.tar.gz -C build-itlwm itl80211 include itlwm/PrivateSPI.pch LICENSE
-          tar -czf build/network-stack/port-source.tar.gz src/network tools/build_network_stack.py tools/check_network_reference.py tools/import_network_reference.py tools/import_radio_reference.py tools/import_mac_reference.py tools/import_rfk_reference.py tools/import_channel_reference.py tools/import_power_reference.py tools/import_device_power_reference.py tools/import_station_tables_reference.py tests/network_* LICENSE
+          tar -czf build/network-stack/port-source.tar.gz src tools firmware Info-Network.plist tests/network_* docs LICENSE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

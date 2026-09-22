@@ -10,6 +10,7 @@ struct Device {
     std::map<unsigned,unsigned> reg;unsigned ops{},failAt{},cancelAt{},delayCalls{},failDelay{};
     bool gate=true,cancel{},frozen{},backward{},suppressReply{},ignoreScheduler{},ignoreAck{};
     bool injectDuringWait{},callbackDone{};uint64_t time=100;
+    unsigned slowAddress{},slowUs{};
     uint32_t replyHeader=0x204;void *callbackOwner{};void (*callback)(void *){};
     Device(){reg[f::firmwareControl]=0xe0;reg[f::schedulerTx]=0xa55a;reg[f::hostCounters]=0xae;}
     bool step(){++ops;if(ops==cancelAt)cancel=true;
@@ -18,7 +19,7 @@ struct Device {
     uint64_t nowUs(){return backward&&delayCalls?--time:time;}
     bool delayUs(unsigned us){++delayCalls;if(!frozen)time+=us;
         if(injectDuringWait){reg[f::c2hControl]=1;reg[f::h2cControl]=0;}return delayCalls!=failDelay;}
-    bool read8(unsigned a,uint8_t &v){v=uint8_t(reg[a]);return step();}
+    bool read8(unsigned a,uint8_t &v){v=uint8_t(reg[a]);if(a==slowAddress)time+=slowUs;return step();}
     bool read16(unsigned a,uint16_t &v){v=uint16_t(reg[a]);return step();}
     bool read32(unsigned a,uint32_t &v){v=reg[a];return step();}
     bool write8(unsigned a,uint8_t v){
@@ -32,6 +33,19 @@ struct Device {
     bool write32(unsigned a,uint32_t v){if(!step())return false;writes.push_back({a,v,4});reg[a]=v;return true;}
 };
 int main(){
+    for(unsigned mask:{0u,1u,0x100u,0x101u,0xffffu}){
+        Device x;f::Mailbox<Device> c(x);assert(c.setSchedulerMask(uint16_t(mask)));
+        assert(x.reg[f::schedulerTx]==mask&&!c.paused());
+        assert(x.reg[f::h2cData[0]]==(mask<<16|0x205)&&x.reg[f::h2cData[1]]==0xffff);
+        const auto count=x.ops;
+        for(unsigned i=1;i<=count;++i){Device y;y.failAt=i;f::Mailbox<Device> bad(y);
+            assert(!bad.setSchedulerMask(uint16_t(mask)));assert(bad.faulted());}
+        assert(c.pauseScheduler());const auto pausedOps=x.ops;
+        assert(!c.setSchedulerMask(0x101)&&x.ops==pausedOps&&c.paused());
+        assert(c.resumeScheduler()&&x.reg[f::schedulerTx]==mask);
+    }
+    {Device x;x.ignoreScheduler=true;f::Mailbox<Device> c(x);
+     assert(!c.setSchedulerMask(0x101)&&c.result.error==f::MailError::readback);}
     Device d;f::Mailbox<Device> m(d);assert(m.pauseScheduler());const auto pauseOps=d.ops;
     assert(m.paused()&&!m.faulted()&&d.reg[f::schedulerTx]==0&&d.reg[f::hostCounters]==0xbf);
     assert(d.reg[f::h2cData[0]]==0x205&&d.reg[f::h2cData[1]]==0xffff&&d.reg[f::h2cData[2]]==0&&d.reg[f::h2cData[3]]==0);
@@ -67,6 +81,15 @@ int main(){
         Device y;y.suppressReply=true;y.frozen=frozen;f::Mailbox<Device> z(y);
         assert(!z.pauseScheduler()&&z.result.error==f::MailError::timeout&&z.result.triggerAttempted&&z.result.polls<=1000002);
     }
+    // Ready returned after a slow MMIO read cannot evade either local deadline.
+    for(unsigned us:{5000u,5001u}){Device x;x.slowAddress=f::h2cControl;x.slowUs=us;f::Mailbox<Device> c(x);
+        if(us==5000)assert(c.pauseScheduler());
+        else assert(!c.pauseScheduler()&&c.result.error==f::MailError::timeout&&!c.result.triggerAttempted);}
+    for(unsigned us:{1000000u,1000001u}){Device x;f::Mailbox<Device> c(x);
+        x.reg[f::c2hControl]=1;x.reg[f::c2hData[0]]=0x104;
+        x.slowAddress=f::c2hControl;x.slowUs=us;
+        if(us==1000000)assert(c.receivePending());
+        else assert(!c.receivePending()&&c.result.error==f::MailError::timeout&&!c.result.replyCaptured&&x.writes.empty());}
     {Device x;x.reg[f::h2cControl]=1;x.backward=true;f::Mailbox<Device> c(x);assert(!c.pauseScheduler()&&c.result.error==f::MailError::clock);}
     {Device x;x.reg[f::h2cControl]=1;x.failDelay=1;f::Mailbox<Device> c(x);assert(!c.pauseScheduler()&&c.result.error==f::MailError::io);}
     for(auto reg:{f::h2cControl,f::c2hControl}){Device x;x.reg[reg]=255;f::Mailbox<Device> c(x);assert(!c.pauseScheduler()&&c.result.error==f::MailError::io);}

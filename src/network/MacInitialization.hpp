@@ -115,6 +115,10 @@ private:
 public:
     explicit MacInitialization(D &io):context_(io,result){}
     MacInitialization(const MacInitialization &)=delete;MacInitialization &operator=(const MacInitialization &)=delete;
+    bool configureCut(uint8_t actualCut){
+        if(actualCut>1||result.stage!=InitStage::idle||result.error!=InitError::none||context_.clockStarted)return false;
+        context_.hal.cv=actualCut;return true;
+    }
     bool enableRadio(){
         if(result.stage!=InitStage::idle||!check(&context_))return false;result.stage=InitStage::radio;
         if(!stopped()||!equals(&context_,0x1e0,0xe0,0xe0))return false;

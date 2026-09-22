@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#pragma once
+#include <IOKit/network/IOEthernetController.h>
+#include <IOKit/pci/IOPCIDevice.h>
+#include <IOKit/IOCommandGate.h>
+#include <IOKit/IOTimerEventSource.h>
+#include "MacFirmwareCommands.hpp"
+#include "StationController.hpp"
+#include "StationIoCore.hpp"
+struct ieee80211com;
+class IOEthernetInterface;
+namespace rtl8852be { namespace network {
+struct MacBootIdentity {
+    uint64_t epoch{}; // New real firmware/RX incarnation, not an operation counter.
+    station::Interface interface{};
+    struct Channel { uint8_t number{}; bool fiveGhz{},passive{}; } channels[64]{};
+    size_t channelCount{};
+};
+class MacNetworkBootSink {
+public:
+    virtual void stationActionComplete(station::Token,station::Action,bool)=0;
+    virtual void bootFailed(const char *reason)=0;
+    virtual ~MacNetworkBootSink()=default;
+};
+// Required real hardware implementation. There is deliberately no success stub.
+// All methods except allocate/destructor run on the controller's workloop gate.
+class MacNetworkBootService {
+public:
+    // Allocate/prepare download DMA outside the gate; no network DMA published yet.
+    virtual bool allocate(IOPCIDevice&,IOMemoryMap&,IOWorkLoop&)=0;
+    // Power + MAC + firmware download. Return with firmware alive, host DMA idle,
+    // bus master disabled and the 9 runtime ring registers reset to zero.
+    virtual bool prepare(MacBootIdentity&)=0;
+    // Runtime MSI and CH12 are now alive; perform asynchronous RFK/BT setup.
+    virtual bool start(NativeFirmwareCommands&,MacNetworkBootSink&)=0;
+    virtual bool service(uint64_t nowUs)=0;
+    virtual bool ready()const=0;
+    // Never recursively invoke sink in beginAction. Completion is deferred to service/C2H.
+    virtual bool beginAction(const station::ActionRequest&,const MacProtocolPeer&)=0;
+    virtual bool setTraffic(station::Traffic)=0;
+    virtual bool txInfo(const TxLease&,TxInfo&,unsigned &runtimeRing)=0;
+    // Actual tuned channel and most recent decoded PHY RSSI; false drops data only,
+    // and MUST NOT prevent C2H processing during bootstrap.
+    virtual bool rxInfo(uint8_t &channel,int &rssi)=0;
+    virtual int phyReport(const RxPacket&)=0;
+    virtual int notification(const FirmwareEvent&)=0;
+    // Called after runtime IRQ/DMA stop attempt. Must silence CPU/RF; return false
+    // if download/hardware resources must remain retained. Must cancel callbacks.
+    virtual bool stop()=0;
+    virtual ~MacNetworkBootService()=default;
+};
+} }
+class R16NetworkController : public IOEthernetController {
+    OSDeclareDefaultStructors(R16NetworkController)
+    struct State; State *state_{};
+    IOWorkLoop *loop_{};IOCommandGate *gate_{};IOTimerEventSource *timer_{};
+    IOPCIDevice *pci_{};IOMemoryMap *bar_{};IOEthernetInterface *interface_{};
+    bool providerOpened_{},providerRetained_{},superStarted_{},retainedFault_{};
+    static IOReturn startGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn stopGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn enableGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn outputGated(OSObject*,void*,void*,void*,void*);
+    static void timer(OSObject*,IOTimerEventSource*);
+    void releaseResources();
+protected:
+    // Override in the hardware personality. Null causes a visible start failure.
+    virtual rtl8852be::network::MacNetworkBootService *createBootService(){return nullptr;}
+public:
+    bool start(IOService*) override;
+    void stop(IOService*) override;
+    void free() override;
+    bool createWorkLoop() override;
+    IOWorkLoop *getWorkLoop() const override;
+    bool configureInterface(IONetworkInterface*) override;
+    IOReturn getHardwareAddress(IOEthernetAddress*) override;
+    IOReturn selectMedium(const IONetworkMedium*) override;
+    IOReturn getPacketFilters(const OSSymbol*,UInt32*) const override;
+    IOReturn enable(IONetworkInterface*) override;
+    IOReturn disable(IONetworkInterface*) override;
+    UInt32 outputPacket(mbuf_t,void*) override;
+    bool setLinkStatus(UInt32,const IONetworkMedium * = nullptr,UInt64 = 0,OSData * = nullptr) override;
+};
+

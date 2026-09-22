@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>local.rtl8852be.network</string>
+  <key>CFBundleExecutable</key><string>RTL8852BENetwork</string>
+  <key>CFBundleName</key><string>RTL8852BE experimental network driver</string>
+  <key>CFBundlePackageType</key><string>KEXT</string>
+  <key>CFBundleVersion</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>OSBundleRequired</key><string>Network-Root</string>
+  <key>OSBundleLibraries</key><dict>
+    <key>com.apple.kpi.bsd</key><string>20.0.0</string>
+    <key>com.apple.kpi.iokit</key><string>20.0.0</string>
+    <key>com.apple.kpi.libkern</key><string>20.0.0</string>
+    <key>com.apple.kpi.mach</key><string>20.0.0</string>
+    <key>com.apple.iokit.IOPCIFamily</key><string>2.9</string>
+    <key>com.apple.iokit.IONetworkingFamily</key><string>3.0.0</string>
+  </dict>
+  <key>IOKitPersonalities</key><dict>
+    <key>RTL8852BE-R16-Network</key><dict>
+      <key>CFBundleIdentifier</key><string>local.rtl8852be.network</string>
+      <key>IOClass</key><string>R16RTL8852BE</string>
+      <key>IOProviderClass</key><string>IOPCIDevice</string>
+      <key>IOPCIMatch</key><string>0xb85210ec</string>
+      <key>IOPCISecondaryMatch</key><string>0x54701a3b</string>
+      <key>IOPCIClassMatch</key><string>0x02800000&amp;0xffff0000</string>
+    </dict>
+  </dict>
+</dict></plist>

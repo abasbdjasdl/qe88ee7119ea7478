@@ -7,6 +7,14 @@ provides the native BAR2 / RF-access / shared-command-queue adapter. This is an
 initialization component; it does not implement the complete runtime Bluetooth
 policy engine or prove that the adapter works on this laptop.
 
+The native `MacRadioBoot` composition now explicitly selects `Board.wlanOnly`.
+That optional mode follows source `BTC_MODE_WL`: INIT INFO includes WL_ONLY
+bit 0; `_action_wl_only` programs ANT_WONLY (WL grant high, BT low, PLT_NONE)
+while retaining the source OFF_BT policy and its actual acknowledgement.
+Default standalone callers retain the original normal-mode WINIT behavior.
+See [mac-radio-boot.md](mac-radio-boot.md) for lifecycle binding, source version
+conversion, scan handling and the explicit lack of concurrent Bluetooth support.
+
 The reference is Realtek `rtw89` commit
 `d1fced1b8a741dc9f92b47c69489c24385945f6e`, BSD-3-Clause option. Source files are
 unchanged at that commit. Relevant SHA-256 values:

@@ -43,6 +43,8 @@ struct Device {
 };
 bool run(Device &d,m::InitResult &result){m::MacInitialization<Device> init(d);bool ok=init.enableRadio()&&init.enableSystem()&&init.initializeDmac()&&init.initializeCmac()&&init.finishTrx();result=init.result;return ok;}
 int main(){
+    {Device x;m::MacInitialization<Device> init(x);assert(!init.configureCut(2));assert(init.configureCut(0));
+        assert(init.enableRadio());assert(!init.configureCut(1));}
     Device d;m::InitResult result;const bool success=run(d,result);
     if(!success)fprintf(stderr,"MAC failure stage=%u error=%u address=%x expected=%x actual=%x operations=%u\n",unsigned(result.stage),unsigned(result.error),result.address,result.expected,result.actual,d.operations);
     assert(success);const auto operations=d.operations;

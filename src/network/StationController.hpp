@@ -63,7 +63,9 @@ template<class Backend> class Controller {
     uint64_t sequenceUsed_[4]{},serial_{},lastNow_{},deadline_{},scanDeadline_{};
     bool clockStarted_{},waitingAction_{},waitingCommand_{},roleCreated_{},
          authenticated_{},scanCancelled_{},disconnectRequested_{};
-    static constexpr uint64_t actionTimeout=2000000,authenticationTimeout=10000000;
+    // Hardware actions include TX drain plus a bounded multi-phase radio tune.
+    // Individual firmware DONE ACKs retain the tighter independent deadline.
+    static constexpr uint64_t actionTimeout=12000000,commandTimeout=2000000,authenticationTimeout=10000000;
     bool fail(Error error){
         if(state_==State::faulted)return false;
         error_=error;state_=State::faulted;waitingAction_=waitingCommand_=false;
@@ -122,7 +124,7 @@ template<class Backend> class Controller {
         if(!encoded)return fail(Error::backend);
         pendingToken_=token();if(state_==State::faulted)return false;
         pendingSequence_=sequence;waitingCommand_=true;state_=state;
-        if(!arm(actionTimeout))return false;
+        if(!arm(commandTimeout))return false;
         return io_.publishH2c(bytes,length,pendingToken_)||fail(Error::backend);
     }
     bool beginDisconnect(){

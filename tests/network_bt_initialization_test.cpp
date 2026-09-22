@@ -148,6 +148,12 @@ static unsigned success(){
     return f.io.ops;
 }
 static void variants(){
+    Fixture wlan;assert(wlan.init.begin({0x001d1d00,1,1,true,true}));
+    for(unsigned k=0;k<5;++k)assert(wlan.ackLast()==b::EventResult::consumed);
+    assert(wlan.io.commands[2].data[11]==3); // FW WL_ONLY|WL_INITOK, not normal mode
+    assert((wlan.io.lte[0x38]&b::grantMask)==b::calibrationGrants);
+    assert(wlan.io.get(b::priorityRegister,2)==0x100&&wlan.policy.offTable==0xe5555555);
+    assert(wlan.shadow.valid&&wlan.policy.valid&&wlan.init.result.policyAcknowledged);
     Fixture dedicated;assert(dedicated.begin(2));for(unsigned k=0;k<5;++k)assert(dedicated.ackLast()==b::EventResult::consumed);
     assert(dedicated.io.lut[0]==0x5df&&dedicated.io.lut[0x10000]==0x5df&&dedicated.io.lut[0x10002]==0x5ff);
     Fixture btOff;btOff.io.scoreboard=0;assert(btOff.run());assert((btOff.io.lte[0x38]&b::grantMask)==b::calibrationGrants);

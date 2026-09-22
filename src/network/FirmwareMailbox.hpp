@@ -47,7 +47,10 @@ template<class Io> class Mailbox {
             if(!read8(address,v))return false;++result.polls;
             if(v>1)return fail(MailError::io,address,v);
             if(previous_<start)return fail(MailError::clock,address);
-            if(v==wanted)return true;if(previous_-start>=timeout)break;
+            // MMIO itself may consume the remaining budget. A late ready bit
+            // must not turn a timed-out transaction into success.
+            if(previous_-start>timeout)break;
+            if(v==wanted)return true;if(previous_-start==timeout)break;
             if(!delay(step))return false;
         }
         return fail(MailError::timeout,address);
@@ -125,6 +128,13 @@ public:
     // Owner explicitly retrieves pending responses, e.g. startup PHY_CAP. No
     // request is sent and no pending response is silently discarded on exchange.
     bool receivePending(){if(!start())return false;ActiveGuard guard{active_};return receive();}
+    // Absolute scheduler update for the station owner. Does not consume or
+    // overwrite a pauseScheduler()/resumeScheduler() owner's saved mask.
+    // A nested pause lease must be released by that owner before using this API.
+    bool setSchedulerMask(uint16_t value){
+        if(paused_)return false;
+        if(!start())return false;ActiveGuard guard{active_};return setScheduler(value);
+    }
     bool pauseScheduler(){
         if(paused_||!start())return false;ActiveGuard guard{active_};uint16_t old=0;
         if(!read16(schedulerTx,old)||!setScheduler(0))return false;

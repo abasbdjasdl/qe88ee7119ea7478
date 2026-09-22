@@ -43,6 +43,7 @@ template<class D> class PciDownload {
         for(unsigned i=0;i<timeout/50+1;++i){
             const auto now=d.nowUs();if(now<begin)return failed(2);if(now-begin>=timeout)return failed(1);
             v=d.read32(a);++result.polls;if(invalid(v))return failed(3);
+            const auto after=d.nowUs();if(after<now)return failed(2);if(after-begin>=timeout)return failed(1);
             if((v&mask)==expected)return true;d.pauseUs(50);
         }return failed(4);
     }

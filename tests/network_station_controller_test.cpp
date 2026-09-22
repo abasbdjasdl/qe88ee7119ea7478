@@ -109,6 +109,11 @@ static void acknowledgments(){
     assert(connect(d,b,31));assert(!same(t,d.associationToken()));assert(!d.authorizePort(t,38));
 }
 static void epochsAndTimeouts(){
+    // Hardware action may include draining prior DMA and a full RFK tune;
+    // passing the old 2s limit does not invent completion/readiness.
+    {Backend b;Device d(b);assert(d.restart(1,0)&&d.start(interface(),1));
+     assert(d.tick(2000001)&&d.tick(12000000)&&b.commands.empty());
+     assert(!d.tick(12000001)&&d.requiresRecovery()&&b.commands.empty());}
     {Backend b;Device d(b);b.resetProven=false;assert(!d.restart(1,0));b.resetProven=true;assert(boot(d,b));
      assert(!d.restart(1,6));assert(!d.restart(2,6));b.expectedEpoch=2;assert(d.restart(2,6));}
     {Backend b;Device d(b);b.reuseSequence=true;assert(d.restart(1,0)&&d.start(interface(),1)&&finish(d,b,2));

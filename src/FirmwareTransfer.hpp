@@ -46,6 +46,8 @@ TransferResult transfer(Backend &b,const Packets &packets){
             const auto elapsed=previous-begin;
             if(previous<begin||elapsed>=400000){r.status=TransferStatus::timeout;return false;}
             r.lastControl=b.readControl();++r.polls;
+            if(!check())return false;
+            if(previous<begin||previous-begin>=400000){r.status=TransferStatus::timeout;return false;}
             const auto error=controlError(r.lastControl);
             if(error!=TransferStatus::notRun){r.status=error;return false;}
             if(path&&((r.lastControl>>5)&7)==7){r.status=TransferStatus::staleReady;return false;}
@@ -90,6 +92,8 @@ TransferResult transfer(Backend &b,const Packets &packets){
             if(!check())break;
             if(previous<begin||previous-begin>=400000){r.status=TransferStatus::timeout;break;}
             r.lastIndex=b.readIndex();++r.polls;
+            if(!check())break;
+            if(previous<begin||previous-begin>=400000){r.status=TransferStatus::timeout;break;}
             const auto host=r.lastIndex&0xfff,hw=(r.lastIndex>>16)&0xfff;
             if(r.lastIndex==0xffffffff||r.lastIndex==0xdeadbeef||host!=packets.count()||hw>packets.count()){
                 r.status=TransferStatus::indexInvalid;break;
