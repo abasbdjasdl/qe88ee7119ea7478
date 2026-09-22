@@ -21,7 +21,7 @@ bool R16PciInterrupts::attach(IOPCIDevice *device,IOWorkLoop *loop,int index){
     if((device->configRead16(kIOPCIConfigCommand)&6)!=2)goto failed;
     return true;
 failed:
-    if(timer_){timer_->release();timer_=nullptr;}
+    if(timer_){if(timerAdded_)loop_->removeEventSource(timer_);timer_->release();timer_=nullptr;}
     if(irq_){if(irqAdded_)loop_->removeEventSource(irq_);irq_->release();irq_=nullptr;}
     device->setBusMasterEnable(false);
     irqAdded_=false;loop_->release();loop_=nullptr;return false;
