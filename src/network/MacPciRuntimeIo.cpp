@@ -13,25 +13,29 @@ MacPciRuntimeIo::MacPciRuntimeIo(IOPCIDevice *d,IOMemoryMap *m){
 }
 bool MacPciRuntimeIo::range(uint32_t a,size_t n)const{return valid()&&a<=mapping_->getLength()&&n<=mapping_->getLength()-a;}
 uint16_t MacPciRuntimeIo::command(){return valid()?device_->configRead16(kIOPCIConfigCommand):0xffff;}
+bool MacPciRuntimeIo::memoryEnabled(bool requireMaster){
+    const auto cmd=command();const unsigned mask=requireMaster?6u:2u;
+    return cmd!=0xffff&&(cmd&mask)==mask;
+}
 bool MacPciRuntimeIo::writeCommand(uint16_t v){
     const auto old=command();if(old==0xffff||!(v&2)||((old^v)&~0x404u))return false;
     device_->configWrite16(kIOPCIConfigCommand,v);return command()==v;
 }
 uint16_t MacPciRuntimeIo::read16(uint32_t a){
-    if((a&1)||!range(a,2)||(command()&2)==0)return 0xffff;
-    return OSReadLittleInt16(reinterpret_cast<const volatile void *>(mapping_->getVirtualAddress()),a);
+    if((a&1)||!range(a,2)||!memoryEnabled())return 0xffff;
+    const auto v=OSReadLittleInt16(reinterpret_cast<const volatile void *>(mapping_->getVirtualAddress()),a);barrier();return v;
 }
 uint32_t MacPciRuntimeIo::read32(uint32_t a){
-    if((a&3)||!range(a,4)||(command()&2)==0)return 0xffffffff;
+    if((a&3)||!range(a,4)||!memoryEnabled())return 0xffffffff;
     const auto v=OSReadLittleInt32(reinterpret_cast<const volatile void *>(mapping_->getVirtualAddress()),a);barrier();return v;
 }
 bool MacPciRuntimeIo::write16(uint32_t a,uint16_t v){
-    if(!range(a,2)||(command()&6)!=6||v>=64)return false;
+    if(!range(a,2)||!memoryEnabled(true)||v>=64)return false;
     bool allowed=false;for(const auto &r:ringRegisters)if(a==r.index)allowed=true;if(!allowed)return false;
     OSWriteLittleInt16(reinterpret_cast<volatile void *>(mapping_->getVirtualAddress()),a,v);barrier();return true;
 }
 bool MacPciRuntimeIo::write32(uint32_t a,uint32_t v){
-    if(!range(a,4)||(command()&2)==0)return false;
+    if(!range(a,4)||!memoryEnabled())return false;
     bool allowed=false;
     for(unsigned i=0;i<3;++i){
         if(a==irqMasks[i])allowed=v==0||v==irqEnabled[i];

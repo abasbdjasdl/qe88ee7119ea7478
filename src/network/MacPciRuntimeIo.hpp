@@ -8,6 +8,7 @@ namespace rtl8852be { namespace network {
 class MacPciRuntimeIo {
     IOPCIDevice *device_{};IOMemoryMap *mapping_{};
     bool range(uint32_t offset,size_t bytes)const;
+    bool memoryEnabled(bool requireMaster=false);
 public:
     MacPciRuntimeIo(IOPCIDevice *,IOMemoryMap *);
     bool valid()const{return device_&&mapping_;}

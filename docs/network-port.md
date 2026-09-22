@@ -79,6 +79,10 @@ recovery must build a fresh epoch after stopping and draining the old one.
 
 `MacPciRuntimeIo` supplies real, bounded BAR2/config accesses. Its writes are
 limited to IRQ masks/observed W1C status, DMA control bits and host doorbells.
+It rejects an all-one PCI Command read before MMIO, even though that value has
+both MEM and bus-master bits set. The native adapter regression test executes
+the actual source and checks that device loss cannot produce a BAR access;
+16-bit reads now have the same ordering barrier as 32-bit reads.
 `R16PciInterrupts` attaches a verified MSI event source to the controller
 workloop. There is no primary-interrupt driver filter. Deferred handling masks
 chip interrupts, acknowledges only observed enabled causes, drains bounded

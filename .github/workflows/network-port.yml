@@ -54,6 +54,8 @@ jobs:
           ./build/network_rfk_native_test | tee build/network-stack/rfk-native-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_runtime_test.cpp -o build/network_runtime_test
           ./build/network_runtime_test | tee build/network-stack/runtime-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_runtime_native_test.cpp -o build/network_runtime_native_test
+          ./build/network_runtime_native_test | tee build/network-stack/runtime-native-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_irq_fakes tests/network_interrupts_test.cpp -o build/network_interrupts_test
           ./build/network_interrupts_test | tee build/network-stack/interrupt-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_queue_service_test.cpp -o build/network_queue_service_test
