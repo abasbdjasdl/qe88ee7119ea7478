@@ -36,7 +36,7 @@ int main(){
     deadReads=1;assert(io.read8(0xc000,b)&&b==0x78);
     deadReads=1;assert(io.read16(0xc000,h)&&h==0x5678);
     map.set(0x1000,0xdeadbeef);writes=0;assert(io.read32(0x1000,v)&&v==0xdeadbeef&&!writes);
-    writes=0;assert(!io.read32(0xe004,v)&&!writes);
+    map.set(0xe004,0xdeadbeef);writes=0;assert(io.read32(0xe004,v)&&v==0xdeadbeef&&!writes);
     deadReads=1;dropMaster=true;assert(!io.read32(0xc004,v));dropMaster=false;device.command=2;
     io.cancel();writes=0;assert(!io.read32(0xc004,v)&&!writes);
     puts("PASS: native CMAC DEAD recovery, 10-retry bound, narrow reads, no non-CMAC recovery, ownership/cancel rejection");

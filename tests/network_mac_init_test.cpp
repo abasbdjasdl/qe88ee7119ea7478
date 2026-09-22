@@ -69,6 +69,9 @@ int main(){
         assert(result.polls<2100);if(mode==3||mode==4)assert(result.address==m::R_AX_RESPBA_CAM_CTRL);
     }
     for(auto v:{0xffffffffu,0xdeadbeefu}){Device f;f.put(m::R_AX_CMAC_FUNC_EN,v,4);assert(!run(f,result)&&result.error==m::InitError::read);}
+    // The CMAC recovery path intentionally writes ALLCKEN (all ones). It is
+    // valid for this clock register, but not a general invalid-read exemption.
+    {Device f;f.put(m::R_AX_CK_EN,0xffffffff,4);assert(run(f,result));}
     {Device f;f.cancel=true;assert(!run(f,result)&&!f.operations);}
     {Device f;f.cmd=6;assert(!run(f,result)&&!f.operations);}
     {Device f;m::MacInitialization<Device> init(f);assert(!init.enableSystem()&&!init.initializeDmac()&&!init.initializeCmac()&&!init.finishTrx()&&!f.operations);
