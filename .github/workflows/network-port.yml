@@ -52,6 +52,8 @@ jobs:
           git diff --exit-code -- src/network/Rtw8852bMacConstants.hpp src/network/Rtw8852bMacFunctions.inc src/network/mac-reference-provenance.json
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_mac_init_test.cpp -o build/network_mac_init_test
           ./build/network_mac_init_test | tee build/network-stack/mac-init-tests.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/network_rfk_fakes tests/network_mac_init_native_test.cpp -o build/network_mac_init_native_test
+          ./build/network_mac_init_native_test | tee build/network-stack/mac-init-native-tests.txt
           python3 tools/import_device_power_reference.py build-rtw89
           git diff --exit-code -- src/network/Rtw8852bDevicePowerConstants.hpp src/network/Rtw8852bDevicePowerFunctions.inc src/network/device-power-reference-provenance.json
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_device_power_test.cpp -o build/network_device_power_test

@@ -9,6 +9,7 @@ namespace rtl8852be { namespace macinit {
 class MacInitializationIo {
     IOPCIDevice *device_{};IOMemoryMap *mapping_{};bool cancelled_{};
     bool accessible(uint32_t,size_t,bool);
+    bool readCmac(uint32_t,unsigned,uint32_t &);
     static void barrier();
 public:
     MacInitializationIo(IOPCIDevice *,IOMemoryMap *);

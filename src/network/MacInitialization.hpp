@@ -56,7 +56,7 @@ template<class D> class MacInitialization {
         ++d->result.reads;if(!initAddress(a)||!d->io.read16(a,v))fail(d,InitError::read,a);d->lastAddress=a;d->lastValue=v;return v;}
     static u32 rtw89_read32(Context *d,u32 a){u32 v=0;if(!check(d))return 0;
         ++d->result.reads;if(!initAddress(a)||!d->io.read32(a,v)||
-            (v==0xffffffff&&a!=R_AX_DMAC_ERR_IMR&&a!=R_AX_CMAC_ERR_IMR)||v==0xdeadbeef){
+            (v==0xffffffff&&a!=R_AX_DMAC_ERR_IMR&&a!=R_AX_CMAC_ERR_IMR&&a!=R_AX_CK_EN)||v==0xdeadbeef){
             fail(d,InitError::read,a,0,v);}
         d->lastAddress=a;d->lastValue=v;return v;}
     static void rtw89_write8(Context *d,u32 a,u8 v){if(!check(d))return;++d->result.writes;
