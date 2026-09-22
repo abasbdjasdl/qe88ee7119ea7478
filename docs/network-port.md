@@ -524,6 +524,14 @@ inside a 50 ms sleep, inside an indirect RF poll and after an MMIO write. The
 coordinator still needs a native adapter, binding to that callback and physical
 reset recovery.
 
+RFK initial RCK/DACK/RXDCK and channel RXDCK/IQK now have separate callable
+phases. This permits the controller to return to the workloop for policy ACKs
+between algorithms. Each consumes its own pre-acquired lease; they do not wait
+for ACKs inside a synchronous call. Tests enforce one admission per call,
+ordered phases, fresh phase budgets across simulated ACK delays, same-channel
+and one-use DC results, and identical final register writes to the convenience
+synchronous wrappers. The asynchronous owner itself is still required.
+
 The [station controller](station-controller.md) implements asynchronous role,
 join, scan, association and disconnect ordering. Real firmware ACKs and backend
 completion tokens are mandatory. CMAC/CAM actions, net80211 authentication and

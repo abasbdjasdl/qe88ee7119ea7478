@@ -176,7 +176,7 @@ template<class Backend> class Initialization {
 public:
     Result result{};
 private:
-    Context context_;
+    Context context_;Channel rxDcChannel_{};bool preparedRxDc_{};
     void setChannel(Channel c){
         context_.channel={static_cast<rtw89_band>(c.band),static_cast<rtw89_bandwidth>(c.width),c.center,
             c.band==0?RTW89_CH_2G:c.center<=64?RTW89_CH_5G_BAND_1:c.center<=144?RTW89_CH_5G_BAND_3:RTW89_CH_5G_BAND_4};
@@ -205,32 +205,53 @@ public:
         context_.calibrationConfigured=true;return true;
     }
     u8 dpdBackoff()const{return context_.dpk.dpk_gs[0];}
-    bool initialize(){
-        if(result.stage!=Stage::idle||!begin(Kind::rck,Stage::rck))return false;
+    // Each step consumes ONE pre-acquired calibration lease and returns to the
+    // controller so it can service C2H and asynchronously restore/acquire the
+    // next BT policy. Never wait for a workloop-delivered ACK inside begin/end.
+    bool initializeRck(){
+        if(result.stage!=Stage::idle||result.error!=Error::none)return false;
+        freshBudget();if(!begin(Kind::rck,Stage::rck))return false;
         _set_dpd_backoff(&context_,RTW89_PHY_0);
         for(u8 path=0;path<2&&check(&context_);++path)_rck(&context_,path);
-        result.rckReady=end(Kind::rck);if(!result.rckReady)return false;
-        if(!begin(Kind::dack,Stage::dack))return false;
+        result.rckReady=end(Kind::rck);return result.rckReady;
+    }
+    bool initializeDack(){
+        if(result.stage!=Stage::rck||!result.rckReady||result.error!=Error::none)return false;
+        freshBudget();if(!begin(Kind::dack,Stage::dack))return false;
         _dac_cal(&context_,false);
         result.dackReady=end(Kind::dack)&&context_.dack.dack_done;
         // Upstream records completion even after timeout; never expose that as valid.
         if(!result.dackReady){context_.dack.dack_done=false;return false;}
-        if(!begin(Kind::rxDc,Stage::rxDc))return false;
+        return true;
+    }
+    bool initializeRxDc(){
+        if(result.stage!=Stage::dack||!result.dackReady||result.error!=Error::none)return false;
+        freshBudget();if(!begin(Kind::rxDc,Stage::rxDc))return false;
         _wait_rx_mode(&context_,RF_AB);_rx_dck(&context_,RTW89_PHY_0);
         result.rxDcReady=end(Kind::rxDc);if(!result.rxDcReady)return false;
         result.stage=Stage::complete;return true;
     }
-    bool calibrateIq(Channel channel){
+    // Convenience for synchronous/test backends. Native asynchronous owners use
+    // the individual steps above and the channel steps below across ACK events.
+    bool initialize(){return initializeRck()&&initializeDack()&&initializeRxDc();}
+    bool calibrateRxDc(Channel channel){
         if(result.stage!=Stage::complete||result.error!=Error::none||result.scanActive||!result.rxDcReady||!validChannel(channel))return false;
-        result.iqReady=false;result.tssiReady=false;result.dpkReady=false;
+        result.iqReady=false;result.tssiReady=false;result.dpkReady=false;preparedRxDc_=false;
         setChannel(channel);
-        context_.restoreFailed[0]=context_.restoreFailed[1]=false;context_.started=false;
-        context_.operationBase=result.operations;
+        freshBudget();
         // RXDCK must run on every newly programmed channel, not just at boot.
         result.rxDcReady=false;
         if(!begin(Kind::rxDc,Stage::rxDc))return false;
         _wait_rx_mode(&context_,RF_AB);_rx_dck(&context_,RTW89_PHY_0);
         result.rxDcReady=end(Kind::rxDc);if(!result.rxDcReady)return false;
+        rxDcChannel_=channel;preparedRxDc_=true;result.stage=Stage::complete;return true;
+    }
+    bool calibrateIqOnly(Channel channel){
+        if(result.stage!=Stage::complete||result.error!=Error::none||result.scanActive||
+           !preparedRxDc_||!result.rxDcReady||!sameChannel(channel,rxDcChannel_))return false;
+        // Consume once: a later IQK (including after scan) needs fresh RXDCK.
+        preparedRxDc_=false;context_.restoreFailed[0]=context_.restoreFailed[1]=false;
+        freshBudget();
         if(!begin(Kind::iqk,Stage::iqk))return false;
         _wait_rx_mode(&context_,RF_AB);_iqk_init(&context_);_iqk(&context_,RTW89_PHY_0,false);
         if(check(&context_))for(unsigned p=0;p<2;++p){const auto &q=context_.iqk;
@@ -240,6 +261,7 @@ public:
         if(!end(Kind::iqk))return false;
         result.iqChannel=channel;result.iqReady=true;result.stage=Stage::complete;return true;
     }
+    bool calibrateIq(Channel channel){return calibrateRxDc(channel)&&calibrateIqOnly(channel);}
     bool calibrateTssi(){
         if(result.stage!=Stage::complete||result.error!=Error::none||result.scanActive||!result.iqReady||!context_.calibrationConfigured)return false;
         result.tssiReady=false;result.dpkReady=false;context_.started=false;context_.operationBase=result.operations;

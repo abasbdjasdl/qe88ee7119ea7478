@@ -74,6 +74,16 @@ SHA-256 of the exact source files inspected:
    synchronous `CalibrationControl.begin` must consume this pre-acquired ready
    lease. It must not block the workloop waiting for a C2H callback scheduled on
    the same workloop. Use async phases around the synchronous RFK component.
+   `Initialization` exposes `initializeRck()`, `initializeDack()` and
+   `initializeRxDc()` as separate calls. Channel calibration likewise exposes
+   `calibrateRxDc(channel)` then `calibrateIqOnly(channel)`; TSSI and DPK already
+   have separate calls. Return to the workloop between them to handle real
+   policy restore/acquire ACKs. The convenience `initialize()`/`calibrateIq()`
+   wrappers are for synchronous/test backends and cannot perform asynchronous
+   arbitration in the middle of their call stacks. The channel DC result is
+   consumed once and IQK rejects a mismatching channel. Each synchronous phase
+   gets its own bounded algorithm budget; time waiting between phases belongs
+   to the controller's ACK/action deadline, not an expired previous phase.
 8. Call `oneshot(phyPath, true/false)` around the actual per-path one-shots;
    STOP must match START's packed path map. Upstream's oneshot notification is
    local state bookkeeping, not an independent hardware ACK. Accordingly this

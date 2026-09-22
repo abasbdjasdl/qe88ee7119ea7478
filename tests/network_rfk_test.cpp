@@ -97,6 +97,30 @@ struct Backend {
     bool drain(){assert(active);return ++drains!=failDrain;}
 };
 bool run(Backend &b,r::Result &result){r::Initialization<Backend> cal(b,1);bool ok=cal.initialize();result=cal.result;return ok;}
+void testAsynchronousSteps(){
+    struct AdmittedBackend:Backend {
+        bool admitted{};r::Kind expected{};
+        void admit(r::Kind k){assert(!active&&!admitted);expected=k;admitted=true;clock+=3000000;}
+        bool begin(r::Kind k){assert(admitted&&expected==k);admitted=false;return Backend::begin(k);}
+    } b;
+    r::Initialization<AdmittedBackend> c(b,1);const r::Channel home{1,2,42};
+    assert(!c.initializeDack()&&!c.initializeRxDc()&&!c.calibrateIqOnly(home)&&!b.begins);
+    b.admit(r::Kind::rck);assert(c.initializeRck()&&!b.active&&!b.admitted&&b.begins==1&&b.ends==1);
+    assert(!c.initializeRck()&&!c.initializeRxDc()&&b.begins==1);
+    b.admit(r::Kind::dack);assert(c.initializeDack()&&!b.active&&!b.admitted&&b.begins==2&&b.ends==2);
+    b.admit(r::Kind::rxDc);assert(c.initializeRxDc()&&!b.active&&!b.admitted&&b.begins==3&&b.ends==3);
+    assert(c.result.stage==r::Stage::complete&&!c.calibrateIqOnly(home));
+    b.admit(r::Kind::rxDc);assert(c.calibrateRxDc(home)&&!c.result.iqReady&&!b.active&&b.begins==4);
+    // A successful DC measurement for one channel cannot authorize IQK for another.
+    assert(!c.calibrateIqOnly({0,0,6})&&b.begins==4);
+    b.admit(r::Kind::iqk);assert(c.calibrateIqOnly(home)&&c.result.iqReady&&!b.active&&b.begins==5&&b.ends==5);
+    assert(!c.calibrateIqOnly(home)&&b.begins==5); // consumed; requires a new RXDCK
+    Backend sync;r::Initialization<Backend> golden(sync,1);
+    assert(golden.initialize()&&golden.calibrateIq(home));
+    assert(b.bb==sync.bb&&b.mac==sync.mac&&b.rf[0]==sync.rf[0]&&b.rf[1]==sync.rf[1]);
+    assert(b.operations==sync.operations&&b.commands==sync.commands);
+    puts("PASS: independently admitted RFK stages return between leases, enforce order/channel/one-use DC result, and match synchronous hardware writes");
+}
 void testIq(){
     const r::Channel channels[]={{0,0,1},{0,0,14},{0,1,3},{0,1,11},{1,0,36},{1,0,177},{1,1,38},{1,1,175},{1,2,42},{1,2,171}};
     unsigned maxOps=0;
@@ -390,6 +414,7 @@ void testScan(){
     printf("PASS: scan RFK four thermal bands, measured/default alignment distinction, home IQK/DPK preservation, %u hop and %u restore I/O failures, cancellation/leases and repeated scans; not AP scanning\n",hopCount,finishCount);
 }
 int main(){
+    testAsynchronousSteps();
     // PAS reports arrive in 16-bit containers but contain signed 12-bit data.
     assert(r::sign_extend32(0xf001,11)==1&&r::sign_extend32(0xf7ff,11)==2047);
     assert(r::sign_extend32(0x8800,11)==-2048&&r::sign_extend32(0xffff,11)==-1);
