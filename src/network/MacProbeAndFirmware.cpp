@@ -59,12 +59,14 @@ bool MacProbeAndFirmware::fail(ProbeFirmwareError error){
         if(state_){
             state_->device.setProperty("R16ProbeStage",uint64_t(result_.failedStage),32);
             state_->device.setProperty("R16ProbeError",uint64_t(error),32);
+            // Zero-extended 64-bit OSNumbers keep uint32 MMIO values unsigned
+            // through ioreg/plutil; signed 32-bit values failed the collector whitelist.
             const auto &mac=state_->mac.result;
             state_->device.setProperty("R16MacStage",uint64_t(mac.stage),32);
             state_->device.setProperty("R16MacError",uint64_t(mac.error),32);
             state_->device.setProperty("R16MacAddress",uint64_t(mac.address),32);
-            state_->device.setProperty("R16MacExpected",uint64_t(mac.expected),32);
-            state_->device.setProperty("R16MacActual",uint64_t(mac.actual),32);
+            state_->device.setProperty("R16MacExpected",uint64_t(mac.expected),64);
+            state_->device.setProperty("R16MacActual",uint64_t(mac.actual),64);
             IOLog("RTL8852BE: probe MAC stage=%u error=%u address=0x%x wanted=0x%x actual=0x%x\n",
                 unsigned(mac.stage),unsigned(mac.error),mac.address,mac.expected,mac.actual);
             if(auto *cycle=state_->cycles[state_->currentCycle]){
@@ -74,13 +76,13 @@ bool MacProbeAndFirmware::fail(ProbeFirmwareError error){
                 state_->device.setProperty("R16PrepStage",uint64_t(prep.stage),32);
                 state_->device.setProperty("R16PrepError",uint64_t(prep.error),32);
                 state_->device.setProperty("R16PrepAddress",uint64_t(prep.address),32);
-                state_->device.setProperty("R16PrepWanted",uint64_t(prep.wanted),32);
-                state_->device.setProperty("R16PrepActual",uint64_t(prep.actual),32);
+                state_->device.setProperty("R16PrepWanted",uint64_t(prep.wanted),64);
+                state_->device.setProperty("R16PrepActual",uint64_t(prep.actual),64);
                 state_->device.setProperty("R16FwOperation",uint64_t(fw.operationStatus),32);
                 state_->device.setProperty("R16FwPhase",uint64_t(fw.phase),32);
                 state_->device.setProperty("R16FwFailedPhase",uint64_t(fw.failedPhase),32);
                 state_->device.setProperty("R16FwControl",uint64_t(fw.lastControl),32);
-                state_->device.setProperty("R16FwIndex",uint64_t(fw.lastIndex),32);
+                state_->device.setProperty("R16FwIndex",uint64_t(fw.lastIndex),64);
                 state_->device.setProperty("R16FwQuiesced",uint64_t(fw.quiesced),32);
                 state_->device.setProperty("R16FwReleased",uint64_t(fw.buffersReleased),32);
                 state_->device.setProperty("R16FwRetained",uint64_t(fw.retainBuffers),32);
@@ -89,15 +91,15 @@ bool MacProbeAndFirmware::fail(ProbeFirmwareError error){
                 state_->device.setProperty("R16ProbePciError",uint64_t(pci.error),32);
                 state_->device.setProperty("R16ProbePowerError",uint64_t(power.error),32);
                 state_->device.setProperty("R16ProbePowerAddress",uint64_t(power.address),32);
-                state_->device.setProperty("R16ProbePowerExpected",uint64_t(power.expected),32);
-                state_->device.setProperty("R16ProbePowerActual",uint64_t(power.actual),32);
+                state_->device.setProperty("R16ProbePowerExpected",uint64_t(power.expected),64);
+                state_->device.setProperty("R16ProbePowerActual",uint64_t(power.actual),64);
                 state_->device.setProperty("R16ProbePowerReads",uint64_t(power.reads),32);
                 state_->device.setProperty("R16ProbePowerWrites",uint64_t(power.writes),32);
                 state_->device.setProperty("R16ProbeDownloadStatus",uint64_t(fw.status),32);
                 state_->device.setProperty("R16ProbePollAddress",uint64_t(downloadPci.pollFailureAddress),32);
-                state_->device.setProperty("R16ProbePollMask",uint64_t(downloadPci.pollFailureMask),32);
-                state_->device.setProperty("R16ProbePollWanted",uint64_t(downloadPci.pollFailureExpected),32);
-                state_->device.setProperty("R16ProbePollActual",uint64_t(downloadPci.pollFailureActual),32);
+                state_->device.setProperty("R16ProbePollMask",uint64_t(downloadPci.pollFailureMask),64);
+                state_->device.setProperty("R16ProbePollWanted",uint64_t(downloadPci.pollFailureExpected),64);
+                state_->device.setProperty("R16ProbePollActual",uint64_t(downloadPci.pollFailureActual),64);
                 IOLog("RTL8852BE: probe cycle preparation stage=%u error=%u address=0x%x wanted=0x%x actual=0x%x "
                     "fw=%u operation=%u phase=%u failedPhase=%u lastControl=0x%x lastIndex=0x%x retained=%u "
                     "pciError=%u pciAddress=0x%x pciValue=0x%x powerError=%u powerAddress=0x%x\n",
