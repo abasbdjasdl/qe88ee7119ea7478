@@ -8,7 +8,16 @@
 
 class R16VMHarness final : public IOService {
     OSDeclareDefaultStructors(R16VMHarness);
+#ifdef R16_VM_START_PROBE
+    // Borrowed from the retained startup ledger. The provider and controller
+    // must expose the same native queue: its getThread() deliberately returns
+    // null in 24.4, so IONetworkController must not apply thread policy to it.
+    IOWorkLoop *sharedWorkQueue_{};
+#endif
 public:
+#ifdef R16_VM_START_PROBE
+    IOWorkLoop *getWorkLoop() const override { return sharedWorkQueue_; }
+#endif
     bool start(IOService *provider) override {
         unsigned enabled=0;
         if (!PE_parse_boot_argn("r16vmtest", &enabled, sizeof(enabled)))
@@ -44,6 +53,13 @@ public:
             IOLog("R16VM support prepared=%u phase=%u failure=%u\n",unsigned(prepared),unsigned(ledger->phase),unsigned(ledger->failure));
             bool started=false;
             if(prepared){
+                sharedWorkQueue_=ledger->workQueue;
+                const bool sameQueue=getWorkLoop()==controller->getWorkLoop();
+                IOLog("R16VM provider/controller same workqueue=%u\n",unsigned(sameQueue));
+                if(!sameQueue){
+                    IOLog("R16VM refusing base start: provider workqueue mismatch\n");
+                    return true; // Retained VM containment, never call unsafe base.
+                }
                 IOLog("R16VM base start begin\n");
                 started=r16_startup_enter_base(ledger);
                 IOLog("R16VM base start result=%u phase=%u failure=%u\n",unsigned(started),unsigned(ledger->phase),unsigned(ledger->failure));
