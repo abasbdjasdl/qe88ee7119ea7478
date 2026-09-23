@@ -242,3 +242,13 @@ even on partial failure. There is no station stop/free claim, packet-pool
 registration, fabricated MAC/SSID, hardware session or native-menu claim.
 This is a VM prerequisite experiment; physical deployment remains blocked
 until the accepted lifecycle and real-network tests pass.
+
+Stage 5 ran with `db5477e`, run `35839479499`, artifact `10740917019`:
+station init, attach and start all returned true. `infra-start.log/json`
+preserve the evidence. Role was not explicitly set; this is not a proved
+role-1 station, Skywalk registration or native Wi-Fi menu. Stage 6 sets role 1
+and interface ID 0 after init, reads role back, then attempts attach/start.
+KC helpers at `225c7ac`, `225fb8c` and `225c594` respectively own these private
+state accesses; the probe does not write instance offsets or use setter return
+values. Role 1 also enables native scan-manager creation during Infra start,
+which the preceding default-role experiment did not establish.
