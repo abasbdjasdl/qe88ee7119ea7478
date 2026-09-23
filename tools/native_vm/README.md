@@ -306,3 +306,25 @@ dispatch; the previous void declaration was incorrect. See
 `../native_abi/return-evidence.md` for caller and implementation evidence.
 Local full-table compilation and O0/O2 Infra audits passed for the correction;
 these checks do not demonstrate native Wi-Fi registration or radio operation.
+
+Stage 9 executed with `3de4979`, run `35842406903`, artifact `10742270399`.
+The real descriptor initializer returned true with both canaries intact:
+version 1, size 304, family 2, subfamily 0, MTU 1500. Station start, both pools
+and all three queue factories also succeeded in that boot. Preserved evidence
+is `outputs/R16-Native-VM/registration-description.log/json`, including binary
+and log hashes. This was descriptor initialization only; no interface
+registration, queue traffic, native menu or hardware operation was tested.
+
+Run `35842191207` failed because a newer local frontend was committed without
+its pending session-adapter headers. The subsequent VM commit isolated the
+MAC return correction against the previous cloud frontend; local session
+adapter work was retained. It did not remove checks or claim integration of
+those pending adapters.
+
+Stage 10 tests the address initialization order before role/id and attach/start.
+It uses the explicitly synthetic locally administered address
+`02:16:24:04:00:10` in the isolated VM only. After start it reads the actual
+native MAC agent through `getSelfMacAddr`; a mismatch prevents subsequent
+pool/queue/descriptor work. The address is not a physical RTL8852BE identity
+and no successful hardware programming is claimed. The MAC callback still
+returns NotReady, queues remain disabled, and registration is not attempted.

@@ -72,6 +72,24 @@ MacAddressAgent at `225eb0f`. Both declarations are corrected together. The
 existing private expansion must already exist before invoking this setter;
 its pointer is dereferenced before the MAC-agent null check.
 
+### Address initialization order (same pinned KC)
+
+`IO80211InfraInterface::init()` at `22cddaa` calls the no-argument Skywalk
+initializer, then allocates its separate expansion at object+0x118. The
+Skywalk `init(IOService*,ether_addr*)` overload at `225bd9e` calls `initIvars`
+even when the Skywalk expansion at +0x110 already exists. In that case
+`initIvars` zeros all 0xf0 bytes at `225b900..225b913`; it does not preserve
+an existing role, provider, logger or MAC-agent pointer. The overload copies
+six initial address bytes to expansion+0xe4 at `225be00..225be14`.
+
+Skywalk `start()` subsequently passes that initial address to
+`IO80211MacAddressAgent::withOptions` at `225c3df`. Consequently the MAC
+initializer must never be used as a post-start address setter. A candidate
+initialization sequence must finish address initialization before assigning
+role/id, attaching, or starting the interface, and verify the real agent's
+address after start. This is ordering evidence, not a tested initialization
+recipe or permission to write any private field directly.
+
 ## Return types not established; do not silently guess
 
 | Method / verified argument list | What the current evidence proves |

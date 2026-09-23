@@ -2635,7 +2635,7 @@
           "slot": 414,
           "signature": "init(IOService*, ether_addr*)",
           "return": "bool",
-          "return_evidence": "pinned-reference-return-unverified",
+          "return_evidence": "target-AL-success-225be38-failure-225be3d-return-225be40",
           "pure": false,
           "symbol": "__ZN23IO80211SkywalkInterface4initEP9IOServiceP10ether_addr"
         },

@@ -15,6 +15,9 @@ class R16VMHarness final : public IOService {
     IOSkywalkTxSubmissionQueue *txSubmission_{};
     IOSkywalkTxCompletionQueue *txCompletion_{};
     IOSkywalkRxCompletionQueue *rxCompletion_{};
+    // Synthetic locally administered address for ABI testing only. No radio
+    // exists in this VM; never use this value as the physical NIC identity.
+    ether_addr diagnosticAddress_{{0x02,0x16,0x24,0x04,0x00,0x10}};
     struct alignas(8) RegistrationProbe {
         unsigned long long before{0x71616e6765723136ULL};
         IOSkywalkEthernetInterface::RegistrationInfo info{};
@@ -74,7 +77,7 @@ public:
             return false;
 #ifdef R16_VM_START_PROBE
 #ifdef R16_VM_INFRA_PROBE
-        if(enabled<1||enabled>9)return false;
+        if(enabled<1||enabled>10)return false;
 #else
         if(enabled<1||enabled>4)return false;
 #endif
@@ -126,7 +129,15 @@ public:
                     const bool initializedStation=station&&station->init();
                     IOLog("R16VM station init result=%u\n",unsigned(initializedStation));
                     bool roleReady=initializedStation;
-                    if(initializedStation&&enabled>=6){
+                    if(initializedStation&&enabled>=10){
+                        // This overload resets the Skywalk expansion. Call only
+                        // before role/id, attach and start; Infra's separate
+                        // expansion has already been initialized by init().
+                        IOLog("R16VM diagnostic MAC init before attach/start begin\n");
+                        roleReady=station->IO80211SkywalkInterface::init(controller,&diagnosticAddress_);
+                        IOLog("R16VM diagnostic MAC init result=%u\n",unsigned(roleReady));
+                    }
+                    if(roleReady&&enabled>=6){
                         // Observed native station role; use family-owned setters,
                         // never write private expansion offsets. Ignore setters'
                         // legacy return declarations; read the actual role back.
@@ -140,7 +151,14 @@ public:
                     if(attached)IOLog("R16VM station start begin\n");
                     const bool stationStarted=attached&&station->start(controller);
                     IOLog("R16VM station start result=%u\n",unsigned(stationStarted));
-                    if(stationStarted&&enabled>=7){
+                    bool addressReady=stationStarted;
+                    if(stationStarted&&enabled>=10){
+                        const ether_addr observed=station->getSelfMacAddr();
+                        addressReady=memcmp(&observed,&diagnosticAddress_,sizeof(diagnosticAddress_))==0;
+                        IOLog("R16VM diagnostic MAC native agent readback=%u\n",unsigned(addressReady));
+                        setProperty("R16VMDiagnosticAddressMatched",addressReady);
+                    }
+                    if(addressReady&&enabled>=7){
                         // Type 1 is the exact-KC ordinary network-packet path.
                         // No DMA spec, offload, queue enable or registration.
                         IOLog("R16VM TX pool factory begin\n");
@@ -168,7 +186,7 @@ public:
                             }
                             setProperty("R16VMQueuesCreated",txSubmission_&&txCompletion_&&rxCompletion_);
                             IOLog("R16VM queue factory experiment finished; queues disabled, no packet transfer\n");
-                            if(txSubmission_&&txCompletion_&&rxCompletion_&&enabled==9){
+                            if(txSubmission_&&txCompletion_&&rxCompletion_&&enabled>=9){
                                 IOLog("R16VM registration description init begin\n");
                                 const bool infoReady=station->initRegistrationInfo(&registration_.info,1,sizeof(registration_.info));
                                 const bool bounds=registration_.before==0x71616e6765723136ULL&&registration_.after==0x6166746572313631ULL;
@@ -185,7 +203,8 @@ public:
                         }
                     }
                     // Keep even partially initialized station and all providers
-                    // alive. No fake MAC, SSID, pools or hardware are supplied.
+                    // alive. Stage 10 supplies only a labeled diagnostic MAC;
+                    // no SSIDs or hardware/network success are fabricated.
                     setProperty("R16VMStationStarted",stationStarted);
                     setProperty("R16VMNativeWiFiVerified",false);
                     IOLog("R16VM station retained; no registration, stop or networking verified\n");
