@@ -37,6 +37,8 @@ jobs:
           xcrun clang++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_wcl_scan_results_test.cpp -o build/native-contract/wcl-scan-results-test
           build/native-contract/wcl-scan-results-test | tee build/native-contract/wcl-scan-results-test-result.txt
           xcrun clang++ -target x86_64-apple-macos15.0 -std=c++17 -O2 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -Wframe-larger-than=512 -Werror -c tests/network_native_wcl_scan_results_kernel_compile.cpp -o build/native-contract/wcl-scan-results-kernel.o
+          xcrun clang++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_wcl_results_observer_test.cpp -o build/native-contract/wcl-results-observer-test
+          build/native-contract/wcl-results-observer-test | tee build/native-contract/wcl-results-observer-test-result.txt
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_scan_cache_test.cpp -o build/native-contract/scan-cache-test
           build/native-contract/scan-cache-test | tee build/native-contract/scan-cache-test-result.txt
           xcrun clang++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_scan_observation_test.cpp -o build/native-contract/scan-observation-test
@@ -61,6 +63,7 @@ jobs:
           python3 tools/native_abi/audit_startup_prototype.py build-itlwm MacKernelSDK build/native-contract/sequoia --out build/native-contract/startup
           python3 tools/native_abi/audit_infra_frontend.py build-itlwm MacKernelSDK build/native-contract/sequoia --out build/native-contract/infra
           python3 tools/native_abi/native_cpu_packet_bridge_test.py --out build/native-contract/cpu-packet-bridge
+          python3 tools/native_abi/audit_native_packet_port.py --out build/native-contract/packet-port
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: native-contract-${{ github.sha }}

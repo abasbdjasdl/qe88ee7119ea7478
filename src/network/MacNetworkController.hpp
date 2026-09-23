@@ -16,6 +16,7 @@
 struct ieee80211com;
 class IOEthernetInterface;
 namespace rtl8852be { namespace network {
+namespace nativewclresults {struct Frame;}
 // Pointer/key-free observation of the most recent successfully applied link
 // status. A native frontend polls from its own queue; this is not a callback or
 // a lossless association-event stream. revision==0 means no publication yet.
@@ -95,6 +96,7 @@ class R16NetworkController : public IOEthernetController {
     static IOReturn nativeScanGated(OSObject*,void*,void*,void*,void*);
     static IOReturn foregroundScanGated(OSObject*,void*,void*,void*,void*);
     static IOReturn wclScanGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn wclResultsGated(OSObject*,void*,void*,void*,void*);
     bool applyLinkStatus(UInt32,const IONetworkMedium*,UInt64,OSData*);
     static void timer(OSObject*,IOTimerEventSource*);
     void releaseResources();
@@ -169,6 +171,22 @@ public:
     IOReturn beginNativeWclScanRequest(const void *message,size_t length,
         bool exactKernelProfileVerified,
         rtl8852be::network::foregroundscan::Status&);
+    // Draft-only WCL result adapter for a future exact-KC IO80211 frontend.
+    // Calls use controlLock -> hardware gate and never post an Apple event.
+    // Arm requires the same completed/drained WCL foreground request token;
+    // reserve copies one bounded, validated draft into caller-owned storage.
+    // Frame::emissionReady stays false. Until a real verified event sender is
+    // integrated, accepted=true is explicitly Unsupported; accepted=false
+    // aborts the reservation. Retire explicitly abandons and closes any draft;
+    // a failed reserve leaves caller output contents unspecified.
+    IOReturn armNativeWclScanResults(rtl8852be::network::foregroundscan::Token,
+                                     bool exactKernelProfileVerified);
+    IOReturn reserveNativeWclScanResult(rtl8852be::network::foregroundscan::Token,
+                                       void *buffer,size_t capacity,
+                                       rtl8852be::network::nativewclresults::Frame&);
+    IOReturn commitNativeWclScanResult(
+        const rtl8852be::network::nativewclresults::Frame&,bool accepted);
+    IOReturn retireNativeWclScanResults(rtl8852be::network::foregroundscan::Token);
     IOReturn copyNativeForegroundScanStatus(rtl8852be::network::foregroundscan::Token,
                                            rtl8852be::network::foregroundscan::Status&);
     IOReturn cancelNativeForegroundScan(rtl8852be::network::foregroundscan::Token,

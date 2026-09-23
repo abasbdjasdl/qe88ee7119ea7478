@@ -9,6 +9,7 @@
 #include "NativeScanObservation.hpp"
 #include "NativeScanProbeTx.hpp"
 #include "NativeWclScanPlan.hpp"
+#include "NativeWclScanResults.hpp"
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -86,6 +87,10 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     void (*savedEvent)(ieee80211com*,int,void*){};
     nativescan::Observer *scanObservations{}; // ~300 KiB, heap only; optional.
     foregroundscan::Controller foregroundScan;
+    nativewclresults::Bridge *wclResults{}; // Optional gate-owned draft state.
+    nativewclscan::Request wclRequest{};
+    foregroundscan::Token wclRequestToken{};
+    bool wclRequestValid{};
     scanprobe::FrameOwner<ProbeOps> foregroundProbe;
     foregroundscan::Dwell foregroundProbeOperation{};
     TxCounters foregroundProbeBefore{};unsigned foregroundProbeRing{6};
@@ -163,14 +168,25 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         // Observation allocation failure must not alter existing connectivity.
         scanObservations=new nativescan::Observer;
     }
-    ~State(){delete scanObservations;delete events;delete boot;delete commands;delete transport;delete queues;}
+    ~State(){delete wclResults;delete scanObservations;delete events;delete boot;delete commands;delete transport;delete queues;}
     uint64_t now(){return runtimeIo.nowUs();}
     bool inGate(){return owner.loop_->inGate();}
+    void abortWclDraft(){
+        if(wclResults)wclResults->abort();
+        bzero(&wclRequest,sizeof(wclRequest));wclRequestValid=false;
+        // Keep wclRequestToken until the frontend retires an aborted draft.
+    }
+    void supersedeWclDraft(){
+        abortWclDraft();
+        if(wclResults)wclResults->retire();
+        wclRequestToken={};
+    }
     void fail(const char *reason){
         if(faulted)return;faulted=true;traffic=station::Traffic::none;enabled=false;
         // The station failure path never calls scanFinished. Do not reenter it
         // from this callback; a later proven shutdown releases the drain debt.
         foregroundScan.fail(foregroundscan::Reason::backend,now());
+        if(inGate())abortWclDraft();
         if(scanObservations&&inGate())scanObservations->cancel();
         authenticationEvents.disable();
         pendingSelection.clear();
@@ -270,6 +286,10 @@ struct R16NetworkController::State final : MacNetworkBootSink {
                 foregroundScan.fail(foregroundscan::Reason::observation,timestamp);
                 if(scanObservations)scanObservations->cancel();
             }
+            if(foregroundScan.status().phase==foregroundscan::Phase::failed||
+               foregroundScan.status().phase==foregroundscan::Phase::cancelled||
+               foregroundScan.status().phase==foregroundscan::Phase::timedOut||
+               foregroundScan.draining())abortWclDraft();
             // StationController clears its scanToken only AFTER this callback.
             // Starting the next scan here would reenter it and lose that token.
             foregroundCompletedThisPoll=true;return;
@@ -683,6 +703,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         pumpTx(); // Real preparation/doorbell, checked against this exact dwell.
     }
     void cancelForeground(foregroundscan::Reason reason,bool cancelStation){
+        abortWclDraft();
         if(!foregroundScan.active())return;
         const auto timestamp=now();
         foregroundScan.cancel(foregroundScan.token(),reason,timestamp);
@@ -705,6 +726,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(request.active&&!activeProbeChannel(target.number))return false;
         if(!station.scan(&request,1,now())){
             foregroundScan.fail(foregroundscan::Reason::backend,now());
+            abortWclDraft();
             if(scanObservations)scanObservations->cancel();return false;
         }
         const auto operation=station.scanToken();
@@ -777,6 +799,9 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         case foregroundscan::Admission::invalid:return kIOReturnBadArgument;
         case foregroundscan::Admission::accepted:break;
         }
+        // Admission replaces the scan-cache generation, even when later
+        // hardware startup fails. No old draft may survive this boundary.
+        supersedeWclDraft();
         if(!scanObservations->begin(identity.epoch,foregroundscan::observerMode,active,plan,count)){
             scanObservations->cancel();foregroundScan.fail(foregroundscan::Reason::observation,now());
             return kIOReturnError;
@@ -814,8 +839,19 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(parsed.status!=nativewclscan::Status::knownSubset)return kIOReturnUnsupported;
         foregroundscan::RequestedPlan plan{};
         const auto mapped=nativewclscanplan::map(parsed,decoded,plan);
-        if(mapped.status!=nativewclscanplan::Status::planned)return kIOReturnUnsupported;
-        return beginForeground(plan.active,out,&plan);
+        if(mapped.status!=nativewclscanplan::Status::planned){
+            bzero(&decoded,sizeof(decoded));return kIOReturnUnsupported;
+        }
+        // Optional native drafting must not consume boot memory or change the
+        // existing WPA2/Ethernet path when no WCL request was admitted.
+        if(!wclResults)wclResults=new nativewclresults::Bridge;
+        if(!wclResults){bzero(&decoded,sizeof(decoded));return kIOReturnNoMemory;}
+        const auto result=beginForeground(plan.active,out,&plan);
+        if(result==kIOReturnSuccess){
+            wclRequest=decoded;wclRequestToken=out.token;wclRequestValid=true;
+        }
+        bzero(&decoded,sizeof(decoded));
+        return result;
     }
     void advanceForeground(){
         if(!foregroundScan.active()||foregroundScan.draining()||foregroundCompletedThisPoll)return;
@@ -830,6 +866,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
                 foregroundscan::observerMode,foregroundScan.status().activeScan,timestamp)&&scanObservations->copySummary(snapshot);
             if(!complete||!foregroundScan.complete(snapshot.token,timestamp)){
                 foregroundScan.fail(foregroundscan::Reason::observation,timestamp);
+                abortWclDraft();
                 if(scanObservations)scanObservations->cancel();
             }
             return;
@@ -841,6 +878,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     void expireForegroundHardware(){
         // expired() may already be terminal between channels, so cleanup cannot
         // depend on active()==true. Preserve the previous completed snapshot.
+        abortWclDraft();
         if(scanObservations)scanObservations->cancel();
         if(foregroundScan.draining()){
             const auto operation=foregroundScan.operation();
@@ -1060,6 +1098,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(!faulted&&owner.timer_->setTimeoutMS(10)!=kIOReturnSuccess)fail("controller timer failed");
     }
     bool shutdown(){
+        abortWclDraft();
         cancelForeground(foregroundscan::Reason::shutdown,false);
         dropForegroundHostProbe();
         if(scanObservations)scanObservations->cancel();
@@ -1235,6 +1274,27 @@ struct WclScanRequest {
     const void *message;size_t length;bool profileVerified;
     foregroundscan::Status *output;
 };
+struct WclResultsRequest {
+    unsigned operation;foregroundscan::Token token{};
+    bool profileVerified{},accepted{};
+    void *buffer{};size_t capacity{};
+    nativewclresults::Frame frame{};
+    nativewclresults::Frame *output{};
+};
+IOReturn wclResultsCode(nativewclresults::Status status){
+    using nativewclresults::Status;
+    switch(status){
+    case Status::ready:case Status::frameReady:return kIOReturnSuccess;
+    case Status::busy:return kIOReturnBusy;
+    case Status::unsupportedProfile:return kIOReturnUnsupported;
+    case Status::stale:return kIOReturnNotFound;
+    case Status::invalidSnapshot:case Status::aborted:case Status::finished:
+        return kIOReturnNotReady;
+    case Status::invalidRequest:case Status::invalidEntry:
+    case Status::invalidBuffer:case Status::bufferTooSmall:return kIOReturnBadArgument;
+    }
+    return kIOReturnError;
+}
 struct LinkStatusRequest {
     UInt32 status;const IONetworkMedium *medium;UInt64 speed;OSData *data;bool applied{};
 };
@@ -1289,6 +1349,71 @@ IOReturn R16NetworkController::wclScanGated(OSObject *owner,void *argument,void*
     return state->beginWclScan(request.message,request.length,
                                request.profileVerified,*request.output);
 }
+IOReturn R16NetworkController::wclResultsGated(OSObject *owner,void *argument,void*,void*,void*){
+    if(!argument)return kIOReturnBadArgument;
+    auto &request=*static_cast<WclResultsRequest*>(argument);
+    auto *state=static_cast<R16NetworkController*>(owner)->state_;
+    if(!state||state->stopping||state->faulted||!state->scanObservations||!state->wclResults)
+        return kIOReturnNotReady;
+    if(!request.token.request||!foregroundscan::same(request.token,state->wclRequestToken))
+        return kIOReturnNotFound;
+    auto &bridge=*state->wclResults;
+    const auto &scan=state->foregroundScan.status();
+    const auto &store=state->scanObservations->completedStoreUnderGate();
+    switch(request.operation){
+    case 0:{
+        if(!request.profileVerified||!state->wclRequestValid)return kIOReturnUnsupported;
+        const auto status=bridge.begin(nativewclbeacon::TargetProfile::darwin24_4_0_d8b50fc2,
+            true,state->wclRequest,scan,store,request.buffer,request.capacity);
+        return wclResultsCode(status);
+    }
+    case 1:{
+        if(!state->wclRequestValid||!request.output)return kIOReturnNotReady;
+        // Frame and payload must not alias any mutable controller object. The
+        // bridge also checks the borrowed Store and foreground Status itself.
+        auto *controller=static_cast<R16NetworkController*>(owner);
+        const auto aliasesController=[&](const void *p,size_t n){
+            return nativewclbeacon::detail::overlaps(p,n,state,sizeof(*state))||
+                nativewclbeacon::detail::overlaps(p,n,controller,sizeof(*controller))||
+                nativewclbeacon::detail::overlaps(p,n,state->scanObservations,
+                                                 sizeof(*state->scanObservations))||
+                nativewclbeacon::detail::overlaps(p,n,state->wclResults,
+                                                 sizeof(*state->wclResults));
+        };
+        const auto writable=nativewclbeacon::detail::writableBytes(request.capacity);
+        if(aliasesController(request.output,sizeof(*request.output))||
+           (request.buffer&&aliasesController(request.buffer,writable)))
+            return kIOReturnBadArgument;
+        return wclResultsCode(bridge.reserve(scan,store,request.buffer,request.capacity,
+                                             *request.output));
+    }
+    case 2:{
+        // No IO80211 event sender has been proven. A caller cannot turn an
+        // offline draft into a purported native-menu delivery by asserting true.
+        // Check the exact reservation before aborting; an old ACK for the same
+        // scan token must not cancel a newer reserved frame.
+        const bool reserved=bridge.phase()==nativewclresults::Phase::reserved;
+        bridge.commit(request.frame,false,scan,store);
+        return reserved&&bridge.phase()==nativewclresults::Phase::aborted?
+            (request.accepted?kIOReturnUnsupported:kIOReturnSuccess):kIOReturnNotFound;
+    }
+    case 3:
+        if(bridge.phase()==nativewclresults::Phase::idle){
+            // A cancelled request can have no draft to retire. Clearing its
+            // orphaned token must still be possible without a later scan.
+            if(state->wclRequestValid&&state->foregroundScan.active())return kIOReturnBusy;
+        }else{
+            // Explicit abandonment of an undelivered draft is safe: no event
+            // sender exists, and a late commit remains token/phase rejected.
+            bridge.abort();
+            if(!bridge.retire())return kIOReturnBusy;
+        }
+        state->wclRequestToken={};state->wclRequestValid=false;
+        bzero(&state->wclRequest,sizeof(state->wclRequest));
+        return kIOReturnSuccess;
+    default:return kIOReturnBadArgument;
+    }
+}
 IOReturn R16NetworkController::beginNativeForegroundScan(bool active,foregroundscan::Status &output){
     memset(&output,0,sizeof(output));ForegroundScanRequest request{0,active,{},nullptr,&output};
     return runControlAction(foregroundScanGated,&request);
@@ -1317,6 +1442,42 @@ IOReturn R16NetworkController::beginNativeWclScanRequest(const void *message,siz
     bzero(copy,nativewclscan::messageBytes);
     IOFree(copy,nativewclscan::messageBytes);
     return result;
+}
+IOReturn R16NetworkController::armNativeWclScanResults(foregroundscan::Token token,
+    bool exactKernelProfileVerified){
+    if(!exactKernelProfileVerified)return kIOReturnUnsupported;
+    // The encoder's 2112-byte scratch belongs to this call, never the kernel
+    // stack, a WCL input allocation, or the observer's cache banks.
+    auto *scratch=static_cast<uint8_t*>(IOMalloc(nativewclbeacon::maxPayloadBytes));
+    if(!scratch)return kIOReturnNoMemory;
+    WclResultsRequest request{};request.operation=0;request.token=token;
+    request.profileVerified=true;request.buffer=scratch;
+    request.capacity=nativewclbeacon::maxPayloadBytes;
+    const auto result=runControlAction(wclResultsGated,&request);
+    bzero(scratch,nativewclbeacon::maxPayloadBytes);
+    IOFree(scratch,nativewclbeacon::maxPayloadBytes);
+    return result;
+}
+IOReturn R16NetworkController::reserveNativeWclScanResult(foregroundscan::Token token,
+    void *buffer,size_t capacity,nativewclresults::Frame &output){
+    // Preserve the bridge's alias checks: zeroing either caller allocation
+    // here would corrupt borrowed state before the gate can reject an alias.
+    // On failure the caller must disregard prior buffer/Frame contents.
+    if(buffer&&nativewclbeacon::detail::overlaps(
+        &output,sizeof(output),buffer,capacity?capacity:1))return kIOReturnBadArgument;
+    WclResultsRequest request{};request.operation=1;request.token=token;
+    request.buffer=buffer;request.capacity=capacity;request.output=&output;
+    return runControlAction(wclResultsGated,&request);
+}
+IOReturn R16NetworkController::commitNativeWclScanResult(
+    const nativewclresults::Frame &frame,bool accepted){
+    WclResultsRequest request{};request.operation=2;request.token=frame.request;
+    request.frame=frame;request.accepted=accepted;
+    return runControlAction(wclResultsGated,&request);
+}
+IOReturn R16NetworkController::retireNativeWclScanResults(foregroundscan::Token token){
+    WclResultsRequest request{};request.operation=3;request.token=token;
+    return runControlAction(wclResultsGated,&request);
 }
 IOReturn R16NetworkController::copyNativeForegroundScanStatus(foregroundscan::Token token,foregroundscan::Status &output){
     memset(&output,0,sizeof(output));ForegroundScanRequest request{1,false,token,nullptr,&output};

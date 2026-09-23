@@ -1,0 +1,41 @@
+{
+  "kernel_sha256": "d8b50fc25bbe4c9f6923a9344ae34e760e1c98b06b23513e4a73e494019865e1",
+  "scope": "Compile-only direct packet API references and pinned target slots; no virtual-layout declaration, symbol-set/link/load or owner-lifecycle approval",
+  "symbols": {
+    "__ZN15IOSkywalkPacket13setDataLengthEj": "0xffffff8002993604",
+    "__ZN15IOSkywalkPacket16prepareWithQueueEP20IOSkywalkPacketQueuejj": "0xffffff800297218e",
+    "__ZN15IOSkywalkPacket20setTransferDirectionEj": "0xffffff8002972462",
+    "__ZN25IOSkywalkPacketBufferPool14allocatePacketEjPP15IOSkywalkPacketj": "0xffffff800299307e",
+    "__ZN25IOSkywalkPacketBufferPool16deallocatePacketEP15IOSkywalkPacket": "0xffffff800299328a",
+    "__ZN26IOSkywalkRxCompletionQueue14enqueuePacketsEPKP15IOSkywalkPacketjj": "0xffffff80029948ce",
+    "__ZN26IOSkywalkTxCompletionQueue14enqueuePacketsEPKP15IOSkywalkPacketjj": "0xffffff8002994d14",
+    "__ZNK15IOSkywalkPacket13getBufferSizeEv": "0xffffff8002972070",
+    "__ZNK15IOSkywalkPacket13getDataLengthEv": "0xffffff8002972088",
+    "__ZNK15IOSkywalkPacket13getDataOffsetEv": "0xffffff8002993792",
+    "__ZNK15IOSkywalkPacket14getSourceQueueEv": "0xffffff8002972138",
+    "__ZNK15IOSkywalkPacket19getPacketBufferPoolEv": "0xffffff8002972066",
+    "__ZNK15IOSkywalkPacket20getPacketBufferCountEv": "0xffffff800297207e",
+    "__ZNK15IOSkywalkPacket20getTransferDirectionEv": "0xffffff800297246c",
+    "__ZNK15IOSkywalkPacket21getDataVirtualAddressEv": "0xffffff80029720d0"
+  },
+  "vtable_slots": [
+    {"vtable":"__ZTV15IOSkywalkPacket","address":"0xffffff800299d098","offset":296,"symbol":"__ZNK15IOSkywalkPacket20getPacketBufferCountEv"},
+    {"vtable":"__ZTV15IOSkywalkPacket","address":"0xffffff800299d098","offset":312,"symbol":"__ZN15IOSkywalkPacket13setDataLengthEj"},
+    {"vtable":"__ZTV15IOSkywalkPacket","address":"0xffffff800299d098","offset":320,"symbol":"__ZNK15IOSkywalkPacket13getDataLengthEv"},
+    {"vtable":"__ZTV15IOSkywalkPacket","address":"0xffffff800299d098","offset":336,"symbol":"__ZNK15IOSkywalkPacket13getDataOffsetEv"},
+    {"vtable":"__ZTV15IOSkywalkPacket","address":"0xffffff800299d098","offset":376,"symbol":"__ZNK15IOSkywalkPacket21getDataVirtualAddressEv"},
+    {"vtable":"__ZTV15IOSkywalkPacket","address":"0xffffff800299d098","offset":392,"symbol":"__ZN15IOSkywalkPacket16prepareWithQueueEP20IOSkywalkPacketQueuejj"},
+    {"vtable":"__ZTV25IOSkywalkPacketBufferPool","address":"0xffffff800299cd50","offset":304,"symbol":"__ZN25IOSkywalkPacketBufferPool14allocatePacketEjPP15IOSkywalkPacketj"},
+    {"vtable":"__ZTV25IOSkywalkPacketBufferPool","address":"0xffffff800299cd50","offset":320,"symbol":"__ZN25IOSkywalkPacketBufferPool16deallocatePacketEP15IOSkywalkPacket"},
+    {"vtable":"__ZTV26IOSkywalkRxCompletionQueue","address":"0xffffff80029a0408","offset":672,"symbol":"__ZN26IOSkywalkRxCompletionQueue14enqueuePacketsEPKP15IOSkywalkPacketjj"},
+    {"vtable":"__ZTV26IOSkywalkTxCompletionQueue","address":"0xffffff80029a2260","offset":672,"symbol":"__ZN26IOSkywalkTxCompletionQueue14enqueuePacketsEPKP15IOSkywalkPacketjj"}
+  ],
+  "return_evidence": {
+    "pool_allocate": "0xffffff8002993107 clears EAX; 0xffffff8002993116 and 0xffffff8002993120 put distinct full-width IOReturn failures into EAX",
+    "packet_set_length": "0xffffff800299361b returns 0xe00002c7 for multiple buffers; success tail-dispatches buffer setter",
+    "packet_prepare": "0xffffff800297218e forwards direction in EDX to buffer preparation at 0xffffff8002972206; 0xffffff8002972264 tail-dispatches packet prepare at virtual +0x190. IO80211NetworkPacket override at 0xffffff80022bfb1a likewise preserves the target return; AppleBCMWLANPCIeSkywalkPacket at 0xffffff80014d4dde tests full EAX status. Direction 2 matches the RX completion path at 0xffffff800297a644. setTransferDirection writes the separate u32 direction field at 0xffffff8002972466; prepareWithQueue itself does not write it",
+    "rx_enqueue": "0xffffff80029948e6 returns 0xe00002c2 for invalid arguments; 0xffffff8002994951 clears R12D on transfer",
+    "tx_completion_enqueue": "0xffffff8002994d36 returns 0xe00002c2 for invalid arguments; 0xffffff8002994da4 clears R12D on completion; 0xffffff8002994daf copies full R12D to EAX",
+    "deallocate": "0xffffff80029932cb null path returns without initializing EAX; probe deliberately ignores return width"
+  }
+}

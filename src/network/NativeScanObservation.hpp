@@ -147,5 +147,9 @@ public:
         const auto *channel=store_.completedChannel(channelIndex);if(!channel)return false;
         out=*channel;return true;
     }
+    // Controller-internal loan for the WCL draft bridge. The caller must hold
+    // this Observer's hardware gate for the entire bridge operation; no Store
+    // pointer/reference may escape into a frontend or survive a new pass.
+    const Store &completedStoreUnderGate()const{return store_;}
 };
 } } }
