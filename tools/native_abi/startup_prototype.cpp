@@ -39,10 +39,12 @@ public:static CCStream *withPipeAndName(CCPipe *,const char *,const CCStreamOpti
 class CCLogStream : public CCStream {public:static const OSMetaClass * const metaClass;};
 class CCDataStream : public CCStream {public:static const OSMetaClass * const metaClass;};
 enum CCStreamLogLevel {R16StartupUnusedLogLevel};
-class CCFaultReporter {
+// Exact KC constructors call IOService::C2 at 31b0bc1 and OSObject::C2
+// at 22489e7 respectively. Only inherited public lifetime slots are used.
+class CCFaultReporter : public IOService {
 public:static CCFaultReporter *withStreamWorkloop(CCDataStream *,IOWorkLoop *);
 };
-class IO80211FaultReporter {
+class IO80211FaultReporter : public OSObject {
 public:static IO80211FaultReporter *allocWithParams(CCFaultReporter *);
 };
 #include <Airport/Apple80211.h>

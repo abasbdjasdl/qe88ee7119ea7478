@@ -15,7 +15,7 @@ p.add_argument('--root',type=Path,required=True)
 p.add_argument('--bundle',type=Path,required=True)
 p.add_argument('--python-packages',type=Path,required=True)
 p.add_argument('--name',default='OpenCore-probe-init')
-p.add_argument('--stage',type=int,choices=[1,2,3],default=1)
+p.add_argument('--stage',type=int,choices=[1,2,3,4],default=1)
 a=p.parse_args();root=a.root.resolve();bundle=a.bundle.resolve()
 if '/' in a.name or '\\' in a.name or not a.name.startswith('OpenCore-probe-'):
     raise ValueError('Choose a local VM image name')

@@ -187,3 +187,21 @@ This establishes the base calls returning in the exact Recovery kernel. The
 experiment still retains support objects and does not call controller free
 after base stop, publish a station or test the physical network. Complete
 cleanup, provider removal and native Wi-Fi remain unproved.
+
+`inject_probe.py --stage 3` additionally tests synchronous IOService termination
+of the ledger's data stream, log stream, data pipe and log pipe, in that order,
+only after successful base start and returned base stop. Each object's owning
+reference stays retained so its inactive/provider state can be inspected after
+termination. An incomplete result prevents subsequent termination attempts.
+This probes the framework-managed stop/detach path rather than mixing manual
+stop, stopPipe and detach. It does not release reporters, native timers,
+PostOffice, the queue or the controller, and cannot establish complete cleanup.
+
+Stage 3 executed with `7ac2f6f`, Actions run `35838395808`, artifact
+`10740540617`. Both base calls succeeded. All four termination calls returned
+true, with inactive=true and getProvider()==null afterwards. Their observed
+retain counts changed from 5 to 2; no owned references were released. The
+serial log continued into Recovery userspace. `cc-termination.log` and
+`cc-termination.json` preserve the bounded result and exact binary/log hashes.
+Remaining references and native PostOffice/TimerFactory/RNGAgent lifetimes
+still require ownership analysis; this result must not be called safe unload.
