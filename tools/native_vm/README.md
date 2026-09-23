@@ -268,3 +268,18 @@ Packet type 1 selects the ordinary network-packet path in the pinned KC.
 only the audited static factory and 32-byte option record. No pool is sized,
 subclassed, manually allocated, field-accessed or released. Failure preserves
 the owner and acquired pool; queues/registration/networking remain absent.
+
+Stage 7 executed with `0ef3fe2`, run `35840364758`, artifact `10740813928`.
+Both pool factories returned non-null following successful role-1 station
+start. `pool-creation.log/json` preserve the exact binary/log hashes and
+configuration. This confirms pool construction, not packet allocation,
+queue creation/enable, registration, native menu discovery or data transfer.
+
+Stage 8 creates TX submission, TX completion and RX completion queues using
+the real pools, capacity 16, IDs 0/1/2 and zero factory options. All three
+factory signatures are compared against the pinned registration symbol record
+by the builder. Objects and callback owner/context remain retained; a failed
+factory prevents later calls. No queue is enabled, registered or released.
+Closed diagnostic callbacks consume/produce zero packets and log unexpected
+invocation. They are deliberately not a functional radio data path and must
+be replaced by the existing packet/session bridge before network testing.

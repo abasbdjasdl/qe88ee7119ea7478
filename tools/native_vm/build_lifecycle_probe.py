@@ -72,7 +72,7 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
 '''
     source = '// GENERATED VM-ONLY EXPERIMENT. Not a deployable network driver.\n' + source
     if args.infra_probe:
-        source='#include "skywalk_pool.hpp"\n'+source
+        source='#include "skywalk_queues.hpp"\n'+source
         infra=(ROOT/'tools/native_abi/infra_frontend_prototype.cpp').read_text()
         infra=infra.split('// Borrowed registration arguments only.')[0]
         infra=infra.replace('R16InfraFrontend','R16VMInfra')
@@ -147,6 +147,14 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
                   identity_imports=sorted(identity_imports),
                   loaded=False, native_wifi_verified=False)
     report['infra_probe']=args.infra_probe
+    if args.infra_probe:
+        helper_spec=json.loads((ROOT/'tools/native_abi/registration-symbols.json').read_text())
+        required_names={'poolWithName','txSimpleWithPool','rxSimpleWithPool','txCompletionWithPool'}
+        required={h['symbol'] for h in helper_spec['helpers'] if h['name'] in required_names}
+        imports=set(audit.object_undefined(objects[0]))
+        if len(required)!=4 or not required<=imports:
+            raise RuntimeError(('Missing exact native factory references',sorted(required-imports)))
+        report['native_factory_imports']=sorted(required)
     if not args.zig:
         if sys.platform != 'darwin':
             raise RuntimeError('Link step requires macOS toolchain')

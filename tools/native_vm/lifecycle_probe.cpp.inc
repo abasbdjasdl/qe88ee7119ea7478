@@ -12,6 +12,21 @@ class R16VMHarness final : public IOService {
     // Retained experiment owner storage; never temporary option/context buffers.
     IOSkywalkPacketBufferPool::PoolOptions poolOptions_{32,32,2048,1,4096,0,nullptr};
     IOSkywalkPacketBufferPool *txPool_{},*rxPool_{};
+    IOSkywalkTxSubmissionQueue *txSubmission_{};
+    IOSkywalkTxCompletionQueue *txCompletion_{};
+    IOSkywalkRxCompletionQueue *rxCompletion_{};
+    // Factory tests do not enable queues or bind a radio session. Refuse all
+    // traffic without consuming packets or writing unowned completion slots.
+    // Invocation is unexpected and is diagnostic evidence, not a successful TX.
+    static unsigned closedTx(OSObject*,IOSkywalkTxSubmissionQueue*,IOSkywalkPacket *const*,unsigned count,void*) {
+        IOLog("R16VM disabled TX callback offered=%u consumed=0\n",count);return 0;
+    }
+    static unsigned closedCompletion(OSObject*,IOSkywalkTxCompletionQueue*,IOSkywalkPacket**,unsigned count,void*) {
+        IOLog("R16VM disabled TX completion callback capacity=%u produced=0\n",count);return 0;
+    }
+    static unsigned closedRx(OSObject*,IOSkywalkRxCompletionQueue*,IOSkywalkPacket**,unsigned count,void*) {
+        IOLog("R16VM disabled RX callback capacity=%u produced=0\n",count);return 0;
+    }
 #endif
 #ifdef R16_VM_START_PROBE
     // Borrowed from the retained startup ledger. The provider and controller
@@ -50,7 +65,7 @@ public:
             return false;
 #ifdef R16_VM_START_PROBE
 #ifdef R16_VM_INFRA_PROBE
-        if(enabled<1||enabled>7)return false;
+        if(enabled<1||enabled>8)return false;
 #else
         if(enabled<1||enabled>4)return false;
 #endif
@@ -116,7 +131,7 @@ public:
                     if(attached)IOLog("R16VM station start begin\n");
                     const bool stationStarted=attached&&station->start(controller);
                     IOLog("R16VM station start result=%u\n",unsigned(stationStarted));
-                    if(stationStarted&&enabled==7){
+                    if(stationStarted&&enabled>=7){
                         // Type 1 is the exact-KC ordinary network-packet path.
                         // No DMA spec, offload, queue enable or registration.
                         IOLog("R16VM TX pool factory begin\n");
@@ -128,6 +143,23 @@ public:
                             IOLog("R16VM RX pool result=%u\n",unsigned(rxPool_!=nullptr));
                         }
                         setProperty("R16VMPoolsCreated",txPool_&&rxPool_);
+                        if(txPool_&&rxPool_&&enabled==8){
+                            IOLog("R16VM TX submission factory begin\n");
+                            txSubmission_=IOSkywalkTxSubmissionQueue::withPool(txPool_,16,0,this,closedTx,this,0);
+                            IOLog("R16VM TX submission result=%u\n",unsigned(txSubmission_!=nullptr));
+                            if(txSubmission_){
+                                IOLog("R16VM TX completion factory begin\n");
+                                txCompletion_=IOSkywalkTxCompletionQueue::withPool(txPool_,16,1,this,closedCompletion,this,0);
+                                IOLog("R16VM TX completion result=%u\n",unsigned(txCompletion_!=nullptr));
+                            }
+                            if(txCompletion_){
+                                IOLog("R16VM RX completion factory begin\n");
+                                rxCompletion_=IOSkywalkRxCompletionQueue::withPool(rxPool_,16,2,this,closedRx,this,0);
+                                IOLog("R16VM RX completion result=%u\n",unsigned(rxCompletion_!=nullptr));
+                            }
+                            setProperty("R16VMQueuesCreated",txSubmission_&&txCompletion_&&rxCompletion_);
+                            IOLog("R16VM queue factory experiment finished; queues disabled, no packet transfer\n");
+                        }
                     }
                     // Keep even partially initialized station and all providers
                     // alive. No fake MAC, SSID, pools or hardware are supplied.
