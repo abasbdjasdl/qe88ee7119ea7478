@@ -19,7 +19,7 @@ def command(*argv, timeout=90):
     completed = subprocess.run(argv, text=True, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, timeout=timeout)
     return {'argv': list(argv), 'status': completed.returncode,
-            'output': completed.stdout[-24000:]}
+            'output': completed.stdout}
 
 
 def main():
@@ -69,6 +69,10 @@ def main():
         report['undefined_symbols'] = command('xcrun', 'nm', '-uj', str(binary))
         report['kmutil_libraries'] = command('kmutil', 'libraries', '-p', str(bundle),
                                             timeout=120)
+        report['undefined_symbol_count'] = len(
+            report['undefined_symbols']['output'].splitlines())
+        report['library_resolution_complete_on_runner'] = (
+            report['kmutil_libraries']['status'] == 0)
     (out / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps({key: value['status'] for key, value in report.items()
                       if isinstance(value, dict) and 'status' in value}, indent=2))
