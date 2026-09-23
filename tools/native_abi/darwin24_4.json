@@ -2658,8 +2658,8 @@
         {
           "slot": 417,
           "signature": "setMacAddress(ether_addr&)",
-          "return": "void",
-          "return_evidence": "target-disassembly-correction",
+          "return": "IOReturn",
+          "return_evidence": "target-caller-EAX-225b219-and-implementation-EAX-1568034",
           "pure": true,
           "symbol": "___cxa_pure_virtual"
         },

@@ -48,6 +48,22 @@ argument types, const qualifiers, and named `IO80211FlowQueueHash` must also mat
 | Skywalk `IOReturn getLastTxTimeStamp(unsigned long long&)` | `2260806` returns `0xe00002c7`; reference parameter is `ERy`. |
 | Skywalk `IOReturn getLastRxTimeStamp(unsigned long long&)` | `2260812` returns `0xe00002c7`; reference parameter is `ERy`. |
 
+## MAC programming callback correction
+
+For the pinned 15.4.1 KC, Skywalk raw slot 417 (`setMacAddress(ether_addr&)`)
+returns `IOReturn`, not `void`. `IO80211MacAddressAgent::setMacAddress` dispatches
+through vptr+0xcf8 at `0xffffff800225b213`, tests EAX at `225b219`, and branches
+on failure at `225b21b` before updating its stored address. Independently,
+`AppleBCMWLANSkywalkInterface::setMacAddress` calls `setCurEtheraddr` at
+`1567fdf`, preserves its 32-bit status in R14D, and returns it in EAX at
+`1568034`. A void override leaves the caller's status undefined.
+
+The prototype now explicitly returns `kIOReturnNotReady` until a hardware
+programming callback is bound. Its member-pointer static assertion prevents a
+return-type regression. This correction does not establish the separately
+named `setHardwareAddress` return contract, nor prove address initialization,
+interface registration, or hardware programming works.
+
 ## Return types not established; do not silently guess
 
 | Method / verified argument list | What the current evidence proves |

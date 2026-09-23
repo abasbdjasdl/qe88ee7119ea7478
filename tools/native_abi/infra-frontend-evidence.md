@@ -59,18 +59,33 @@ overlay's existing return evidence, not inferred from mangled names alone.
 
 ## Scan callback and ownership boundary
 
-`setWCL_SCAN_REQ` receives a pointer with **no length**. A 5456-byte expected
-shape does not establish that the argument is readable, live, from the expected
-operation, or from this KC. The callback never dereferences that pointer. With
-no bound backend it returns `kIOReturnNotReady`; no trusted live adapter is
-implemented or bound in this prototype.
+The frontend now offers `bindSessionScan`/`retireSessionScan` using
+`native_session_scan_adapter.hpp`. Its submission calls the real
+`beginMacNetworkDecodedWclScan`, shared with the existing raw WCL entrypoint.
+That path retains the decoded request, BSS filter and radio token needed by
+the result draft bridge; the ordinary foreground scan entry alone does not.
+The adapter maps independent dispatch/radio epochs, forwards cancel/status to
+the shared session, and retires only matching terminal, drained operations.
+Cancellation admission never fabricates completion. Mismatched successful
+backend tokens quarantine the mapping. The typed callback reader is implemented
+in `native_session_scan_reader.hpp`, using the exact internal dispatch evidence
+in `native-wcl-dispatch-evidence.md`. No runtime owner binds this adapter yet.
 
-The missing `Backend::copyValidated` must prove the dispatch operation, exact
-readable length, target KC and source lifetime, and copy into the bridge's own
-5456-byte storage. It must also supply a trusted policy snapshot and independent
-dispatch identity. Filling these facts by assertion or memcpy of the raw
-callback argument would violate the interface contract. No raw user/kernel
-pointer may be passed straight to the decoder or production backend.
+`tests/network_native_session_scan_test.py` compiles this adapter's actual body
+with four substituted kernel entrypoints and the real foreground state machine.
+It covers running admission, preserved request values, duplicate/stale requests,
+gate failure, cancellation drain, completed scans and wrong-token quarantine.
+`native_session_scan_probe.cpp` separately compiles calls against the actual
+kernel-session declarations. Neither test demonstrates a radio scan, WCL event,
+native-menu receipt or safe IO80211 startup.
+
+`setWCL_SCAN_REQ` receives a pointer with **no length**. The new fixed-KC
+dispatcher audit establishes the synchronous 5456-byte internal WCL lane;
+size alone would not establish readability or lifetime. SessionScanReader may
+copy from that typed callback while the caller holds its buffer. This does not
+authorize arbitrary pointers or a userspace entry. With no bound backend the
+callback still returns `kIOReturnNotReady`. Runtime KC verification, owner
+lifetime and gate entry must be established before binding the reader.
 
 The owned bridge must be heap/IOKit-object storage, never a kernel-stack local.
 It decodes `NativeWclScan`, maps `NativeWclScanPlan`, and submits a small
@@ -141,7 +156,7 @@ that enabling them alone will make the menu work:
 | Area | Current prototype | Required real data/operation |
 | --- | --- | --- |
 | Native controller/interface construction | No allocation/start path; existing native base methods merely inherited | Proved controller callbacks and support objects, init/attach/start order, provider/service lifetime, controller-interface binding |
-| Station MAC | `setMacAddress` is void, so it poisons scan admission instead of claiming success | Validated hardware/current address, actual programming and framework/BSD address synchronization |
+| Station MAC | `setMacAddress` returns IOReturn, poisons scan admission and returns NotReady until a hardware backend is bound | Validated hardware/current address, actual programming and framework/BSD address synchronization |
 | Radio and channel description | `getCHANNEL` (467), `getOP_MODE` (471), `getSUPPORTED_CHANNELS` (473), `getHW_SUPPORTED_CHANNELS` (492), `getCOUNTRY_CHANNELS` (485), `getWCL_CHANNELS_INFO` (526) all Unsupported | Verified exact output layouts and actual hardware/regulatory channel, band, width and mode snapshots |
 | Power/capabilities/metrics | `getPOWERSAVE`, `getTXPOWER`, `getRSSI`, `getRATE`, HT/VHT getters and corresponding setters Unsupported | Implement only supported hardware features with validated data units and policy; never fill plausible constants |
 | Skywalk/BSD registration | Only three independent compile callsites | Real pool and queue owners, correct RegistrationInfo fields/flags and callback context, successful register result, BSD attachment and safe unwind |

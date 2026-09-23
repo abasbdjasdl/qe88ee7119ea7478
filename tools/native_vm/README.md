@@ -299,3 +299,10 @@ family/subfamily/MTU defaults. No private interface offsets are written and
 no default capability values are replaced with Broadcom-specific constants.
 It does not call registerInfraEthernetInterface: self-MAC initialization and
 functional callback binding remain prerequisites of usable registration.
+
+Before running stage 9, the cloned Infra MAC callback was corrected to return
+an explicit `IOReturn` failure. The pinned native MAC agent checks EAX after
+dispatch; the previous void declaration was incorrect. See
+`../native_abi/return-evidence.md` for caller and implementation evidence.
+Local full-table compilation and O0/O2 Infra audits passed for the correction;
+these checks do not demonstrate native Wi-Fi registration or radio operation.
