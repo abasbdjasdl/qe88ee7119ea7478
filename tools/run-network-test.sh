@@ -83,10 +83,18 @@ wait_elapsed=$(($(date +%s)-start))
 end=0
 # When packaged with this test image, exercise the real administrator control
 # endpoint in the same boot. The probe never joins/disconnects or dumps frames.
+# Staging must replace this marker with the verified helper's SHA256, then pin
+# the resulting worker's digest in the immutable recovery launcher.
+expected_control=NOT_PACKAGED
 if [ -x "$here/r16-wireless-control" ]; then
  phase probing_wireless_control
- bounded 10 "$here/r16-wireless-control" probe > "$ram/wireless-control-probe.txt" 2>&1
- printf 'probe_exit=%s\n' "$?" >> "$ram/wireless-control-probe.txt"
+ control_hash=$(bounded 3 /sbin/sha256 -q "$here/r16-wireless-control" 2>/dev/null)
+ if [ "${#expected_control}" -eq 64 ] && [ "$control_hash" = "$expected_control" ]; then
+  bounded 10 "$here/r16-wireless-control" probe > "$ram/wireless-control-probe.txt" 2>&1
+  printf 'probe_exit=%s\n' "$?" >> "$ram/wireless-control-probe.txt"
+ else
+  printf 'probe_exit=65\nreason=helper_not_packaged_or_digest_mismatch\n' > "$ram/wireless-control-probe.txt"
+ fi
 fi
 phase collecting_final_evidence
 # User authorized this bounded network experiment. HEAD is bound to the verified

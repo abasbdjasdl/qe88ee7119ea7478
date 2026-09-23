@@ -21,5 +21,8 @@ subprocess.run(['xcrun','clang++',*flags,'-I'+str(root/'src/network'),'-c',str(r
 (out/'adapter-main.cpp').write_text('#include <stdio.h>\nextern "C" int R16NativeAdapterTest();\nint main(){int r=R16NativeAdapterTest();printf("Native adapter test failure line: %d (0 means pass)\\n",r);return r?1:0;}\n')
 subprocess.run(['xcrun','clang++',str(out/'adapter-main.cpp'),str(out/'adapter-test.o'),'-o',str(out/'adapter-test')],check=True)
 subprocess.run([str(out/'adapter-test')],check=True)
-(out/'metadata.json').write_text(json.dumps({'scope':'Compiled declarations only; ABI compatibility and native UI functionality NOT established','upstream':subprocess.check_output(['git','-C',str(upstream),'rev-parse','HEAD'],text=True).strip(),'header_sha256':hashlib.sha256(header.read_bytes()).hexdigest(),'methods':[m for m,_ in methods]},indent=2))
+local_inputs=sorted((root/'src/network').glob('*.hpp'))+sorted((root/'tests').glob('network_native_*'))
+(out/'metadata.json').write_text(json.dumps({'scope':'Compiled declarations and offline byte-view tests only; ABI compatibility and native UI functionality NOT established','upstream':subprocess.check_output(['git','-C',str(upstream),'rev-parse','HEAD'],text=True).strip(),'header_sha256':hashlib.sha256(header.read_bytes()).hexdigest(),'methods':[m for m,_ in methods],
+    'port_revision':subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip(),
+    'port_inputs_sha256':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in local_inputs}},indent=2))
 print('Private header layout contract compiled; runtime comparison required.')

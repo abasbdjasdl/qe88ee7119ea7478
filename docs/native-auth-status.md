@@ -29,6 +29,13 @@ available. No new package was installed or reboot armed for this work.
   selection/disconnection backend and a single gated wireless snapshot per
   status reply. It does not register a framework interface or accept userspace
   pointers. Real-header adapter tests passed in run 35797077262.
+- Same-version WCL analysis established 5456-byte scan and 988-byte association
+  buffers on the pinned recovery kernel's internal dispatch path. These differ
+  from the old Apple association structure above. `NativeWclCandidates.hpp`
+  decodes only proven single-candidate fields from a caller-owned byte span;
+  unknown fields, credentials and mode enums are not reinterpreted. The decoder
+  is not wired to join or framework registration. See
+  [version-specific evidence](native-wcl-evidence.md).
 - `SaeSession` uses hostap's group-19 SAE H2E and hunting-and-pecking. Corrected
   an erroneous ordinary-SAE AKM selector requirement. Exchange, wrong password,
   modified confirmation and export-before-confirm rejection passed in macOS
@@ -38,6 +45,10 @@ available. No new package was installed or reboot armed for this work.
   Confirm retries increment the counter and recompute the authenticator, including
   the case where an AP has accepted but its response was lost. Anti-clogging
   tokens and actual management TX/state-machine ownership remain pending.
+  The complete SAE, OWE and new real-peer retry tests passed ASan/UBSan in
+  [run 35800453613](https://github.com/abasbdjasdl/qe88ee7119ea7478/actions/runs/35800453613).
+  The matching controller, event-queue tests and userspace probe compiled in
+  [run 35800453644](https://github.com/abasbdjasdl/qe88ee7119ea7478/actions/runs/35800453644).
 - `OweSession` uses hostap's ECDH/hash primitives and RFC 8110 key ordering and
   derivation. Group-19 peer agreement, PMKID, invalid group/length/point/reflection
   rejection passed with SAE in macOS ASan/UBSan run 35796953546. Derived keys
@@ -59,8 +70,11 @@ available. No new package was installed or reboot armed for this work.
    then test with real APs. No WPA3 or OWE hardware success is claimed.
 4. Integrate enterprise EAP/TLS/TTLS/PEAP and certificate verification/credential
    handling. These modes are not implemented by the new SAE/OWE components.
-5. Implement and validate 5 GHz radio/channel/calibration policy and broader
-   bandwidth. Current hardware policy remains 2.4 GHz channels 1–11, 20 MHz.
+5. Complete the production 5 GHz channel/power policy and validate this device's
+   calibration and live traffic. Geometry, tuning, power tables and RFK branches
+   already contain 5 GHz code; their model tests do not authorize channels or
+   establish hardware results. Current hardware policy remains 2.4 GHz channels
+   1–11, 20 MHz. Wider-bandwidth station traffic is still explicitly rejected.
 
 There is no defensible overall completion percentage. Offline peer tests do
 not substitute for interoperability, kernel ABI or hardware validation.

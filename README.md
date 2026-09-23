@@ -1,10 +1,23 @@
 # RTL8852BE experimental macOS driver
 
-This repository contains the earlier diagnostic service and a new integrated
-experimental network driver. Real Wi-Fi operation is not yet hardware-verified.
+This repository contains an experimental network driver and its earlier
+diagnostic services. The installed `120aae9` build has demonstrated association,
+DHCP and target-interface HTTPS on one 2.4 GHz WPA2-Personal/CCMP network.
+It exposes an Ethernet interface. Native macOS Wi-Fi registration, WPA3/OWE,
+enterprise authentication and 5 GHz operation remain unfinished.
 Target: x86-64 macOS, PCI 10ec:b852, subsystem 1a3b:5470.
 
-## Integrated networking candidate: 0.1.0 (not deployed)
+Current authentication work adds an administrator control connection, an
+observation-only authentication/EAPOL RX queue, and offline hostap-based SAE/OWE
+components. The SAE body state machine includes bounded retries and deadlines;
+it is not a completed radio authentication path. See
+[current native/auth status](docs/native-auth-status.md) and
+[authentication integration boundaries](docs/auth-integration.md).
+
+The sections below retain the history of early bring-up candidates. Their
+pending-hardware statements describe those versions, not the current baseline.
+
+## Initial integrated networking candidate: 0.1.0 (historical)
 
 `RTL8852BENetwork.kext` links the concrete PCI controller, persistent firmware
 boot, MAC/PHY/RFK initialization, DMA/MSI queues, station tables, scan/association
