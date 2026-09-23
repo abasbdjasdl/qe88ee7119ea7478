@@ -19,7 +19,7 @@ consumer, dispatch and message-length evidence. The existing
 `tools/build_native_contract.py` uses `__IO80211_TARGET=140400`; targeting
 `x86_64-apple-macos15.0` does not make those private declarations Sequoia-compatible.
 
-## Reuse the data path; add the native control/interface graph
+## Keep one hardware owner; add the native control and packet graph
 
 The pinned reference uses this graph:
 
@@ -39,18 +39,20 @@ the BSD interface is created through `IONetworkController::attachInterface`.
 to `prepareBSDInterface` and synchronizes the native interface name/unit/MAC.
 
 The RTL driver currently has only `R16NetworkController : IOEthernetController`
-and one `IOEthernetInterface`. The minimal structural change is a separately
-selected native build/profile with an IO80211Controller-derived controller,
-native infrastructure interface and BSD bridge, retaining the existing State,
-boot service, net80211 owner, PCI owner and DMA queues. Update the metaclass,
-base start/stop/free/configure calls, createInterface, native enable/disable
-overloads, work queue and media publication together. Adding another independent
-PCI-matching controller beside the existing owner is not this design.
+and one `IOEthernetInterface`. A separately selected native build/profile needs
+an IO80211Controller-derived controller and native infrastructure interface,
+retaining the existing State, boot service, net80211 owner, PCI owner and DMA
+queues. The pinned Sequoia KC additionally requires legitimate Skywalk pools,
+queues and packet callbacks for its native data interface; the old reference's
+provider spoof/private expansion writes are not a verified bridge. Update the
+metaclass, base start/stop/free/configure calls, native enable/disable overloads,
+work queue, media publication, packet conversion and completion together. Only
+one controller may own the PCI device.
 
 | Integration point | Existing implementation to preserve | Necessary native connection |
 | --- | --- | --- |
-| RX | `MacNetworkController.cpp::State::deliver` feeds `deliverRealtekRx`; net80211 decrypts/decapsulates into mbufs | Keep `ic.ic_if.iface` pointing at the **BSD IOEthernetInterface-compatible bridge**. Pinned `_mbuf.cpp::_if_input` calls its `inputPacket` and `flushInputQueue`. Never assign an IO80211InfraProtocol pointer there. |
-| TX | `outputPacket` -> `outputGated` -> `if_snd.queue->lockEnqueue` -> `pumpTx` | Route the native service's BSD output to this same entry point. Preserve one mbuf owner, free-on-drop semantics and `Traffic::authorized` gating. No second raw-802.11/Skywalk data path is required by the reference design. |
+| RX | `MacNetworkController.cpp::State::deliver` feeds `deliverRealtekRx`; net80211 decrypts/decapsulates into mbufs | Keep `ic.ic_if.iface` pointing at a legitimate BSD-compatible consumer until a bounded mbuf-to-Skywalk packet bridge is installed. The native RX queue requires real pool packets, completion and explicit failure ownership. Never assign an IO80211InfraProtocol pointer there. |
+| TX | `outputPacket` -> `outputGated` -> `if_snd.queue->lockEnqueue` -> `pumpTx` | A real Skywalk TX callback must transfer offered packets into the existing guarded frame path and report the exact consumed count, then complete or return every packet once. Preserve authorized-traffic gating and one hardware owner. |
 | Protocol owner | `attachProtocol`, one net80211 runtime/gate, `MacNetworkBootService` | Keep one owner and existing hardware-completion callbacks. Native requests translate into bounded commands to that owner. |
 | Link state | `State::poll` authorizes after hardware association, RUN and `ni_port_valid`; `setLinkStatus` also checks authorized traffic | Publish BSD and native link changes from a common transition helper, with generation and retained event data. Notify native link/running state and SSID/BSSID changes only through the verified target ABI. |
 | Join | `selectWirelessNetwork` -> `queueSelection` -> disconnect/drain -> `applyPendingSelection` -> `ieee80211_add_ess` | Decode the actual target request into `selection::Join`; return queued status, then emit real association/failure/authorized transitions. Preserve old-key/drain ordering. |
@@ -59,9 +61,12 @@ PCI-matching controller beside the existing owner is not this design.
 
 The reference's BSD bridge `getProvider()` override is explicitly described
 upstream as a hack, and its startup writes directly into two private
-`mExpansionData` registration pointers. These details cannot be transplanted
-without proving the matching Sequoia layout and lifetime rules. The same applies
-to the reference's `reportLinkStatus(3, 0x80)`/`(1, 0)` constants.
+`mExpansionData` registration pointers. The fixed KC's
+`IOSkywalkLegacyEthernet::start` safe-casts to a real Skywalk provider and reads
+Apple-owned private state, so that spoof is unsuitable here. The same applies
+to the reference's `reportLinkStatus(3, 0x80)`/`(1, 0)` constants. See the
+workspace `outputs/R16-Native-WiFi/native-datapath-findings.md` for the target
+packet/provisioning evidence.
 
 ## Link groundwork now present; native notifications still missing
 
@@ -111,12 +116,13 @@ WPA2 data link-up still comes from controlled-port authorization, never from
 
 The legacy startup poll begins a scan only when `enabled && credentials`.
 `beginNativeForegroundScan`, `copyNativeForegroundScanStatus` and
-`cancelNativeForegroundScan` now provide an independent, kernel-only passive
+`cancelNativeForegroundScan` now provide an independent, kernel-only foreground
 operation without provisioned credentials. Admission requires an enabled, idle,
 unconnected station in net80211 INIT, no legacy credentials/AUTO_JOIN, pending
-join or deferred work. Connected requests return Busy without disconnecting;
-active requests currently return Unsupported. No native framework callback
-calls these APIs yet, so this is not menu scanning.
+join or deferred work. Connected requests return Busy without disconnecting.
+Active requests are limited to the current 2.4 GHz/20 MHz channels 1..11 and
+reject a channel marked passive by either the boot policy or net80211. No native
+framework callback calls these APIs yet, so this is not menu scanning.
 
 The operation snapshots actual boot policy intersected with currently allowed
 net80211 channels, starts one real station scan per channel and waits for its
@@ -159,7 +165,7 @@ fence and exact epoch/generation/index checks. Cancellation retains the last
 complete snapshot; overflow/truncation or an incomplete channel plan cannot
 publish a new complete result. Entries are copied to caller-owned storage,
 without retaining node pointers. The observer serves both legacy scans and the
-new independent passive scheduler. It deliberately excludes background scans.
+new independent foreground scheduler. It deliberately excludes background scans.
 The unattended recovery collector also records count-only `R16NativeScan*`
 properties (observer availability, open pass and last complete token/count/channel
 count). Complete means a retained full pass exists, not a live WCL request
@@ -167,21 +173,28 @@ completed. These diagnostics contain no SSID/BSSID or raw IE data.
 
 The foreground scheduler's tests exercise the real StationController and Observer
 with simulated hardware completions, including stale tokens, all scan phases,
-cancel/timeout/failure, no probes or protocol autojoin, and old-cache retention.
-They are not real-radio or native-menu tests. `NativeScanProbe.hpp` separately
-encodes a wildcard SSID and existing legacy rate IEs for a future active path;
-it does not enqueue/transmit a frame. Reusing `ieee80211_send_mgmt(PROBE_REQ)`
-blindly would arm net80211's management timer, while its stock probe body reads
-`ic_des_essid`, which may still contain an earlier selection. Active scans need
-an independently owned node/frame and verified TX ownership without those effects.
+cancel/timeout/failure and old-cache retention. They are not real-radio or
+native-menu tests. `NativeScanProbe.hpp` encodes a wildcard SSID and existing
+legacy rate IEs. `NativeScanProbeTx.hpp` and the gated controller now queue that
+frame with a detached, separately owned node; they check the exact current dwell
+before hardware submission, require a matching TX completion and drain before
+publishing that channel, and release outstanding DMA references on the existing
+completion/shutdown path. The management timer and prior `ic_des_essid` are not
+used. A status-zero broadcast TX report proves local transmission completion,
+not an access-point acknowledgment or actual discovered networks.
 
 Exact-target WCL inspection establishes selector 1 as Active and 2 as Passive;
 capabilities do not rewrite ordinary selector 1 to Passive. The +4 private-MAC
 trigger has a legitimate no-op when the driver explicitly lacks that capability
-or the feature is disabled, but it is not an arbitrary flag to ignore. Normal
-non-ID requests also acquire flag 0x08; remaining policy/dwell fields still need
-admission semantics. Do not connect a default active request to the passive API
-and report success, or interpret payload timing values as the WCL watchdog.
+or the feature is disabled. `NativeWclScan.hpp` strictly decodes a bounded
+request subset with trusted channel-policy masks, preserving the flag 0x08
+request without expanding those masks. `beginNativePlannedForegroundScan` now
+accepts a copied ordered subset of 2.4 GHz channels and a 10..1000 ms dwell,
+rechecking every channel against the boot/net80211 policy under the gate. The
+original kernel entry point still defaults to 120 ms. No native WCL callback
+invokes the planned entry point yet; home timing, request ownership and terminal
+WCL events remain to be bound. A successful decode alone cannot start a scan or
+claim that the macOS menu sees it.
 
 `NativeWclBeacon.hpp` can produce an offline 64-byte metadata plus raw-IE draft
 from one such entry for the pinned KC. It revalidates bounds, names, channels

@@ -23,6 +23,19 @@ static bool zero(const void *p,size_t size){
 static const ns::Channel plan[]={{ns::Band::ghz2,1},{ns::Band::ghz2,6},{ns::Band::ghz2,11}};
 static fg::Readiness ready(){return {true,true,true,false,false,false,false};}
 
+static void plannedDwell(){
+    fg::Controller scan;fg::Status out;
+    CHECK(scan.begin(ready(),false,7,100,plan,2,9,out)==fg::Admission::invalid);
+    CHECK(zero(&out,sizeof(out))&&!scan.active());
+    CHECK(scan.begin(ready(),false,7,100,plan,2,1001,out)==fg::Admission::invalid);
+    CHECK(zero(&out,sizeof(out))&&!scan.active());
+    const ns::Channel selected[]={plan[2],plan[0]};
+    CHECK(scan.begin(ready(),false,7,100,selected,2,65,out)==fg::Admission::accepted);
+    CHECK(out.dwellMs==65&&out.plannedChannels==2);
+    ns::Channel first;CHECK(scan.next(first)&&ns::same(first,plan[2]));
+    CHECK(scan.cancel(out.token,fg::Reason::caller,101));
+}
+
 static void admission(){
     fg::Controller c;fg::Status out;
     for(unsigned reason=0;reason<7;++reason){
@@ -107,7 +120,8 @@ struct Harness {
     st::Controller<Harness> station{*this};
     std::vector<st::ActionRequest> actions;std::vector<std::array<uint8_t,12>> commands;
     uint64_t now{10};unsigned sequence{},probes{},authStarts{},callbacks{},faults{},launches{};
-    bool inCallback{},deferAdvance{},permitAuthentication{};st::Traffic traffic{st::Traffic::none};
+    bool inCallback{},deferAdvance{},permitAuthentication{},activeScan{},probeReportOk{true};
+    unsigned publishedProbes{};st::Token probeOperation{};st::Traffic traffic{st::Traffic::none};
     bool inGate(){return true;}
     bool setTraffic(st::Traffic value){traffic=value;return true;}
     bool reserveH2cSequence(uint8_t &out){out=uint8_t(sequence++);return true;}
@@ -116,14 +130,28 @@ struct Harness {
     }
     bool beginAction(const st::ActionRequest &action){CHECK(!inCallback);actions.push_back(action);return true;}
     bool beginAuthentication(st::Token,const st::Peer&){++authStarts;return permitAuthentication;}
-    bool sendProbe(st::Token,const st::Peer*,const st::ScanChannel&){++probes;return false;}
+    bool sendProbe(st::Token token,const st::Peer *peer,const st::ScanChannel &channel){
+        ++probes;CHECK(!peer&&channel.active&&traffic==st::Traffic::scanProbe);
+        CHECK(station.state()==st::State::scanningDwell&&station.canSendScanProbe(token,now));
+        return scan.requestProbe({token.epoch,token.operation},{ns::Band::ghz2,channel.channel.primary});
+    }
+    bool sendPending(){
+        const auto operation=scan.operation();ns::Channel channel;
+        if(!scan.pendingProbe(operation,channel)||
+           !station.canSendScanProbe({operation.epoch,operation.operation},now))return false;
+        CHECK(!inCallback&&traffic==st::Traffic::scanProbe);
+        CHECK(scan.submittedProbe(operation));probeOperation={operation.epoch,operation.operation};
+        ++publishedProbes;return true;
+    }
     bool cancelProtocol(st::Token){return true;}
     bool firmwareRestartVerified(uint64_t epoch){return epoch==1;}
     void recoveryRequired(st::Token,st::Error){++faults;scan.fail(fg::Reason::backend,now);observer->cancel();}
     void scanFinished(st::Token token,bool cancelled){
         inCallback=true;++callbacks;const unsigned submitted=launches;
         CHECK(scan.owns({token.epoch,token.operation}));
-        if(cancelled||scan.draining())observer->cancel();
+        const bool probeOk=!activeScan||(!cancelled&&!scan.draining()&&probeReportOk&&
+            st::same(probeOperation,token)&&scan.completedProbe({token.epoch,token.operation}));
+        if(cancelled||scan.draining()||!probeOk)observer->cancel();
         else CHECK(observer->channelFinished({token.epoch,token.operation},false));
         CHECK(scan.channelFinished({token.epoch,token.operation},cancelled,now));
         CHECK(st::same(station.scanToken(),token)); // it is cleared only after return
@@ -144,15 +172,16 @@ struct Harness {
     }
     bool launch(){
         CHECK(!inCallback);ns::Channel channel;if(!scan.next(channel))return false;
-        st::ScanChannel dwell{{uint8_t(channel.band==ns::Band::ghz5),0,channel.number,channel.number},fg::dwellMs,false};
+        st::ScanChannel dwell{{uint8_t(channel.band==ns::Band::ghz5),0,channel.number,channel.number},fg::dwellMs,activeScan};
         CHECK(station.scan(&dwell,1,++now));const auto token=station.scanToken();
         CHECK(scan.accepted({token.epoch,token.operation}));
-        CHECK(observer->channelAccepted(1,fg::observerMode,false,channel,{token.epoch,token.operation}));
+        CHECK(observer->channelAccepted(1,fg::observerMode,activeScan,channel,{token.epoch,token.operation}));
         ++launches;return true;
     }
-    fg::Token begin(size_t count=3){
-        fg::Status out;CHECK(scan.begin(ready(),false,1,++now,plan,count,out)==fg::Admission::accepted);
-        CHECK(observer->begin(1,fg::observerMode,false,plan,count));CHECK(launch());return out.token;
+    fg::Token begin(size_t count=3,bool active=false){
+        activeScan=active;auto readiness=ready();readiness.activeAllowed=true;
+        fg::Status out;CHECK(scan.begin(readiness,active,1,++now,plan,count,out)==fg::Admission::accepted);
+        CHECK(observer->begin(1,fg::observerMode,active,plan,count));CHECK(launch());return out.token;
     }
     void air(){
         CHECK(station.state()==st::State::scanningDwell);const auto token=station.scanToken();
@@ -171,14 +200,14 @@ struct Harness {
         if(phase>=3){now+=uint64_t(fg::dwellMs)*1000;CHECK(station.tick(now));} // restore
         if(phase>=4)CHECK(finish()); // restore -> end
     }
-    void finishDwell(){toPhase(2);air();now+=uint64_t(fg::dwellMs)*1000;
+    void finishDwell(){toPhase(2);if(activeScan)CHECK(sendPending());air();now+=uint64_t(fg::dwellMs)*1000;
         CHECK(station.tick(now));CHECK(finish()&&finish());CHECK(station.state()==st::State::idle);
         CHECK(!station.scanToken().operation&&deferAdvance);
     }
     void advanceSamePoll(){
         if(deferAdvance)return;
         if(scan.readyToFinish()){
-            CHECK(observer->finish(1,fg::observerMode,false,++now));ns::Summary summary;
+            CHECK(observer->finish(1,fg::observerMode,activeScan,++now));ns::Summary summary;
             CHECK(observer->copySummary(summary));CHECK(scan.complete(summary.token,now));
         }else if(scan.active()&&!scan.draining())CHECK(launch());
     }
@@ -264,5 +293,57 @@ static void connectedRemainsConnected(){
     CHECK(h.actions.size()==actionCount&&h.commands.size()==commandCount&&h.callbacks==0&&h.launches==0);
 }
 
-int main(){admission();stateAndDeadlines();realPass();cancellationAndFailure();connectedRemainsConnected();
+static void activePassAndFailures(){
+    {Harness h;h.begin(3,true);
+     for(unsigned i=0;i<3;++i){h.finishDwell();h.poll();}
+     CHECK(h.scan.status().phase==fg::Phase::complete&&h.scan.status().activeScan);
+     CHECK(h.probes==3&&h.publishedProbes==3&&h.scan.status().probesSubmitted==3);
+     CHECK(h.authStarts==0&&h.faults==0);ns::Summary summary;
+     CHECK(h.observer->copySummary(summary)&&summary.channelCount==3);}
+    // Real station callback requested a probe, but no submission took place.
+    {Harness h;h.begin(1,true);h.toPhase(2);CHECK(h.probes==1&&!h.publishedProbes);
+     h.now+=uint64_t(fg::dwellMs)*1000;CHECK(h.station.tick(h.now));h.drain();
+     CHECK(h.scan.status().phase==fg::Phase::failed&&h.scan.status().reason==fg::Reason::probe);
+     CHECK(!h.scan.status().snapshot.generation&&h.scan.status().drained);}
+    // Actual submission alone cannot pass a failed hardware completion.
+    {Harness h;h.probeReportOk=false;h.begin(1,true);h.finishDwell();
+     CHECK(h.publishedProbes==1&&h.scan.status().phase==fg::Phase::failed);
+     CHECK(!h.scan.status().snapshot.generation);}
+    // Admission checked after preparation: no tick is needed to reject a
+    // probe when elapsed time crossed the current dwell deadline.
+    {Harness h;const auto request=h.begin(1,true);h.toPhase(2);const auto token=h.station.scanToken();
+     CHECK(!h.station.canSendScanProbe({token.epoch+1,token.operation},h.now));
+     CHECK(!h.station.canSendScanProbe({token.epoch,token.operation+1},h.now));
+     CHECK(!h.station.canSendScanProbe(token,h.now-1));
+     h.now+=uint64_t(fg::dwellMs)*1000-1;CHECK(h.station.canSendScanProbe(token,h.now));
+     ++h.now;CHECK(h.station.state()==st::State::scanningDwell&&!h.sendPending());
+     CHECK(!h.publishedProbes&&h.scan.cancel(request,fg::Reason::probe,h.now));
+     h.observer->cancel();CHECK(h.station.cancelScan(token,h.now));h.drain();
+     CHECK(h.scan.status().phase==fg::Phase::cancelled&&h.scan.status().drained);}
+    for(unsigned phase=0;phase<5;++phase){
+        Harness h;const auto request=h.begin(1,true);h.toPhase(phase);
+        const auto token=h.station.scanToken();
+        if(phase==2)CHECK(h.sendPending());
+        CHECK(h.scan.cancel(request,fg::Reason::caller,++h.now));h.observer->cancel();
+        CHECK(h.station.cancelScan(token,h.now));CHECK(!h.sendPending());h.drain();
+        CHECK(h.scan.status().phase==fg::Phase::cancelled&&h.scan.status().drained);
+        CHECK(!h.station.canSendScanProbe(token,h.now));
+    }
+    {Harness h;h.begin(1);h.toPhase(2);CHECK(!h.station.canSendScanProbe(h.station.scanToken(),h.now));}
+    // Wrong channel/token, duplicate submission/completion and cancelled
+    // identities cannot authorize another packet or complete an active pass.
+    {fg::Controller c;fg::Status out;auto r=ready();r.activeAllowed=true;
+     CHECK(c.begin(r,true,1,10,plan,1,out)==fg::Admission::accepted);CHECK(c.accepted({1,1}));
+     CHECK(!c.requestProbe({1,2},plan[0])&&!c.requestProbe({1,1},plan[1]));
+     CHECK(!c.submittedProbe({1,1})&&!c.completedProbe({1,1}));
+     CHECK(c.requestProbe({1,1},plan[0])&&!c.requestProbe({1,1},plan[0]));
+     CHECK(c.submittedProbe({1,1})&&!c.submittedProbe({1,1}));
+     CHECK(c.completedProbe({1,1})&&!c.completedProbe({1,1}));
+     CHECK(c.cancel(out.token,fg::Reason::caller,11));ns::Channel channel;
+     CHECK(!c.pendingProbe({1,1},channel)&&zero(&channel,sizeof(channel)));
+     CHECK(!c.completedProbe({1,1})&&c.channelFinished({1,1},false,12));
+     CHECK(c.status().phase==fg::Phase::cancelled);}
+}
+
+int main(){plannedDwell();admission();stateAndDeadlines();realPass();cancellationAndFailure();connectedRemainsConnected();activePassAndFailures();
     std::printf("native foreground scan: %u checks passed\n",checks);}

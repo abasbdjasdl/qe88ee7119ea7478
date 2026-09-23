@@ -167,6 +167,13 @@ public:
     bool roleCreated()const{return roleCreated_;}
     Token associationToken()const{return associationToken_;}
     Token scanToken()const{return scanToken_;}
+    // Read-only TX admission; unlike tick(), safe inside a driver's TX pump.
+    // Recheck immediately before publication after any allocation/preparation.
+    bool canSendScanProbe(Token original,uint64_t now)const{
+        return state_==State::scanningDwell&&!scanCancelled_&&!disconnectRequested_&&
+            same(original,scanToken_)&&original.operation&&channelIndex_<channelCount_&&
+            channels_[channelIndex_].active&&now>=lastNow_&&now<deadline_&&now<scanDeadline_;
+    }
     Token pendingToken()const{return pendingToken_;}
     bool commandPending()const{return waitingCommand_;}
     // Legal only after DMA stopped, firmware restarted, C2H/interrupt callbacks

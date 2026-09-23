@@ -179,4 +179,6 @@ command `0x1b9`, and freeing a 5456-byte (`0x1550`) request. The
 `getScanRequestForDriver` unsigned-reference argument is read into request `+0x08`
 and used by `setScanHomeAwayTime`; it is not an output length. Producer value 1
 at request `+0x04` enables the consumer's private scan MAC behavior and is not a
-proven version field. No scan decoder or complete native scan layout is claimed.
+proven version field. The later [native-wcl-scan.md](native-wcl-scan.md) documents
+a narrow, offline scan decoder using additional same-KC and public-source
+evidence. It does not establish a live native scan interface.
