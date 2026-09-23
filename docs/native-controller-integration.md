@@ -87,8 +87,10 @@ events, nor an IO80211 notification. No observer function is invoked under the
 hardware gate. A derived setLinkStatus override must chain to the base and defer
 framework notifications; it must not call the external snapshot API from the gate.
 
-The controller currently installs `ic_newstate`, but no `ic_event_handler`.
-The pinned net80211 implementation emits:
+The controller now installs `ic_newstate` and chains/restores `ic_event_handler`.
+The latter records complete foreground scan passes; association/deauthentication
+notifications have not yet been connected to a native frontend. The pinned
+net80211 implementation emits:
 
 | Source event | Source location in the pinned tree | Meaning for the adapter |
 | --- | --- | --- |
@@ -96,7 +98,8 @@ The pinned net80211 implementation emits:
 | `IEEE80211_EVT_STA_DEAUTH` | Same file, deauthentication handler | Link loss with a bounded copy of reason/current generation; never retain the node pointer. |
 | `IEEE80211_EVT_SCAN_DONE` | `ieee80211_node.c::ieee80211_end_scan` | End of a net80211 channel scan; distinct from one hardware dwell finishing. |
 
-Add the event hook plus an adapter-owned operation identity. Event payloads
+The passive scan observer carries a physical hardware epoch, its own pass
+generation and the exact StationController dwell token. Association event payloads
 must carry the hardware incarnation and selection/scan generation, copied under
 the hardware gate; drop stale completions after disconnect, cancel, stop or a new
 request. Association timeouts and hardware failures also need a terminal native
@@ -112,9 +115,10 @@ produce the menu's initial list. Add an explicit scan request independent of
 credentials, with a bounded request, generation, cancellation and deadline.
 
 `State::scanFinished` sets `scanDone` after one StationController channel visit;
-poll then calls `ieee80211_next_scan`. Do not post whole-scan completion there.
-Use `IEEE80211_EVT_SCAN_DONE` for the matching complete request and take a stable
-cache snapshot at that boundary. The pinned AirportItlwm `fakeScanDone` timer
+poll then calls `ieee80211_next_scan`. It now marks only that channel complete
+in the observer. `IEEE80211_EVT_SCAN_DONE` publishes a stable cache only after
+every planned channel has completed. This is one net80211 mode/active-or-passive
+pass, not yet a framework scan request completion. The pinned AirportItlwm `fakeScanDone` timer
 posts after 100 ms regardless of RF completion; it is not an appropriate completion
 source for this driver.
 
@@ -126,14 +130,31 @@ from a connected request. Until a real background channel/restore operation is
 implemented, preserve the current connection and return the target framework's
 verified busy/cached-result behavior; do not report an unperformed fresh scan.
 
-`WirelessStatus::Network` currently retains only SSID/BSSID/channel, percentage
-signal, privacy and collapsed RSN flags. It does not retain the raw bounded RSN/
-WPA IE, beacon interval/capabilities, rates or observation age that the reference
-`convertNodeToScanResult` uses. Extend a separate bounded scan view or the snapshot
-under the gate to copy those actual observations. Keep count/IE/rate limits and
-explicit truncation, and use an owned view plus cursor/generation instead of
-holding RB-tree node pointers across native requests. Do not invent dBm/noise
-from percentages or reconstruct a lossy security IE as if it came from the AP.
+`WirelessStatus::Network` retains only a collapsed node view. A separate
+`NativeScanObservation.hpp` observer now copies real beacon/probe responses before
+net80211 delivery: complete bounded IEs, beacon interval/capabilities, binary
+SSID/BSSID, tuned channel, host monotonic observation time and an explicitly
+typed signal. The RTL backend preserves actual PHY dBm; the sample is the most
+recent valid PHY report, not proven exact per-MPDU attribution. No percentage
+conversion or fabricated noise measurement is used.
+
+The ~300 KiB double-bank observer is heap-backed and optional on allocation
+failure. `copyNativeScanSummary/Entry/Channel` use the external control-lock/gate
+fence and exact epoch/generation/index checks. Cancellation retains the last
+complete snapshot; overflow/truncation or an incomplete channel plan cannot
+publish a new complete result. Entries are copied to caller-owned storage,
+without retaining node pointers. This is passive observation of existing scans,
+not a new foreground-scan scheduler. It deliberately excludes background scans.
+The unattended recovery collector also records count-only `R16NativeScan*`
+properties (observer availability, open pass and last complete token/count/channel
+count). Complete means a retained full pass exists, not a live WCL request
+completed. These diagnostics contain no SSID/BSSID or raw IE data.
+
+`NativeWclBeacon.hpp` can produce an offline 64-byte metadata plus raw-IE draft
+from one such entry for the pinned KC. It revalidates bounds, names, channels
+and signal units; its `emissionReady` remains false. Real interface registration,
+request binding and notification lifetime are still missing. See
+[native-wcl-notifications.md](native-wcl-notifications.md).
 
 ## Join credentials, dispatch and gate contract
 
@@ -159,6 +180,13 @@ SSID/PMK request delivery and completion identity must be resolved before a menu
 selection can invoke `selectWirelessNetwork` correctly. If the framework supplies
 a passphrase rather than PMK, use a bounded, wiped, non-gate-blocking derivation
 path with a verified request lifetime; do not reinterpret bytes as a PMK.
+
+`NativeWclJoin.hpp` now decodes a narrow, target-pinned 988-byte WPA2-PSK/CCMP
+candidate with an embedded raw PMK. It rejects unsupported policy and authentication
+instead of lowering security. This is credential extraction only; it is not yet
+called by a registered WCL interface. Separate CIPHER_KEY delivery, callback
+operation identity, real queue admission and terminal notifications still need
+to be wired together. See [native-auth-status.md](native-auth-status.md).
 
 The existing WPA2 net80211 supplicant/key installation remains the handshake
 owner in this first integration. Do not also enable `USE_APPLE_SUPPLICANT` or

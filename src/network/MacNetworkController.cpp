@@ -6,6 +6,7 @@
 #include "RxTrace.hpp"
 #include "WirelessControl.hpp"
 #include "AuthenticationBinding.hpp"
+#include "NativeScanObservation.hpp"
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -36,6 +37,8 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     station::Controller<State> station;
     station::Traffic traffic{station::Traffic::none};station::Token auth{};
     int (*savedState)(ieee80211com*,enum ieee80211_state,int){};
+    void (*savedEvent)(ieee80211com*,int,void*){};
+    nativescan::Observer *scanObservations{}; // ~300 KiB, heap only; optional.
     bool bound{},attached{},visible{},runtimeAttempted{},prepared{},bootStarted{},stationStarted{},interruptAttached{},credentials{};
     bool enabled{},faulted{},stopping{},scanDone{},authPending{},probePending{},runPending{},resetPending{};
     bool stateDeferred{};int deferredState{},deferredArgument{};
@@ -55,6 +58,23 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             metadata=inspectRx(packet,identity.interface.address.bytes);
             if(packet.info.pkt_type==0&&!hardwareDecrypted(packet.info)&&packet.length>=28)
                 authenticationEvents.observe(packet.payload,packet.length-4,channel,now());
+            if(scanObservations&&packet.info.pkt_type==0&&!hardwareDecrypted(packet.info)&&
+               packet.length>=40&&ic.ic_state==IEEE80211_S_SCAN&&!(ic.ic_flags&IEEE80211_F_BGSCAN)&&
+               station.state()==station::State::scanningDwell&&channel&&ic.ic_channels[channel].ic_freq){
+                const nativescan::Channel observedChannel{
+                    IEEE80211_IS_CHAN_5GHZ(&ic.ic_channels[channel])?nativescan::Band::ghz5:nativescan::Band::ghz2,channel};
+                // The boot backend supplies the most recent real PHY sample;
+                // this does not claim exact per-MPDU/PPDU RSSI attribution.
+                nativescan::Signal signal{};
+                if(rssi>=0&&rssi<=100)signal={nativescan::SignalUnit::percent,int16_t(rssi)};
+                int dbm=0;if(boot->rxSignalDbm(dbm)&&dbm>=-127&&dbm<=0)
+                    signal={nativescan::SignalUnit::dbm,int16_t(dbm)};
+                const auto token=station.scanToken();
+                // RX includes a four-byte FCS. Copy complete raw IEs before
+                // protocol delivery can request another state/channel.
+                scanObservations->observe({token.epoch,token.operation},packet.payload,packet.length-4,
+                                           observedChannel,signal,now());
+            }
         }
         const auto before=ic.ic_stats;RxDeliveryTrace trace;
         if(metadata.eapol){++rxEapolBridge;
@@ -86,12 +106,15 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     State(R16NetworkController &o,MacNetworkBootService *b):owner(o),boot(b),
         runtimeIo(o.pci_,o.bar_),ringIo(o.pci_,o.bar_),runtime(runtimeIo),station(*this){
         for(unsigned i=0;i<6;++i)txPointers[i]=&tx[i];
+        // Observation allocation failure must not alter existing connectivity.
+        scanObservations=new nativescan::Observer;
     }
-    ~State(){delete events;delete boot;delete commands;delete transport;delete queues;}
+    ~State(){delete scanObservations;delete events;delete boot;delete commands;delete transport;delete queues;}
     uint64_t now(){return runtimeIo.nowUs();}
     bool inGate(){return owner.loop_->inGate();}
     void fail(const char *reason){
         if(faulted)return;faulted=true;traffic=station::Traffic::none;enabled=false;
+        if(scanObservations&&inGate())scanObservations->cancel();
         authenticationEvents.disable();
         pendingSelection.clear();
         ic.ic_if.if_flags&=~IFF_RUNNING;
@@ -160,8 +183,14 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             peer.bssid.bytes,peer.channel.primary);authPending=true;return true;
     }
     bool sendProbe(station::Token,const station::Peer*,const station::ScanChannel&){probePending=true;return true;}
-    bool cancelProtocol(station::Token){authenticationEvents.invalidate();authPending=probePending=runPending=false;resetPending=true;return true;}
-    void scanFinished(station::Token,bool cancelled){if(!cancelled)scanDone=true;}
+    bool cancelProtocol(station::Token){
+        if(scanObservations)scanObservations->cancel();
+        authenticationEvents.invalidate();authPending=probePending=runPending=false;resetPending=true;return true;
+    }
+    void scanFinished(station::Token token,bool cancelled){
+        if(scanObservations)scanObservations->channelFinished({token.epoch,token.operation},cancelled);
+        if(!cancelled)scanDone=true; // Only advances the existing net80211 scan.
+    }
     void recoveryRequired(station::Token,station::Error){fail("station operation failed; physical firmware reset required");}
     bool firmwareRestartVerified(uint64_t epoch){return prepared&&identity.epoch==epoch&&commands&&commands->epoch()==epoch;}
     static State *from(ieee80211com *ic){return static_cast<State*>(ic->ic_if.if_softc);}
@@ -173,9 +202,42 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         return {uint8_t(IEEE80211_IS_CHAN_5GHZ(c)?1:0),0,uint8_t(n),uint8_t(n)};
     }
     station::Address bssid(){station::Address a;memcpy(a.bytes,ic.ic_bss->ni_bssid,6);return a;}
+    void observeScanPlan(){
+        if(!scanObservations||scanObservations->open())return;
+        nativescan::Channel planned[nativescan::maxChannels]{};size_t count=0;
+        const bool active=(ic.ic_flags&IEEE80211_F_ASCAN)!=0;
+        const auto current=channelOf(&ic,ic.ic_bss->ni_chan);
+        bool valid=channel::validChannel(current)&&!(ic.ic_flags&IEEE80211_F_BGSCAN);
+        // next_scan has already cleared the selected channel's bitmap bit.
+        // Reinsert only that channel, then apply its actual passive-scan rule.
+        for(unsigned i=1;valid&&i<=IEEE80211_CHAN_MAX;++i){
+            const auto &candidate=ic.ic_channels[i];
+            if(i!=current.primary&&!isset(ic.ic_chan_scan,i))continue;
+            if(active&&(candidate.ic_flags&IEEE80211_CHAN_PASSIVE))continue;
+            if(!isset(ic.ic_chan_active,i)||!candidate.ic_freq||!candidate.ic_flags||
+               i>255||count==nativescan::maxChannels){valid=false;break;}
+            planned[count++]={IEEE80211_IS_CHAN_5GHZ(&candidate)?nativescan::Band::ghz5:nativescan::Band::ghz2,uint8_t(i)};
+        }
+        // A bad/oversize plan blocks observations for this pass only. Do not
+        // change channel policy, ask for another scan, or fail the radio.
+        scanObservations->begin(identity.epoch,int(ic.ic_curmode),active,valid?planned:nullptr,valid?count:0);
+    }
+    static void protocolEvent(ieee80211com *ic,int event,void *data){
+        auto *s=from(ic);if(!s)return;
+        if(event==IEEE80211_EVT_SCAN_DONE&&s->scanObservations){
+            if(s->inGate()&&!s->stopping&&!s->faulted&&ic->ic_state==IEEE80211_S_SCAN&&
+               !(ic->ic_flags&IEEE80211_F_BGSCAN))
+                s->scanObservations->finish(s->identity.epoch,int(ic->ic_curmode),
+                    (ic->ic_flags&IEEE80211_F_ASCAN)!=0,s->now());
+            // An unexpected caller outside the gate cannot mutate the cache.
+            else if(s->inGate())s->scanObservations->cancel();
+        }
+        if(s->savedEvent&&s->savedEvent!=protocolEvent)s->savedEvent(ic,event,data);
+    }
     static int newState(ieee80211com *ic,enum ieee80211_state next,int arg){
         auto &s=*from(ic);if(s.stopping||s.faulted)return ENETDOWN;
         if(!s.inGate()){s.fail("net80211 state outside gate");return EIO;}
+        if(next!=IEEE80211_S_SCAN&&s.scanObservations)s.scanObservations->cancel();
         if(unsigned(next)<5)++s.stateRequests[unsigned(next)];
         // State/argument only, no frame contents, network names or key material.
         s.lastStateRequest=(uint64_t(unsigned(ic->ic_state))<<40)|(uint64_t(unsigned(next))<<32)|uint32_t(arg);
@@ -194,7 +256,18 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             station::ScanChannel channel{};channel.channel=channelOf(ic,ic->ic_bss->ni_chan);
             channel.dwellMs=120;channel.active=(ic->ic_flags&IEEE80211_F_ASCAN)&&
                 !(ic->ic_bss->ni_chan->ic_flags&IEEE80211_CHAN_PASSIVE);
-            return s.station.scan(&channel,1,s.now())?0:EIO;
+            s.observeScanPlan();
+            const bool accepted=s.station.scan(&channel,1,s.now());
+            if(s.scanObservations){
+                if(accepted){
+                    const auto token=s.station.scanToken();
+                    s.scanObservations->channelAccepted(s.identity.epoch,int(ic->ic_curmode),
+                        (ic->ic_flags&IEEE80211_F_ASCAN)!=0,
+                        {channel.channel.band?nativescan::Band::ghz5:nativescan::Band::ghz2,channel.channel.primary},
+                        {token.epoch,token.operation});
+                }else s.scanObservations->rejectedChannel();
+            }
+            return accepted?0:EIO;
         }
         if(next==IEEE80211_S_AUTH){
             if(s.station.state()!=station::State::idle){
@@ -314,6 +387,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         ic.ic_ibss_chan=&ic.ic_channels[identity.interface.home.primary];ic.ic_max_rssi=100;
         if_attach(&ifp);ieee80211_ifattach(&ifp,&owner);attached=true;
         savedState=ic.ic_newstate;ic.ic_newstate=newState;ieee80211_media_init(&ifp);
+        savedEvent=ic.ic_event_handler;ic.ic_event_handler=protocolEvent;
         return savedState&&ic.ic_bss&&ifp.if_snd.queue;
     }
     static void fillJoin(const selection::Join &selected,ieee80211_join &join){
@@ -434,6 +508,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             if(!selection::valid(*requested))return kIOReturnBadArgument;
             if(!pendingSelection.submit(*requested))return kIOReturnBusy;
         }else pendingSelection.clear();
+        if(scanObservations)scanObservations->cancel();
         // Keep the old protocol keys until all old-channel TX and hardware work
         // has drained. Never install the new credentials from this call stack.
         if(!station.disconnect(now())){pendingSelection.clear();return kIOReturnBusy;}
@@ -500,6 +575,17 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     uint64_t lastStatus{};
     void publishStatus(){
         if(!owner.pci_)return;
+        // Count-only diagnostics for the unattended recovery collector. Never
+        // publish network names, addresses, raw IEs or credentials here.
+        nativescan::Summary nativeScan{};
+        const bool nativeScanComplete=scanObservations&&scanObservations->copySummary(nativeScan);
+        owner.pci_->setProperty("R16NativeScanObserver",uint64_t(scanObservations!=nullptr),64);
+        owner.pci_->setProperty("R16NativeScanPassOpen",uint64_t(scanObservations&&scanObservations->open()),64);
+        owner.pci_->setProperty("R16NativeScanComplete",uint64_t(nativeScanComplete),64);
+        owner.pci_->setProperty("R16NativeScanGeneration",nativeScan.token.generation,64);
+        owner.pci_->setProperty("R16NativeScanEpoch",nativeScan.token.epoch,64);
+        owner.pci_->setProperty("R16NativeScanCount",uint64_t(nativeScan.count),64);
+        owner.pci_->setProperty("R16NativeScanChannels",uint64_t(nativeScan.channelCount),64);
         owner.pci_->setProperty("R16TraceEapolBridgeOk",uint64_t(eapolBridgeOk),64);
         owner.pci_->setProperty("R16TraceEapolBridgeFailed",uint64_t(eapolBridgeFailed),64);
         owner.pci_->setProperty("R16TraceEapolStage",uint64_t(eapolStage),64);
@@ -621,6 +707,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(!faulted&&owner.timer_->setTimeoutMS(10)!=kIOReturnSuccess)fail("controller timer failed");
     }
     bool shutdown(){
+        if(scanObservations)scanObservations->cancel();
         authenticationEvents.disable();
         stopping=true;enabled=false;traffic=station::Traffic::none;owner.timer_->cancelTimeout();
         pendingSelection.clear();
@@ -640,6 +727,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         released=rxq.releaseAfterDmaStopped()&&rpq.releaseAfterDmaStopped()&&released;
         if(!released)return false;
         if(attached){ic.ic_if.if_flags&=~IFF_RUNNING;ic.ic_newstate=savedState;
+            ic.ic_event_handler=savedEvent;
             savedState(&ic,IEEE80211_S_INIT,-1);ieee80211_ifdetach(&ic.ic_if);if_detach(&ic.ic_if);attached=false;}
         if(bound){if(protocol.unbindAfterProtocolDetached()!=kIOReturnSuccess)return false;bound=false;}
         return true;
@@ -743,7 +831,8 @@ IOReturn R16NetworkController::enableGated(OSObject *o,void *on,void*,void*,void
     auto &owner=*static_cast<R16NetworkController*>(o);auto *s=owner.state_;
     if(!s||s->faulted||s->stopping)return kIOReturnNotReady;s->enabled=on!=nullptr;
     if(s->enabled){s->ic.ic_if.if_flags|=IFF_UP|IFF_RUNNING;s->lastWatchdog=s->now();}
-    else{s->authenticationEvents.disable();s->pendingSelection.clear();s->ic.ic_if.if_flags&=~(IFF_UP|IFF_RUNNING);s->stateDeferred=true;s->deferredState=IEEE80211_S_INIT;s->deferredArgument=-1;
+    else{if(s->scanObservations)s->scanObservations->cancel();
+        s->authenticationEvents.disable();s->pendingSelection.clear();s->ic.ic_if.if_flags&=~(IFF_UP|IFF_RUNNING);s->stateDeferred=true;s->deferredState=IEEE80211_S_INIT;s->deferredArgument=-1;
         if(s->stationStarted)s->station.disconnect(s->now());
         owner.setLinkStatus(kIONetworkLinkValid);}
     return kIOReturnSuccess;
@@ -779,9 +868,35 @@ IOReturn R16NetworkController::copyLinkPublication(MacLinkPublication &out){
 }
 namespace {
 struct AuthenticationRequest {void *client;uint32_t operation;authevents::Event *output;};
+struct NativeScanRequest {unsigned operation; nativescan::Token token;size_t index;void *output;};
 struct LinkStatusRequest {
     UInt32 status;const IONetworkMedium *medium;UInt64 speed;OSData *data;bool applied{};
 };
+}
+IOReturn R16NetworkController::nativeScanGated(OSObject *owner,void *arg,void*,void*,void*){
+    if(!arg)return kIOReturnBadArgument;
+    const auto &request=*static_cast<NativeScanRequest*>(arg);
+    auto *state=static_cast<R16NetworkController*>(owner)->state_;
+    if(!state||state->stopping||!state->scanObservations||!request.output)return kIOReturnNotReady;
+    auto &observer=*state->scanObservations;
+    switch(request.operation){
+    case 0:return observer.copySummary(*static_cast<nativescan::Summary*>(request.output))?kIOReturnSuccess:kIOReturnNotReady;
+    case 1:return observer.copyEntry(request.token,request.index,*static_cast<nativescan::Entry*>(request.output))?kIOReturnSuccess:kIOReturnNotFound;
+    case 2:return observer.copyChannel(request.token,request.index,*static_cast<nativescan::Channel*>(request.output))?kIOReturnSuccess:kIOReturnNotFound;
+    default:return kIOReturnBadArgument;
+    }
+}
+IOReturn R16NetworkController::copyNativeScanSummary(nativescan::Summary &output){
+    memset(&output,0,sizeof(output));NativeScanRequest request{0,{},0,&output};
+    return runControlAction(nativeScanGated,&request);
+}
+IOReturn R16NetworkController::copyNativeScanEntry(nativescan::Token token,size_t index,nativescan::Entry &output){
+    memset(&output,0,sizeof(output));NativeScanRequest request{1,token,index,&output};
+    return runControlAction(nativeScanGated,&request);
+}
+IOReturn R16NetworkController::copyNativeScanChannel(nativescan::Token token,size_t index,nativescan::Channel &output){
+    memset(&output,0,sizeof(output));NativeScanRequest request{2,token,index,&output};
+    return runControlAction(nativeScanGated,&request);
 }
 IOReturn R16NetworkController::authenticationGated(OSObject *owner,void *arg,void*,void*,void*){
     const auto &request=*static_cast<AuthenticationRequest*>(arg);

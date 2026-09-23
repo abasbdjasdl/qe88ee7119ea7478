@@ -203,6 +203,14 @@ public:
         if(!inGate()||!ready()||!channelValid_||!sampleValid_||radio_.busy())return false;
         channel=channel_.primary;rssi=phy_.normalized;return true;
     }
+    bool rxSignalDbm(int &value)override{
+        value=0;
+        if(!inGate()||!ready()||!channelValid_||!sampleValid_||radio_.busy()||
+           phy_.dbm< -127||phy_.dbm>0)return false;
+        // Preserve the PHY's measured dBm before its normalized/clamped
+        // percent mapping. Native scan metadata must never invert that clamp.
+        value=phy_.dbm;return true;
+    }
     int phyReport(const RxPacket &packet)override{
         if(!inGate()||!ready()||!channelValid_||radio_.busy())return 0;
         stationio::PhySample sample{};if(!MacStationIo::phyReport(packet,sample))return 0;

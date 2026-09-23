@@ -11,6 +11,7 @@
 #include "WirelessSelection.hpp"
 #include "WirelessStatus.hpp"
 #include "AuthenticationEvents.hpp"
+#include "NativeScanCache.hpp"
 struct ieee80211com;
 class IOEthernetInterface;
 namespace rtl8852be { namespace network {
@@ -61,6 +62,8 @@ public:
     // Actual tuned channel and most recent decoded PHY RSSI; false drops data only,
     // and MUST NOT prevent C2H processing during bootstrap.
     virtual bool rxInfo(uint8_t &channel,int &rssi)=0;
+    // Optional actual decoded PHY dBm. No percent-to-dBm conversion fallback.
+    virtual bool rxSignalDbm(int &out){out=0;return false;}
     virtual int phyReport(const RxPacket&)=0;
     virtual int notification(const FirmwareEvent&)=0;
     // Called after runtime IRQ/DMA stop attempt. Must silence CPU/RF; return false
@@ -88,6 +91,7 @@ class R16NetworkController : public IOEthernetController {
     static IOReturn linkStatusGated(OSObject*,void*,void*,void*,void*);
     static IOReturn linkPublicationGated(OSObject*,void*,void*,void*,void*);
     static IOReturn authenticationGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn nativeScanGated(OSObject*,void*,void*,void*,void*);
     bool applyLinkStatus(UInt32,const IONetworkMedium*,UInt64,OSData*);
     static void timer(OSObject*,IOTimerEventSource*);
     void releaseResources();
@@ -121,5 +125,16 @@ public:
     // Same external-call/stop fence as copyWirelessStatus. Never call while
     // holding the hardware gate. Failure clears out; stop rejects new readers.
     IOReturn copyLinkPublication(rtl8852be::network::MacLinkPublication&);
+    // Passive snapshots of an existing net80211 mode/pass, not a new scan or
+    // proof of complete coverage of both bands. External kernel callers only;
+    // controlLock -> gate, never call while holding the hardware gate. Entry
+    // storage belongs to the caller (prefer heap); no borrowed cache pointers.
+    // Read summary first, then pass its exact epoch/generation with every index.
+    // A replaced publication makes old tokens fail. Failure clears output.
+    IOReturn copyNativeScanSummary(rtl8852be::network::nativescan::Summary&);
+    IOReturn copyNativeScanEntry(rtl8852be::network::nativescan::Token,size_t,
+                                rtl8852be::network::nativescan::Entry&);
+    IOReturn copyNativeScanChannel(rtl8852be::network::nativescan::Token,size_t,
+                                  rtl8852be::network::nativescan::Channel&);
     IOReturn authenticationEvents(void *client,uint32_t operation,rtl8852be::network::authevents::Event* = nullptr);
 };
