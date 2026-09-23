@@ -3,6 +3,7 @@
 #include <IOKit/IOReturn.h>
 #include "NativeScanCache.hpp"
 #include "NativeForegroundScan.hpp"
+#include "NativeWclScanResults.hpp"
 #include "WirelessStatus.hpp"
 #include "WirelessSelection.hpp"
 
@@ -45,4 +46,23 @@ IOReturn copyMacNetworkScanChannel(MacNetworkState *,nativescan::Token,size_t,
 // results through its verified IO80211 event path.
 IOReturn beginMacNetworkWclScan(MacNetworkState *,const void *,size_t,bool,
                                 foregroundscan::Status &);
+// All of these execute under the same session gate. A completed foreground
+// scan is still only a hardware observation; no native event has been sent.
+IOReturn beginMacNetworkForegroundScan(MacNetworkState *,bool,
+                                       const foregroundscan::RequestedPlan *,
+                                       foregroundscan::Status &);
+IOReturn copyMacNetworkForegroundScanStatus(MacNetworkState *,foregroundscan::Token,
+                                            foregroundscan::Status &);
+IOReturn cancelMacNetworkForegroundScan(MacNetworkState *,foregroundscan::Token,
+                                        foregroundscan::Status &);
+// Draft result lifecycle for a future registered native interface. The gate
+// protects the session, and caller-owned buffers must not alias it or owner.
+// commit(...,true) stays Unsupported until a real event sender is integrated.
+IOReturn armMacNetworkWclResults(MacNetworkState *,foregroundscan::Token,bool,
+                                 void *,size_t);
+IOReturn reserveMacNetworkWclResult(MacNetworkState *,foregroundscan::Token,
+                                    void *,size_t,nativewclresults::Frame &);
+IOReturn commitMacNetworkWclResult(MacNetworkState *,const nativewclresults::Frame &,
+                                   bool);
+IOReturn retireMacNetworkWclResults(MacNetworkState *,foregroundscan::Token);
 } }

@@ -79,6 +79,7 @@ public:
 // on the owner's existing gate; this does not create a second PCI claimant.
 struct MacNetworkStateHost {
     void *controller_{};
+    size_t controllerBytes_{}; // Reject result buffers aliasing the live owner.
     IOService *registry_{};
     IOWorkLoop *loop_{};
     IOCommandGate *gate_{};
@@ -91,7 +92,7 @@ struct MacNetworkStateHost {
     void (*protocolLink_)(void *,bool){};
     void (*startup_)(void *,IOService *,unsigned,bool){};
     bool ready()const{
-        return controller_&&registry_&&loop_&&gate_&&timer_&&pci_&&bar_&&
+        return controller_&&controllerBytes_&&registry_&&loop_&&gate_&&timer_&&pci_&&bar_&&
                interface_&&linkStatus_&&protocolLink_&&startup_;
     }
     bool setLinkStatus(UInt32 status)const{

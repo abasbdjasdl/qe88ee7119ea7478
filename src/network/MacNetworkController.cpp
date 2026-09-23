@@ -1201,6 +1201,31 @@ IOReturn beginMacNetworkWclScan(MacNetworkState *state,const void *message,
     if(!state||!state->inGate()||state->stopping)return kIOReturnNotReady;
     return state->beginWclScan(message,length,exactProfileVerified,out);
 }
+IOReturn beginMacNetworkForegroundScan(MacNetworkState *state,bool active,
+                                      const foregroundscan::RequestedPlan *plan,
+                                      foregroundscan::Status &out){
+    bzero(&out,sizeof(out));
+    if(!state||!state->inGate()||state->stopping)return kIOReturnNotReady;
+    return state->beginForeground(active,out,plan);
+}
+IOReturn copyMacNetworkForegroundScanStatus(MacNetworkState *state,
+                                           foregroundscan::Token token,
+                                           foregroundscan::Status &out){
+    bzero(&out,sizeof(out));
+    if(!state||!state->inGate()||state->stopping)return kIOReturnNotReady;
+    return state->foregroundScan.copy(token,out)?kIOReturnSuccess:kIOReturnNotFound;
+}
+IOReturn cancelMacNetworkForegroundScan(MacNetworkState *state,
+                                       foregroundscan::Token token,
+                                       foregroundscan::Status &out){
+    bzero(&out,sizeof(out));
+    if(!state||!state->inGate()||state->stopping)return kIOReturnNotReady;
+    if(!foregroundscan::same(token,state->foregroundScan.token())||
+       !state->foregroundScan.active())return kIOReturnNotFound;
+    state->cancelForeground(foregroundscan::Reason::caller,true);
+    if(state->faulted)return kIOReturnError;
+    return state->foregroundScan.copy(token,out)?kIOReturnSuccess:kIOReturnNotFound;
+}
 } }
 // The pinned net80211 source calls this from a two-site, hash-checked source
 // override. Its if_softc already points at this session before ifattach.
@@ -1271,7 +1296,8 @@ bool R16NetworkController::start(IOService *provider){
         recordStartup(provider,7);
         auto *boot=createBootService();if(!boot){setProperty("R16Failure","concrete boot service missing");goto failed;}
         recordStartup(provider,8);
-        stateHost_.controller_=this;stateHost_.registry_=this;
+        stateHost_.controller_=this;stateHost_.controllerBytes_=sizeof(*this);
+        stateHost_.registry_=this;
         stateHost_.loop_=loop_;stateHost_.gate_=gate_;stateHost_.timer_=timer_;
         stateHost_.pci_=pci_;stateHost_.bar_=bar_;stateHost_.legacyEthernet_=this;
         stateHost_.interface_=stateHostInterface;
@@ -1424,15 +1450,12 @@ IOReturn R16NetworkController::foregroundScanGated(OSObject *owner,void *argumen
     if(!request.output)return kIOReturnBadArgument;
     auto *state=static_cast<R16NetworkController*>(owner)->state_;
     if(!state||state->stopping)return kIOReturnNotReady;
-    if(request.operation==0)return state->beginForeground(request.active,*request.output,request.plan);
-    if(request.operation==1)return state->foregroundScan.copy(request.token,*request.output)?
-        kIOReturnSuccess:kIOReturnNotFound;
+    if(request.operation==0)return beginMacNetworkForegroundScan(
+        state,request.active,request.plan,*request.output);
+    if(request.operation==1)return copyMacNetworkForegroundScanStatus(
+        state,request.token,*request.output);
     if(request.operation!=2)return kIOReturnBadArgument;
-    if(!foregroundscan::same(request.token,state->foregroundScan.token())||
-       !state->foregroundScan.active())return kIOReturnNotFound;
-    state->cancelForeground(foregroundscan::Reason::caller,true);
-    if(state->faulted)return kIOReturnError;
-    return state->foregroundScan.copy(request.token,*request.output)?kIOReturnSuccess:kIOReturnNotFound;
+    return cancelMacNetworkForegroundScan(state,request.token,*request.output);
 }
 IOReturn R16NetworkController::wclScanGated(OSObject *owner,void *argument,void*,void*,void*){
     if(!argument)return kIOReturnBadArgument;
@@ -1443,68 +1466,90 @@ IOReturn R16NetworkController::wclScanGated(OSObject *owner,void *argument,void*
     return beginMacNetworkWclScan(state,request.message,request.length,
                                   request.profileVerified,*request.output);
 }
+namespace rtl8852be { namespace network {
+static IOReturn checkMacNetworkWclResult(MacNetworkState *state,
+                                        foregroundscan::Token token){
+    if(!state||!state->inGate()||state->stopping||state->faulted||
+       !state->scanObservations||!state->wclResults)return kIOReturnNotReady;
+    return token.request&&foregroundscan::same(token,state->wclRequestToken)?
+        kIOReturnSuccess:kIOReturnNotFound;
+}
+IOReturn armMacNetworkWclResults(MacNetworkState *state,foregroundscan::Token token,
+                                bool exactProfileVerified,void *scratch,size_t capacity){
+    const auto ready=checkMacNetworkWclResult(state,token);
+    if(ready!=kIOReturnSuccess)return ready;
+    if(!exactProfileVerified||!state->wclRequestValid)return kIOReturnUnsupported;
+    const auto status=state->wclResults->begin(
+        nativewclbeacon::TargetProfile::darwin24_4_0_d8b50fc2,true,
+        state->wclRequest,state->foregroundScan.status(),
+        state->scanObservations->completedStoreUnderGate(),scratch,capacity);
+    return wclResultsCode(status);
+}
+IOReturn reserveMacNetworkWclResult(MacNetworkState *state,foregroundscan::Token token,
+                                   void *buffer,size_t capacity,nativewclresults::Frame &out){
+    const auto ready=checkMacNetworkWclResult(state,token);
+    if(ready!=kIOReturnSuccess)return ready;
+    if(!state->wclRequestValid)return kIOReturnNotReady;
+    // Both allocations are caller-owned; neither may alias the live session,
+    // owner, observer or result bridge, or each other.
+    const auto aliasesState=[&](const void *p,size_t n){
+        return nativewclbeacon::detail::overlaps(p,n,state,sizeof(*state))||
+            nativewclbeacon::detail::overlaps(p,n,state->owner.controller_,
+                                             state->owner.controllerBytes_)||
+            nativewclbeacon::detail::overlaps(p,n,state->scanObservations,
+                                             sizeof(*state->scanObservations))||
+            nativewclbeacon::detail::overlaps(p,n,state->wclResults,
+                                             sizeof(*state->wclResults));
+    };
+    const auto writable=nativewclbeacon::detail::writableBytes(capacity);
+    if(aliasesState(&out,sizeof(out))||
+       (buffer&&(aliasesState(buffer,writable)||
+                 nativewclbeacon::detail::overlaps(&out,sizeof(out),buffer,writable))))
+        return kIOReturnBadArgument;
+    return wclResultsCode(state->wclResults->reserve(
+        state->foregroundScan.status(),state->scanObservations->completedStoreUnderGate(),
+        buffer,capacity,out));
+}
+IOReturn commitMacNetworkWclResult(MacNetworkState *state,
+                                  const nativewclresults::Frame &frame,bool accepted){
+    const auto ready=checkMacNetworkWclResult(state,frame.request);
+    if(ready!=kIOReturnSuccess)return ready;
+    // An offline draft cannot be acknowledged as an IO80211 delivery. The
+    // matching reservation is aborted even if a caller falsely asserts it.
+    auto &bridge=*state->wclResults;
+    const bool reserved=bridge.phase()==nativewclresults::Phase::reserved;
+    bridge.commit(frame,false,state->foregroundScan.status(),
+                  state->scanObservations->completedStoreUnderGate());
+    return reserved&&bridge.phase()==nativewclresults::Phase::aborted?
+        (accepted?kIOReturnUnsupported:kIOReturnSuccess):kIOReturnNotFound;
+}
+IOReturn retireMacNetworkWclResults(MacNetworkState *state,
+                                    foregroundscan::Token token){
+    const auto ready=checkMacNetworkWclResult(state,token);
+    if(ready!=kIOReturnSuccess)return ready;
+    auto &bridge=*state->wclResults;
+    if(bridge.phase()==nativewclresults::Phase::idle){
+        if(state->wclRequestValid&&state->foregroundScan.active())return kIOReturnBusy;
+    }else{
+        bridge.abort();
+        if(!bridge.retire())return kIOReturnBusy;
+    }
+    state->wclRequestToken={};state->wclRequestValid=false;
+    bzero(&state->wclRequest,sizeof(state->wclRequest));
+    return kIOReturnSuccess;
+}
+} }
 IOReturn R16NetworkController::wclResultsGated(OSObject *owner,void *argument,void*,void*,void*){
     if(!argument)return kIOReturnBadArgument;
     auto &request=*static_cast<WclResultsRequest*>(argument);
     auto *state=static_cast<R16NetworkController*>(owner)->state_;
-    if(!state||state->stopping||state->faulted||!state->scanObservations||!state->wclResults)
-        return kIOReturnNotReady;
-    if(!request.token.request||!foregroundscan::same(request.token,state->wclRequestToken))
-        return kIOReturnNotFound;
-    auto &bridge=*state->wclResults;
-    const auto &scan=state->foregroundScan.status();
-    const auto &store=state->scanObservations->completedStoreUnderGate();
     switch(request.operation){
-    case 0:{
-        if(!request.profileVerified||!state->wclRequestValid)return kIOReturnUnsupported;
-        const auto status=bridge.begin(nativewclbeacon::TargetProfile::darwin24_4_0_d8b50fc2,
-            true,state->wclRequest,scan,store,request.buffer,request.capacity);
-        return wclResultsCode(status);
-    }
-    case 1:{
-        if(!state->wclRequestValid||!request.output)return kIOReturnNotReady;
-        // Frame and payload must not alias any mutable controller object. The
-        // bridge also checks the borrowed Store and foreground Status itself.
-        auto *controller=static_cast<R16NetworkController*>(owner);
-        const auto aliasesController=[&](const void *p,size_t n){
-            return nativewclbeacon::detail::overlaps(p,n,state,sizeof(*state))||
-                nativewclbeacon::detail::overlaps(p,n,controller,sizeof(*controller))||
-                nativewclbeacon::detail::overlaps(p,n,state->scanObservations,
-                                                 sizeof(*state->scanObservations))||
-                nativewclbeacon::detail::overlaps(p,n,state->wclResults,
-                                                 sizeof(*state->wclResults));
-        };
-        const auto writable=nativewclbeacon::detail::writableBytes(request.capacity);
-        if(aliasesController(request.output,sizeof(*request.output))||
-           (request.buffer&&aliasesController(request.buffer,writable)))
-            return kIOReturnBadArgument;
-        return wclResultsCode(bridge.reserve(scan,store,request.buffer,request.capacity,
-                                             *request.output));
-    }
-    case 2:{
-        // No IO80211 event sender has been proven. A caller cannot turn an
-        // offline draft into a purported native-menu delivery by asserting true.
-        // Check the exact reservation before aborting; an old ACK for the same
-        // scan token must not cancel a newer reserved frame.
-        const bool reserved=bridge.phase()==nativewclresults::Phase::reserved;
-        bridge.commit(request.frame,false,scan,store);
-        return reserved&&bridge.phase()==nativewclresults::Phase::aborted?
-            (request.accepted?kIOReturnUnsupported:kIOReturnSuccess):kIOReturnNotFound;
-    }
-    case 3:
-        if(bridge.phase()==nativewclresults::Phase::idle){
-            // A cancelled request can have no draft to retire. Clearing its
-            // orphaned token must still be possible without a later scan.
-            if(state->wclRequestValid&&state->foregroundScan.active())return kIOReturnBusy;
-        }else{
-            // Explicit abandonment of an undelivered draft is safe: no event
-            // sender exists, and a late commit remains token/phase rejected.
-            bridge.abort();
-            if(!bridge.retire())return kIOReturnBusy;
-        }
-        state->wclRequestToken={};state->wclRequestValid=false;
-        bzero(&state->wclRequest,sizeof(state->wclRequest));
-        return kIOReturnSuccess;
+    case 0:return armMacNetworkWclResults(state,request.token,
+                request.profileVerified,request.buffer,request.capacity);
+    case 1:return request.output?reserveMacNetworkWclResult(state,request.token,
+                request.buffer,request.capacity,*request.output):kIOReturnNotReady;
+    case 2:return commitMacNetworkWclResult(state,request.frame,request.accepted);
+    case 3:return retireMacNetworkWclResults(state,request.token);
     default:return kIOReturnBadArgument;
     }
 }

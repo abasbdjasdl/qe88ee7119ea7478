@@ -48,8 +48,12 @@ The pinned net80211 stack's two link-status calls are redirected through this
 host; the Ethernet host preserves its original current-medium/status calls.
 `MacNetworkSession.hpp` exposes one opaque create/prepare/start/stop/poll/destroy
 boundary and the same RTL8852BE boot-service factory used by the Ethernet
-owner. It also exposes gate-only status, completed-scan snapshots, WCL scan
-admission and network selection; the Ethernet owner now uses those same calls.
+owner. It also exposes gate-only status, completed-scan snapshots, foreground
+scan admission/status/cancellation, WCL scan admission and result-draft
+retirement, and network selection; the Ethernet owner now uses those same
+calls. Result buffers are rejected if they overlap the live session or owner.
+Draft result commits still reject a claim of native delivery because there is
+no registered IO80211 event sender.
 A future native owner can use this hardware session without inheriting from
 the Ethernet controller, but no native owner calls it yet.
 This is a source-level ownership seam, not a native service: the state still
