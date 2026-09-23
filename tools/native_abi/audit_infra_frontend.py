@@ -94,12 +94,18 @@ def main():
             raise ValueError(dict(level=level, vtable_errors=errors))
         imported = audit.object_undefined(obj)
         required = inherited | helper_symbols | set(contract['extra_imports'][level])
-        if imported != required:
+        # Apple Clang may lower the 5456-byte zero-initialized owned scratch
+        # member to libkern memset. Zig's Clang currently expands that init.
+        # This is the only permitted compiler-generated import; preserve it
+        # explicitly in the report rather than weakening the target ABI set.
+        generated = imported-required
+        allowed_generated = {'_memset'} if not args.zig else set()
+        if required-imported or generated-allowed_generated:
             raise ValueError(dict(level=level, missing=sorted(required-imported),
-                                  unexpected=sorted(imported-required)))
+                                  unexpected=sorted(generated-allowed_generated)))
         report['results'].append(dict(optimization=level, slots=len(table),
             overrides=target['table'].count('___cxa_pure_virtual'), object_sha256=sha(obj),
-            imports=sorted(imported), vtable=table))
+            imports=sorted(imported), compiler_generated_imports=sorted(generated), vtable=table))
     # A declaration drift that still compiles must be rejected by the full
     # table check. Mutated code stays in build output, never in shared sources.
     source = (HERE/'infra_frontend_prototype.cpp').read_text()

@@ -184,3 +184,12 @@ compiling extra-slot rejection. `build/native-infra-prototype/infra-audit.json`
 records object, source, decoder, plan, manifest, helper evidence and generated
 overlay hashes. No Mach-O object is executed by the audit. There has been no
 target-machine frontend test, deployment or reboot.
+
+The first macOS CI compile exposed one Apple-Clang code-generation difference:
+the zero-initialized, owned 5456-byte scan scratch member causes an external
+`_memset` import at O0, while local Zig Clang expanded it without that import.
+The audit now permits **only** this additional libkern memory primitive on the
+Apple-Clang path and records whether it appears at each optimization level;
+all pinned inherited methods, registration helpers and other imports remain
+exactly checked. This is a compiler-lowering allowance, not a private ABI
+symbol substitution or evidence of runtime startup.
