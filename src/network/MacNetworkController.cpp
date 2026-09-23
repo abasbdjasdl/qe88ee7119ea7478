@@ -40,6 +40,8 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     bool enabled{},faulted{},stopping{},scanDone{},authPending{},probePending{},runPending{},resetPending{};
     bool stateDeferred{};int deferredState{},deferredArgument{};
     selection::Pending pendingSelection;
+    MacLinkPublication linkPublication;
+    bool linkPublicationValid{};
     authevents::Queue authenticationEvents;
     uint64_t stateRequests[5]{},runCommitted{},portAuthorizations{},rxBridgeOk{},rxBridgeError{},txPrepareErrors{};
     uint64_t lastStateRequest{},lastRxBridgeError{},lastTxPrepareError{};
@@ -93,7 +95,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         authenticationEvents.disable();
         pendingSelection.clear();
         ic.ic_if.if_flags&=~IFF_RUNNING;
-        owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
+        owner.setLinkStatus(kIONetworkLinkValid);
         publishStatus();owner.setProperty("R16Failure",reason);IOLog("RTL8852BE network: %s\n",reason);
         // No reclamation from a receive/ACK callback. stop() later proves idle.
         if(interrupt)interrupt->stop();else if(runtimeAttempted)runtime.stop();
@@ -110,14 +112,14 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             // Stop host admission first; published frames retain the OLD channel
             // and scheduler until their real TXBD + RPQ completions arrive.
             traffic=t;phyWait.clear();if(pendingTx.frame)releaseTx(&ic,pendingTx);
-            owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
+            owner.setLinkStatus(kIONetworkLinkValid);
             if(actionInFlight||!dataDrained())return true;
             return boot->setTraffic(t);
         }
         if(actionInFlight||!boot->setTraffic(t))return false;
         if(t!=station::Traffic::authorized&&pendingTx.frame)releaseTx(&ic,pendingTx);
         traffic=t;
-        if(t!=station::Traffic::authorized)owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
+        if(t!=station::Traffic::authorized)owner.setLinkStatus(kIONetworkLinkValid);
         return true;
     }
     static bool stationAck(void *p,const FirmwareEvent &event,uint64_t epoch,uint64_t){
@@ -438,7 +440,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         credentials=false;ic.ic_flags&=~IEEE80211_F_AUTO_JOIN;
         stateDeferred=true;deferredState=IEEE80211_S_INIT;deferredArgument=-1;
         authPending=probePending=runPending=scanDone=false;
-        owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
+        owner.setLinkStatus(kIONetworkLinkValid);
         return kIOReturnSuccess;
     }
     bool applyPendingSelection(){
@@ -610,7 +612,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(ic.ic_state==IEEE80211_S_RUN&&station.state()==station::State::associated&&
            (!(ic.ic_flags&IEEE80211_F_RSNON)||ic.ic_bss->ni_port_valid)){
             if(!station.authorizePort(auth,now())){fail("controlled port authorization failed");return;}
-            ++portAuthorizations;owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid|kIONetworkLinkActive);
+            ++portAuthorizations;owner.setLinkStatus(kIONetworkLinkValid|kIONetworkLinkActive);
         }
         if(station.state()==station::State::authorized&&(ic.ic_flags&IEEE80211_F_RSNON)&&!ic.ic_bss->ni_port_valid)
             station.revokePort(auth,now());
@@ -622,7 +624,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         authenticationEvents.disable();
         stopping=true;enabled=false;traffic=station::Traffic::none;owner.timer_->cancelTimeout();
         pendingSelection.clear();
-        owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
+        owner.setLinkStatus(kIONetworkLinkValid);
         if(commands)commands->invalidate();
         // Disable the source first. No memory is released while a callback borrows it.
         bool idle=interruptAttached?interrupt->stop():true;
@@ -710,7 +712,7 @@ bool R16NetworkController::start(IOService *provider){
         if(!attachInterface(reinterpret_cast<IONetworkInterface**>(&interface_),true))goto failed;
     }
     IOLockLock(controlLock_);controlStopping_=false;IOLockUnlock(controlLock_);
-    IOEthernetController::setLinkStatus(kIONetworkLinkValid);registerService();interface_->registerService();
+    setLinkStatus(kIONetworkLinkValid);registerService();interface_->registerService();
     recordStartup(provider,52);return true;
 failed:
     recordStartup(provider,startupStage_,true);
@@ -743,7 +745,7 @@ IOReturn R16NetworkController::enableGated(OSObject *o,void *on,void*,void*,void
     if(s->enabled){s->ic.ic_if.if_flags|=IFF_UP|IFF_RUNNING;s->lastWatchdog=s->now();}
     else{s->authenticationEvents.disable();s->pendingSelection.clear();s->ic.ic_if.if_flags&=~(IFF_UP|IFF_RUNNING);s->stateDeferred=true;s->deferredState=IEEE80211_S_INIT;s->deferredArgument=-1;
         if(s->stationStarted)s->station.disconnect(s->now());
-        owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);}
+        owner.setLinkStatus(kIONetworkLinkValid);}
     return kIOReturnSuccess;
 }
 IOReturn R16NetworkController::enable(IONetworkInterface*){return gate_?gate_->runAction(enableGated,this):kIOReturnNotReady;}
@@ -765,8 +767,21 @@ IOReturn R16NetworkController::copyWirelessStatus(wireless::Snapshot &out){
     memset(&out,0,sizeof(out));
     return runControlAction(wirelessStatusGated,&out);
 }
+IOReturn R16NetworkController::linkPublicationGated(OSObject *o,void *output,void*,void*,void*){
+    if(!output)return kIOReturnBadArgument;
+    auto *state=static_cast<R16NetworkController*>(o)->state_;
+    if(!state||!state->linkPublicationValid||!state->linkPublication.revision)return kIOReturnNotReady;
+    *static_cast<MacLinkPublication*>(output)=state->linkPublication;
+    return kIOReturnSuccess;
+}
+IOReturn R16NetworkController::copyLinkPublication(MacLinkPublication &out){
+    out={};return runControlAction(linkPublicationGated,&out);
+}
 namespace {
 struct AuthenticationRequest {void *client;uint32_t operation;authevents::Event *output;};
+struct LinkStatusRequest {
+    UInt32 status;const IONetworkMedium *medium;UInt64 speed;OSData *data;bool applied{};
+};
 }
 IOReturn R16NetworkController::authenticationGated(OSObject *owner,void *arg,void*,void*,void*){
     const auto &request=*static_cast<AuthenticationRequest*>(arg);
@@ -800,9 +815,32 @@ UInt32 R16NetworkController::outputPacket(mbuf_t m,void*){
     if(!gate_){mbuf_freem(m);return result;}
     if(gate_->runAction(outputGated,m,&result)!=kIOReturnSuccess)mbuf_freem(m);return result;
 }
-bool R16NetworkController::setLinkStatus(UInt32 status,const IONetworkMedium *medium,UInt64 speed,OSData *data){
+bool R16NetworkController::applyLinkStatus(UInt32 status,const IONetworkMedium *medium,UInt64 speed,OSData *data){
     if(!state_||state_->traffic!=station::Traffic::authorized)status&=~kIONetworkLinkActive;
-    return IOEthernetController::setLinkStatus(status,medium,speed,data);
+    const bool applied=IOEthernetController::setLinkStatus(status,medium,speed,data);
+    if(state_){
+        state_->linkPublicationValid=applied;
+        state_->linkPublication.record(applied,status,state_->identity.epoch,
+            state_->pendingSelection.generation(),state_->now());
+    }
+    return applied;
+}
+IOReturn R16NetworkController::linkStatusGated(OSObject *o,void *argument,void*,void*,void*){
+    auto *owner=static_cast<R16NetworkController*>(o);
+    if(!argument||!owner->state_)return kIOReturnNotReady;
+    auto &request=*static_cast<LinkStatusRequest*>(argument);
+    request.applied=owner->applyLinkStatus(request.status,request.medium,request.speed,request.data);
+    return kIOReturnSuccess;
+}
+bool R16NetworkController::setLinkStatus(UInt32 status,const IONetworkMedium *medium,UInt64 speed,OSData *data){
+    // Preserve superclass initialization/teardown calls before/after State exists.
+    // They can only publish an inactive link and have no observer snapshot.
+    if(!state_)return applyLinkStatus(status,medium,speed,data);
+    // Internal transitions already own the gate (including shutdown after the
+    // external-call fence closes). Never invert controlLock -> gate here.
+    if(loop_&&loop_->inGate())return applyLinkStatus(status,medium,speed,data);
+    LinkStatusRequest request{status,medium,speed,data};
+    return runControlAction(linkStatusGated,&request)==kIOReturnSuccess&&request.applied;
 }
 void R16NetworkController::releaseResources(){
     // Drain in-flight control calls before dismantling gate/state; reject new

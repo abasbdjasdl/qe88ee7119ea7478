@@ -3,6 +3,7 @@
 #include "../src/network/NativeWirelessData.hpp"
 #include "../src/network/NativeWirelessRequests.hpp"
 #include "../src/network/NativeWirelessDispatch.hpp"
+#include "../src/network/MacNetworkController.hpp"
 using namespace rtl8852be::network;
 #define CHECK(x) do { if(!(x))return __LINE__; } while(0)
 struct AdapterTestBackend {
@@ -18,6 +19,26 @@ struct AdapterTestBackend {
     IOReturn disconnectWirelessNetwork(){++disconnected;return kIOReturnSuccess;}
 };
 extern "C" int R16NativeAdapterTest(){
+    MacLinkPublication publication;
+    CHECK(!publication.revision);
+    CHECK(!publication.record(false,kIONetworkLinkValid,10,1,100)&&!publication.revision);
+    CHECK(publication.record(true,kIONetworkLinkValid,10,1,100));
+    CHECK(publication.revision==1&&publication.epoch==10&&publication.selectionGeneration==1&&
+        publication.changedAtUs==100&&publication.status==kIONetworkLinkValid);
+    CHECK(!publication.record(true,kIONetworkLinkValid,10,1,110));
+    CHECK(publication.revision==1&&publication.changedAtUs==100);
+    CHECK(!publication.record(false,kIONetworkLinkValid|kIONetworkLinkActive,10,1,120));
+    CHECK(publication.revision==1&&publication.status==kIONetworkLinkValid);
+    CHECK(publication.record(true,kIONetworkLinkValid|kIONetworkLinkActive,10,1,130));
+    CHECK(publication.revision==2&&publication.changedAtUs==130);
+    CHECK(publication.record(true,kIONetworkLinkValid,10,2,140));
+    const auto copiedPublication=publication;
+    CHECK(publication.record(true,kIONetworkLinkValid,10,3,150));
+    CHECK(publication.revision==4&&copiedPublication.revision==3&&copiedPublication.selectionGeneration==2);
+    CHECK(publication.record(true,kIONetworkLinkValid,11,3,160)&&publication.revision==5);
+    // Zero remains reserved for no publication even after counter rollover.
+    publication.revision=~uint64_t(0);
+    CHECK(publication.record(true,kIONetworkLinkValid,12,3,170)&&publication.revision==1);
     apple80211_assoc_data a{};selection::Join out;
     CHECK(nativewifi::decodeAssociation(nullptr,out)==kIOReturnBadArgument);
     a.version=APPLE80211_VERSION;a.ad_mode=APPLE80211_AP_MODE_INFRA;

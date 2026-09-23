@@ -14,6 +14,21 @@
 struct ieee80211com;
 class IOEthernetInterface;
 namespace rtl8852be { namespace network {
+// Pointer/key-free observation of the most recent successfully applied link
+// status. A native frontend polls from its own queue; this is not a callback or
+// a lossless association-event stream. revision==0 means no publication yet.
+struct MacLinkPublication {
+    uint64_t revision{},epoch{},selectionGeneration{},changedAtUs{};
+    UInt32 status{};
+    bool record(bool applied,UInt32 nextStatus,uint64_t nextEpoch,
+                uint64_t nextSelection,uint64_t nowUs){
+        if(!applied)return false;
+        if(revision&&status==nextStatus&&epoch==nextEpoch&&selectionGeneration==nextSelection)return false;
+        if(!++revision)++revision;
+        status=nextStatus;epoch=nextEpoch;selectionGeneration=nextSelection;changedAtUs=nowUs;
+        return true;
+    }
+};
 struct MacBootIdentity {
     uint64_t epoch{}; // New real firmware/RX incarnation, not an operation counter.
     station::Interface interface{};
@@ -70,7 +85,10 @@ class R16NetworkController : public IOEthernetController {
     static IOReturn outputGated(OSObject*,void*,void*,void*,void*);
     static IOReturn selectionGated(OSObject*,void*,void*,void*,void*);
     static IOReturn wirelessStatusGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn linkStatusGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn linkPublicationGated(OSObject*,void*,void*,void*,void*);
     static IOReturn authenticationGated(OSObject*,void*,void*,void*,void*);
+    bool applyLinkStatus(UInt32,const IONetworkMedium*,UInt64,OSData*);
     static void timer(OSObject*,IOTimerEventSource*);
     void releaseResources();
     unsigned startupStage_{};
@@ -92,11 +110,16 @@ public:
     IOReturn enable(IONetworkInterface*) override;
     IOReturn disable(IONetworkInterface*) override;
     UInt32 outputPacket(mbuf_t,void*) override;
+    // State transitions use virtual dispatch. A derived frontend must chain to
+    // this implementation and defer framework notifications outside the gate.
     bool setLinkStatus(UInt32,const IONetworkMedium * = nullptr,UInt64 = 0,OSData * = nullptr) override;
     // Kernel-side native UI adapter entry points. Success means queued only.
     // They never publish credentials through IORegistry or a property setter.
     IOReturn selectWirelessNetwork(const rtl8852be::network::selection::Join&);
     IOReturn disconnectWirelessNetwork();
     IOReturn copyWirelessStatus(rtl8852be::network::wireless::Snapshot&);
+    // Same external-call/stop fence as copyWirelessStatus. Never call while
+    // holding the hardware gate. Failure clears out; stop rejects new readers.
+    IOReturn copyLinkPublication(rtl8852be::network::MacLinkPublication&);
     IOReturn authenticationEvents(void *client,uint32_t operation,rtl8852be::network::authevents::Event* = nullptr);
 };

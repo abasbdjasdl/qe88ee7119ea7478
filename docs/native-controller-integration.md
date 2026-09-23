@@ -1,0 +1,208 @@
+# Native Wi-Fi controller integration: existing WPA2 data path
+
+This is a source audit and integration contract, not an implemented native
+interface or evidence that the macOS Wi-Fi menu can select a network. Scope is
+the existing WPA2-Personal path and current radio policy. No SAE, additional
+bands, or new authentication capability is needed to make this first integration.
+
+## Evidence profiles
+
+The reference checkout is `../itlwm-reference`, commit
+`53c51c2cdd6e4b69beb91f310d74c53422b0f8bd`. Its `AirportItlwmV2` implementation
+and private headers describe a Sonoma-era architecture. They are a useful
+integration example, **not a verified Sequoia C++ ABI**.
+
+The local Sequoia 15.4.1 KC has SHA-256
+`d8b50fc25bbe4c9f6923a9344ae34e760e1c98b06b23513e4a73e494019865e1`.
+See [native-wcl-evidence.md](native-wcl-evidence.md) for the actual WCL producer,
+consumer, dispatch and message-length evidence. The existing
+`tools/build_native_contract.py` uses `__IO80211_TARGET=140400`; targeting
+`x86_64-apple-macos15.0` does not make those private declarations Sequoia-compatible.
+
+## Reuse the data path; add the native control/interface graph
+
+The pinned reference uses this graph:
+
+```text
+IOPCIDevice
+  AirportItlwm : IO80211Controller
+    AirportItlwmSkywalkInterface : IO80211InfraProtocol   native control plane
+    AirportItlwmEthernetInterface : IOEthernetInterface  BSD mbuf data plane
+```
+
+Sources: `AirportItlwm/AirportItlwmV2.hpp`, `AirportItlwmSkywalkInterface.hpp`,
+`AirportItlwmEthernetInterface.hpp`, and `AirportItlwmV2.cpp::start/createInterface`.
+`include/Airport/IO80211Controller.h` itself derives from `IOEthernetController`.
+The native interface is attached to both its provider and IO80211Controller;
+the BSD interface is created through `IONetworkController::attachInterface`.
+`AirportItlwmEthernetInterface::attachToDataLinkLayer` passes the real BSD ifnet
+to `prepareBSDInterface` and synchronizes the native interface name/unit/MAC.
+
+The RTL driver currently has only `R16NetworkController : IOEthernetController`
+and one `IOEthernetInterface`. The minimal structural change is a separately
+selected native build/profile with an IO80211Controller-derived controller,
+native infrastructure interface and BSD bridge, retaining the existing State,
+boot service, net80211 owner, PCI owner and DMA queues. Update the metaclass,
+base start/stop/free/configure calls, createInterface, native enable/disable
+overloads, work queue and media publication together. Adding another independent
+PCI-matching controller beside the existing owner is not this design.
+
+| Integration point | Existing implementation to preserve | Necessary native connection |
+| --- | --- | --- |
+| RX | `MacNetworkController.cpp::State::deliver` feeds `deliverRealtekRx`; net80211 decrypts/decapsulates into mbufs | Keep `ic.ic_if.iface` pointing at the **BSD IOEthernetInterface-compatible bridge**. Pinned `_mbuf.cpp::_if_input` calls its `inputPacket` and `flushInputQueue`. Never assign an IO80211InfraProtocol pointer there. |
+| TX | `outputPacket` -> `outputGated` -> `if_snd.queue->lockEnqueue` -> `pumpTx` | Route the native service's BSD output to this same entry point. Preserve one mbuf owner, free-on-drop semantics and `Traffic::authorized` gating. No second raw-802.11/Skywalk data path is required by the reference design. |
+| Protocol owner | `attachProtocol`, one net80211 runtime/gate, `MacNetworkBootService` | Keep one owner and existing hardware-completion callbacks. Native requests translate into bounded commands to that owner. |
+| Link state | `State::poll` authorizes after hardware association, RUN and `ni_port_valid`; `setLinkStatus` also checks authorized traffic | Publish BSD and native link changes from a common transition helper, with generation and retained event data. Notify native link/running state and SSID/BSSID changes only through the verified target ABI. |
+| Join | `selectWirelessNetwork` -> `queueSelection` -> disconnect/drain -> `applyPendingSelection` -> `ieee80211_add_ess` | Decode the actual target request into `selection::Join`; return queued status, then emit real association/failure/authorized transitions. Preserve old-key/drain ordering. |
+| Disconnect/power | `disconnectWirelessNetwork`, `enableGated`, shutdown fencing | Route native disconnect and power changes to these state transitions; cancel pending joins/scans, invalidate callback generations and publish terminal state. |
+| Status | `copyWirelessStatus`, `NativeWirelessData.hpp` | Serve one consistent gated snapshot for each request. Extend only with measured/observed fields; advertise only the existing supported policy. |
+
+The reference's BSD bridge `getProvider()` override is explicitly described
+upstream as a hack, and its startup writes directly into two private
+`mExpansionData` registration pointers. These details cannot be transplanted
+without proving the matching Sequoia layout and lifetime rules. The same applies
+to the reference's `reportLinkStatus(3, 0x80)`/`(1, 0)` constants.
+
+## Link groundwork now present; native notifications still missing
+
+All `MacNetworkController.cpp` State, startup and enable/disable link updates now
+use virtual `setLinkStatus`; the only qualified IOEthernetController call is in
+`applyLinkStatus`. It preserves the existing authorized-traffic guard and records
+an observation only after the base status update succeeds. Runtime updates from
+outside the hardware gate use the existing `controlLock_ -> gate_` fence; internal
+updates, including shutdown, never reacquire `controlLock_` from the gate.
+
+`copyLinkPublication(MacLinkPublication&)` is the pointer/key-free observation
+path for a future native frontend running on its own queue. The copy contains
+revision, hardware epoch, selection generation, last-change monotonic timestamp
+and actual applied status bits. Duplicate status/epoch/selection tuples do not
+advance the revision; a failed base update does not publish requested state and
+makes snapshot reads fail until a later successful update.
+Revision zero means no publication yet. The counter skips zero on wrap; compare
+revisions for inequality, not a perpetual numerical ordering. The copy is gated,
+cleared on failure, and rejected after the external stop fence closes. The
+frontend must invalidate its own state and remembered revision on a failed read
+or stop instead of retaining a prior up snapshot. This latest-state view is not a lossless stream of transient association
+events, nor an IO80211 notification. No observer function is invoked under the
+hardware gate. A derived setLinkStatus override must chain to the base and defer
+framework notifications; it must not call the external snapshot API from the gate.
+
+The controller currently installs `ic_newstate`, but no `ic_event_handler`.
+The pinned net80211 implementation emits:
+
+| Source event | Source location in the pinned tree | Meaning for the adapter |
+| --- | --- | --- |
+| `IEEE80211_EVT_STA_ASSOC_DONE` | `itl80211/openbsd/net80211/ieee80211_input.c`, association response handler | Association response processed; not WPA2 key completion or proof of IP connectivity. |
+| `IEEE80211_EVT_STA_DEAUTH` | Same file, deauthentication handler | Link loss with a bounded copy of reason/current generation; never retain the node pointer. |
+| `IEEE80211_EVT_SCAN_DONE` | `ieee80211_node.c::ieee80211_end_scan` | End of a net80211 channel scan; distinct from one hardware dwell finishing. |
+
+Add the event hook plus an adapter-owned operation identity. Event payloads
+must carry the hardware incarnation and selection/scan generation, copied under
+the hardware gate; drop stale completions after disconnect, cancel, stop or a new
+request. Association timeouts and hardware failures also need a terminal native
+result because they are not guaranteed to produce a successful assoc-done event.
+WPA2 data link-up still comes from controlled-port authorization, never from
+`queueSelection` success or the earlier association event.
+
+## Scanning is a missing operation, not just a missing result getter
+
+The current startup poll begins a scan only when `enabled && credentials`.
+With no provisioned network, merely registering the native interface will not
+produce the menu's initial list. Add an explicit scan request independent of
+credentials, with a bounded request, generation, cancellation and deadline.
+
+`State::scanFinished` sets `scanDone` after one StationController channel visit;
+poll then calls `ieee80211_next_scan`. Do not post whole-scan completion there.
+Use `IEEE80211_EVT_SCAN_DONE` for the matching complete request and take a stable
+cache snapshot at that boundary. The pinned AirportItlwm `fakeScanDone` timer
+posts after 100 ms regardless of RF completion; it is not an appropriate completion
+source for this driver.
+
+There is also a connected-state constraint: current `newState(S_SCAN)` disconnects
+when the station is not idle. Wiring a native refresh directly to
+`ieee80211_begin_cache_bgscan` would not establish nondisruptive background scans.
+The first adapter must explicitly distinguish a disconnected foreground scan
+from a connected request. Until a real background channel/restore operation is
+implemented, preserve the current connection and return the target framework's
+verified busy/cached-result behavior; do not report an unperformed fresh scan.
+
+`WirelessStatus::Network` currently retains only SSID/BSSID/channel, percentage
+signal, privacy and collapsed RSN flags. It does not retain the raw bounded RSN/
+WPA IE, beacon interval/capabilities, rates or observation age that the reference
+`convertNodeToScanResult` uses. Extend a separate bounded scan view or the snapshot
+under the gate to copy those actual observations. Keep count/IE/rate limits and
+explicit truncation, and use an owned view plus cursor/generation instead of
+holding RB-tree node pointers across native requests. Do not invent dBm/noise
+from percentages or reconstruct a lossy security IE as if it came from the AP.
+
+## Join credentials, dispatch and gate contract
+
+`NativeWirelessRequests.hpp` currently decodes the pinned legacy
+`apple80211_assoc_data`: infra/open lower auth, bounded SSID/IE and an explicit
+32-byte PMK for WPA2-Personal. It wipes temporary credentials and queues the
+existing selection operation. This is reusable validation **after** the real
+framework request has been identified and copied into owned kernel memory.
+
+`NativeWirelessDispatch.hpp` currently supports GET SSID/BSSID/CHANNEL/RSSI and
+SET ASSOCIATE/DISASSOCIATE only. It does not register any IO80211 service, handle
+scan requests, report power/capabilities/state, or establish the Sequoia menu's
+credential route. Unsupported operations must remain unsupported rather than
+returning success from empty methods. Required capability, power, interface,
+current-network and scan operations should be added according to verified
+framework callers and conservative existing-driver capability values.
+
+The KC evidence proves a WCL candidate message of 988 bytes for command `0x1ba`
+and a scan message of 5456 bytes for `0x1b9`; it does **not** prove the legacy
+association struct is the Sequoia menu's request. `NativeWclCandidates.hpp` is
+observation-only and deliberately cannot supply an SSID or credential. The actual
+SSID/PMK request delivery and completion identity must be resolved before a menu
+selection can invoke `selectWirelessNetwork` correctly. If the framework supplies
+a passphrase rather than PMK, use a bounded, wiped, non-gate-blocking derivation
+path with a verified request lifetime; do not reinterpret bytes as a PMK.
+
+The existing WPA2 net80211 supplicant/key installation remains the handshake
+owner in this first integration. Do not also enable `USE_APPLE_SUPPLICANT` or
+feed/install the same EAPOL keys twice. Native UI control does not by itself
+require replacing the working WPA2 key exchange.
+
+`runControlAction` locks `controlLock_` then the hardware command gate and
+explicitly rejects callers already inside `loop_->inGate()`. Consequently native
+callbacks cannot blindly call `selectWirelessNetwork` or `copyWirelessStatus`
+while holding that gate. Either use a separately fenced frontend queue entering
+the existing external methods, or add explicit internal gate-owned methods whose
+callers already satisfy stop/lifetime protection. Do not acquire `controlLock_`
+from the gate and invert the shutdown lock order. Copy event/status data under
+the gate and send framework notifications outside it unless the target ABI
+expressly requires a compatible, proven gate context.
+
+## Minimal implementation sequence and proof required
+
+1. Verify the Sequoia controller/infra/bridge constructors, class sizes and virtual
+   slots; work queue, registration, attach/detach and request argument signatures;
+   WCL scan/join credential route; and notification payload/ownership semantics.
+   A Sonoma header-only compile or a found symbol is insufficient for these.
+2. Add the native controller/interface/bridge build profile and required bundle
+   dependencies/personality, while preserving the existing hardware/backend owner.
+   Test unloaded construction/dispatch contracts before any real load.
+3. Add the bounded foreground-scan operation, stable scan results, real completion
+   events and conservative power/capability/status responses. Add the framework
+   join adapter to the existing drain-and-select path and unify link publication.
+4. Preserve startup rollback, stop request draining and DMA-retention safeguards.
+   Stop/cancel native callbacks before detaching the interfaces; keep the objects
+   alive if existing hardware shutdown cannot prove DMA idle. Native notifications
+   must not dereference State or a BSD interface after teardown.
+5. Test an actual native IORegistry service graph, initial menu scan without
+   `R16SSID`, selection of an existing WPA2 network, correct/wrong passwords,
+   switch between two networks, disconnect/reconnect, power off/on and stop during
+   scan/join. Confirm link is down before key completion, then DHCP and bidirectional
+   network traffic after authorization. An icon alone proves none of those paths.
+
+Existing `network_wireless_selection_test.cpp`, `network_wireless_status_test.cpp`,
+`network_native_adapter_test.cpp` and `network_native_wcl_candidates_test.cpp`
+cover pieces of bounded data/selection translation. `build_native_contract.py`
+compiles private-header declarations and runs offline byte-view tests. None tests
+native service registration, Sequoia virtual dispatch, real scan completion,
+framework credential delivery or menu-driven association. Add focused adapter
+tests for stale generations, cancellation, exact terminal callbacks, real scan
+vs cached views, link authorization and stop/reentrant-request races; report those
+separately from the hardware/menu validation.
