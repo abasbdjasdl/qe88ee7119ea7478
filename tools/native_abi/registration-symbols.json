@@ -43,6 +43,17 @@
       "mach_o": {"n_type": 15, "n_sect": 1, "n_desc": 0, "external": true, "private_external": false}
     },
     {
+      "name": "txCompletionWithPool",
+      "wrapper": "_r16_registration_tx_completion_queue",
+      "symbol": "__ZN26IOSkywalkTxCompletionQueue8withPoolEP25IOSkywalkPacketBufferPooljjP8OSObjectPFjS3_PS_PP15IOSkywalkPacketjPvES8_j",
+      "address": "0xffffff800297da84",
+      "return_contract": "Owned IOSkywalkTxCompletionQueue pointer on successful init; failure releases the new object and returns null. This does not establish callback quiescence or safe release of a live queue.",
+      "return_evidence": ["0xffffff800297db0c", "0xffffff800297db16", "0xffffff800297db19", "0xffffff800297db1b"],
+      "input_contract": "Seven-argument factory. Initializer rejects null pool, capacity less than 2, or nonzero options. Completion callback returns unsigned and takes IOSkywalkPacket **, distinct from submission's packet * const * callback. Successful creation alone does not enable a queue or register it.",
+      "input_evidence": ["0xffffff800297db41", "0xffffff800297db47", "0xffffff800297db4f", "0xffffff800297db58"],
+      "mach_o": {"n_type": 15, "n_sect": 1, "n_desc": 0, "external": true, "private_external": false}
+    },
+    {
       "name": "initRegistrationInfo",
       "wrapper": "_r16_registration_init_info",
       "symbol": "__ZN26IOSkywalkEthernetInterface20initRegistrationInfoEPNS_16RegistrationInfoEjm",
