@@ -23,6 +23,12 @@ public:
     R16NativeControllerAudit() = delete;
     ~R16NativeControllerAudit() override;
 
+    // IONetworkController::start -> createWorkLoop -> createWorkQueue.
+    // The pinned IO80211 default returns false even when our getter is ready.
+    // Support preparation owns allocation; never allocate a second queue here.
+    bool createWorkQueue() override {
+        return r16_startup_work_queue(ledger_)!=nullptr;
+    }
     IO80211WorkQueue *getWorkQueue() const override {
         return r16_startup_work_queue(ledger_);
     }

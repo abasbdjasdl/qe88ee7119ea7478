@@ -297,12 +297,16 @@ def main():
     helper_evidence = json.loads(REGISTRATION_SYMBOLS.read_text())
     if helper_evidence['kernel_sha256'] != manifest['kernel_sha256']:
         raise ValueError('Registration helpers and vtables must have the same KC profile')
-    with (out / 'registration-compiler-diagnostics.txt').open('w') as diagnostics:
-        # This object is never executed: inspect only its eight direct calls.
-        # Disable Zig's implicit debug instrumentation instead of silently
-        # accepting additional sanitizer imports as registration helpers.
-        subprocess.run([*compiler, *flags, '-fno-sanitize=all', '-c', str(REGISTRATION_SOURCE), '-o',
-                        str(out / 'registration-probe.o')], stdout=diagnostics, stderr=diagnostics, check=True)
+    for optimization, object_name in (('-O0','registration-probe.o'),('-O2','registration-probe-O2.o')):
+        with (out / (object_name + '.diagnostics')).open('w') as diagnostics:
+            # Never executed: inspect the direct calls at both optimization levels.
+            # Disable implicit instrumentation instead of accepting extra imports.
+            subprocess.run([*compiler, *flags, optimization, '-fno-sanitize=all', '-c',
+                            str(REGISTRATION_SOURCE), '-o', str(out / object_name)],
+                           stdout=diagnostics, stderr=diagnostics, check=True)
+        current = audit_helper_symbols(helper_evidence, object_undefined(out / object_name))
+        if current['missing'] or current['unexpected']:
+            raise RuntimeError('Registration helper symbol mismatch at '+optimization+': '+repr(current))
     helper_report = audit_helper_symbols(helper_evidence, object_undefined(out / 'registration-probe.o'))
     (out / 'registration-symbol-audit.json').write_text(json.dumps(helper_report, indent=2))
     if helper_report['missing'] or helper_report['unexpected']:
@@ -319,7 +323,7 @@ def main():
         raise RuntimeError('Support helper symbol mismatch: ' + repr(support_report))
     inputs = [ROOT / 'tools/build_native_sequoia.py', MANIFEST, REGISTRATION_SOURCE, REGISTRATION_SYMBOLS,
               SUPPORT_SOURCE, SUPPORT_OPTIONS, SUPPORT_SYMBOLS]
-    generated = [out / 'probe.cpp', out / 'probe.o', out / 'registration-probe.o',
+    generated = [out / 'probe.cpp', out / 'probe.o', out / 'registration-probe.o', out / 'registration-probe-O2.o',
                  out / 'registration-symbol-audit.json', out / 'support-probe.o',
                  out / 'support-symbol-audit.json', *sorted((out / 'include').rglob('*.h'))]
     metadata = dict(scope=SCOPE, manifest_sha256=digest(MANIFEST), kernel_sha256=manifest['kernel_sha256'],

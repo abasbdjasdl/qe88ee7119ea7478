@@ -1,0 +1,33 @@
+name: Build VM-only native controller lifecycle probe
+on:
+  workflow_dispatch:
+  push:
+    branches: [native-vm-init-20260923]
+    paths: ['tools/native_vm/**', 'tools/native_abi/**', 'tools/build_native_sequoia.py', '.github/workflows/native-vm-probe.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Fetch pinned headers
+        run: |
+          git init build-itlwm
+          git -C build-itlwm remote add origin https://github.com/OpenIntelWireless/itlwm.git
+          git -C build-itlwm fetch --depth 1 origin 53c51c2cdd6e4b69beb91f310d74c53422b0f8bd
+          git -C build-itlwm checkout --detach FETCH_HEAD
+          git init MacKernelSDK
+          git -C MacKernelSDK remote add origin https://github.com/acidanthera/MacKernelSDK.git
+          git -C MacKernelSDK fetch --depth 1 origin 05094e5e88cec7caedbfb35e8449ed0db94bf95b
+          git -C MacKernelSDK checkout --detach FETCH_HEAD
+      - name: Compile and link; never load on runner
+        run: python3 tools/native_vm/build_lifecycle_probe.py build-itlwm MacKernelSDK --out build/native-vm
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-vm-init-probe
+          path: |
+            build/native-vm/R16NativeVMProbe.kext
+            build/native-vm/probe-build.json
+          if-no-files-found: error
