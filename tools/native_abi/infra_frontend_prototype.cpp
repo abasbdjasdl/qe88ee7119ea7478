@@ -9,48 +9,18 @@
 #include <Airport/Apple80211.h>
 #include <sys/errno.h>
 #include "native_infra_scan_bridge.hpp"
-#include "native_session_scan_adapter.hpp"
-#include "native_session_scan_reader.hpp"
 
 class R16InfraFrontend : public IO80211InfraProtocol {
     r16_infra_audit::ScanBridge scan_;
-    r16_infra_audit::SessionScanAdapter *sessionScan_{}; // borrowed until drained/unbound
-    r16_infra_audit::Status (*abortScan_)(void *,r16_infra_audit::Identity){};
-    static IOReturn scanReturn(r16_infra_audit::Status status){
-        using r16_infra_audit::Status;
-        switch(status){
-        case Status::accepted:return kIOReturnSuccess;
-        case Status::badArgument:return kIOReturnBadArgument;
-        case Status::unsupported:return kIOReturnUnsupported;
-        case Status::notReady:case Status::stale:return kIOReturnNotReady;
-        case Status::busy:return kIOReturnBusy;
-        case Status::failed:return kIOReturnError;
-        }
-        return kIOReturnError;
-    }
 public:
     R16InfraFrontend() : IO80211InfraProtocol(nullptr) {}
     ~R16InfraFrontend() override;
     // Binding is only legal under the future owner gate before registration.
     bool bindScan(r16_infra_audit::Backend backend, uint64_t epoch) { return scan_.bind(backend, epoch); }
-    bool bindSessionScan(r16_infra_audit::SessionScanAdapter &session,
-                         r16_infra_audit::SessionScanReader &reader,uint64_t epoch) {
-        if(sessionScan_||reader.session()!=session.session()||reader.epoch()!=epoch||session.epoch()!=epoch)return false;
-        if(!scan_.bind(session.backend(reader.backend()),epoch))return false;
-        sessionScan_=&session;abortScan_=r16_infra_audit::SessionScanAdapter::abort;return true;
-    }
-    bool retireSessionScan(r16_infra_audit::SessionScanAdapter &session,
-                           r16_infra_audit::Identity identity) {
-        return sessionScan_==&session&&session.retire(scan_,identity);
-    }
-    bool retireScan(r16_infra_audit::Identity identity) { return !sessionScan_&&scan_.terminal(identity); }
-    bool unbindIdleScan() {
-        if(sessionScan_&&!sessionScan_->idle())return false;
-        if(!scan_.unbindIdle())return false;
-        abortScan_=nullptr;sessionScan_=nullptr;return true;
-    }
-    // MAC agent checks a full IOReturn after this call. Until a real hardware
-    // programming callback is bound, fail explicitly and close scan admission.
+    bool retireScan(r16_infra_audit::Identity identity) { return scan_.terminal(identity); }
+    bool unbindIdleScan() { return scan_.unbindIdle(); }
+    // The native MAC agent consumes a full IOReturn. Fail explicitly instead
+    // of pretending to program a MAC. Runtime construction is still blocked.
     IOReturn setMacAddress(ether_addr&) override { scan_.poison(); return kIOReturnNotReady; }
     IOReturn getCHANNEL(apple80211_channel_data*) override { return kIOReturnUnsupported; }
     IOReturn getPOWERSAVE(apple80211_powersave_data*) override { return kIOReturnUnsupported; }
@@ -174,14 +144,7 @@ public:
     IOReturn setWCL_LEGACY_ROAM_PROFILE_CONFIG(apple80211_legacy_roam_profile_config*) override { return kIOReturnUnsupported; }
     IOReturn setWCL_ROAM_PROFILE_CONFIG(apple80211_roam_profile_config*) override { return kIOReturnUnsupported; }
     IOReturn setWCL_ROAM_USER_CACHE(apple80211_user_roam_cache*) override { return kIOReturnUnsupported; }
-    IOReturn setWCL_SCAN_ABORT(void*) override {
-        // WCL command 0x1b3 carries no payload. Never dereference its argument,
-        // invent a scan-done event, or unbind while the radio is draining.
-        if(!sessionScan_||!abortScan_)return kIOReturnNotReady;
-        const auto identity=scan_.inFlight();
-        if(!identity.generation)return kIOReturnNotReady;
-        return scanReturn(abortScan_(sessionScan_,identity));
-    }
+    IOReturn setWCL_SCAN_ABORT(void*) override { return kIOReturnUnsupported; }
     IOReturn setWCL_REAL_TIME_MODE(apple80211_wcl_real_time_mode*) override { return kIOReturnUnsupported; }
     IOReturn setWCL_ARP_MODE(apple80211_wcl_arp_mode*) override { return kIOReturnUnsupported; }
     IOReturn setWCL_JOIN_ABORT(void*) override { return kIOReturnUnsupported; }
@@ -264,8 +227,6 @@ public:
 };
 R16InfraFrontend::~R16InfraFrontend() {}
 static_assert(!__is_abstract(R16InfraFrontend), "Every pure callback must be explicit");
-static_assert(__is_same(decltype(&R16InfraFrontend::setMacAddress),IOReturn(R16InfraFrontend::*)(ether_addr&)),
-              "MAC programming callback must define the EAX status checked by the native agent");
 static_assert(sizeof(IO80211InfraProtocol) == 288, "Wrong target overlay size");
 static_assert(sizeof(R16InfraFrontend) >= 288 + sizeof(r16_infra_audit::ScanBridge),
               "Owned state must follow the complete native base");

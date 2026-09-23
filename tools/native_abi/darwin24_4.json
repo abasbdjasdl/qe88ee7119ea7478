@@ -1430,8 +1430,8 @@
         {
           "slot": 335,
           "signature": "setHardwareAddress(ether_addr*)",
-          "return": "void",
-          "return_evidence": "pinned-reference-return-unverified",
+          "return": "IOReturn",
+          "return_evidence": "target-base-EAX-297c01a-and-Skywalk-status-tailcall-225eb0f",
           "pure": false,
           "symbol": "__ZN26IOSkywalkEthernetInterface18setHardwareAddressEP10ether_addr"
         },
@@ -2138,8 +2138,8 @@
         {
           "slot": 335,
           "signature": "setHardwareAddress(ether_addr*)",
-          "return": "void",
-          "return_evidence": "pinned-reference-return-unverified",
+          "return": "IOReturn",
+          "return_evidence": "target-errors-EAX-225eb2e-225eb4f-and-MacAddressAgent-tailcall",
           "pure": false,
           "symbol": "__ZN23IO80211SkywalkInterface18setHardwareAddressEP10ether_addr"
         },

@@ -60,9 +60,17 @@ on failure at `225b21b` before updating its stored address. Independently,
 
 The prototype now explicitly returns `kIOReturnNotReady` until a hardware
 programming callback is bound. Its member-pointer static assertion prevents a
-return-type regression. This correction does not establish the separately
-named `setHardwareAddress` return contract, nor prove address initialization,
-interface registration, or hardware programming works.
+return-type regression. This does not prove address initialization, interface
+registration, or hardware programming works.
+
+The separately named raw slot 335 `setHardwareAddress(ether_addr*)` is also
+`IOReturn` throughout the inheritance chain. The IOSkywalkEthernetInterface
+base sets EAX to `0xe00002c7` at `297c01a`. The IO80211SkywalkInterface override
+returns `0xe00002c2` for null input at `225eb2e`, `0xe00002bc` for a missing
+MAC agent at `225eb4f`, and otherwise tail-calls the above status-returning
+MacAddressAgent at `225eb0f`. Both declarations are corrected together. The
+existing private expansion must already exist before invoking this setter;
+its pointer is dereferenced before the MAC-agent null check.
 
 ## Return types not established; do not silently guess
 
