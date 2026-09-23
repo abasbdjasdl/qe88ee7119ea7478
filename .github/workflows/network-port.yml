@@ -34,7 +34,9 @@ jobs:
           import hashlib
           from pathlib import Path
           path = Path('build-itlwm/include/Airport/apple80211_var.h')
-          expected = '3ac3f7bb1893ad35a04bf243ad3b48eafdb2d67593fd0485ba15703233a3d9d1'
+          # Hash the LF bytes checked out by the macOS runner. A Windows
+          # checkout converts this header to CRLF and has a different hash.
+          expected = '4af5e3dbb54d12a694f7be5997d208212260e7b265aedf617f9c9122f4a36db5'
           assert hashlib.sha256(path.read_bytes()).hexdigest() == expected
           PY
           mkdir -p build/network-stack
