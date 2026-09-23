@@ -44,7 +44,11 @@ public:
         if (!PE_parse_boot_argn("r16vmtest", &enabled, sizeof(enabled)))
             return false;
 #ifdef R16_VM_START_PROBE
+#ifdef R16_VM_INFRA_PROBE
+        if(enabled<1||enabled>5)return false;
+#else
         if(enabled<1||enabled>4)return false;
+#endif
 #else
         if(enabled!=1)return false;
 #endif
@@ -86,6 +90,25 @@ public:
                 IOLog("R16VM base start result=%u phase=%u failure=%u\n",unsigned(started),unsigned(ledger->phase),unsigned(ledger->failure));
             }
             if(started){
+#ifdef R16_VM_INFRA_PROBE
+                if(enabled==5){
+                    IOLog("R16VM station allocate begin\n");
+                    auto *station=new R16VMInfra;
+                    const bool initializedStation=station&&station->init();
+                    IOLog("R16VM station init result=%u\n",unsigned(initializedStation));
+                    const bool attached=initializedStation&&station->attach(controller);
+                    IOLog("R16VM station attach result=%u\n",unsigned(attached));
+                    if(attached)IOLog("R16VM station start begin\n");
+                    const bool stationStarted=attached&&station->start(controller);
+                    IOLog("R16VM station start result=%u\n",unsigned(stationStarted));
+                    // Keep even partially initialized station and all providers
+                    // alive. No fake MAC, SSID, pools or hardware are supplied.
+                    setProperty("R16VMStationStarted",stationStarted);
+                    setProperty("R16VMNativeWiFiVerified",false);
+                    IOLog("R16VM station retained; no registration, stop or networking verified\n");
+                    registerService();return true;
+                }
+#endif
                 IOLog("R16VM base stop begin\n");
                 controller->IO80211Controller::stop(this);
                 IOLog("R16VM base stop returned\n");

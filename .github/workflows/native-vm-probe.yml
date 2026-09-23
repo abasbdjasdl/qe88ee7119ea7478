@@ -30,7 +30,7 @@ jobs:
           python3 tests/native_startup_entry_test.py build/native-vm/entry-test.cpp
           xcrun clang++ -std=c++14 -O1 -Wall -Wextra -Werror -fsanitize=address,undefined build/native-vm/entry-test.cpp -o build/native-vm/entry-test
           build/native-vm/entry-test
-          python3 tools/native_vm/build_lifecycle_probe.py build-itlwm MacKernelSDK --out build/native-vm --start-probe
+          python3 tools/native_vm/build_lifecycle_probe.py build-itlwm MacKernelSDK --out build/native-vm --start-probe --infra-probe
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: native-vm-lifecycle-probe

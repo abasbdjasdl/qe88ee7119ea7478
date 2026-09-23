@@ -33,7 +33,11 @@ def main():
     parser.add_argument('--zig', type=Path, help='Compile-only on Windows')
     parser.add_argument('--start-probe', action='store_true',
                         help='Include contained base-start/stop experiment; VM boot arg r16vmtest=2 required')
+    parser.add_argument('--infra-probe', action='store_true',
+                        help='Include native station allocation/init/attach/start experiment (stage 5)')
     args = parser.parse_args()
+    if args.infra_probe and not args.start_probe:
+        parser.error('--infra-probe requires --start-probe')
     upstream, sdk, out = [x.resolve() for x in (args.upstream, args.sdk, args.out)]
     out.mkdir(parents=True, exist_ok=True)
     (out / 'probe-build.json').unlink(missing_ok=True)
@@ -67,6 +71,16 @@ extern "C" CCLogStream *r16_startup_logger(const StartupLedger *) { return nullp
 extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *) { return nullptr; }
 '''
     source = '// GENERATED VM-ONLY EXPERIMENT. Not a deployable network driver.\n' + source
+    if args.infra_probe:
+        infra=(ROOT/'tools/native_abi/infra_frontend_prototype.cpp').read_text()
+        infra=infra.split('// Borrowed registration arguments only.')[0]
+        infra=infra.replace('R16InfraFrontend','R16VMInfra')
+        infra=replace_once(infra,'class R16VMInfra : public IO80211InfraProtocol {',
+                           'class R16VMInfra : public IO80211InfraProtocol {\n    OSDeclareDefaultStructors(R16VMInfra);')
+        infra=replace_once(infra,'    R16VMInfra() : IO80211InfraProtocol(nullptr) {}\n    ~R16VMInfra() override;','')
+        infra=replace_once(infra,'R16VMInfra::~R16VMInfra() {}',
+                           'OSDefineMetaClassAndStructors(R16VMInfra, IO80211InfraProtocol);')
+        source+='\n#define R16_VM_INFRA_PROBE 1\n'+infra
     source += (HERE / 'lifecycle_probe.cpp.inc').read_text()
     generated = out / 'VMController.cpp'
     generated.write_text(source)
@@ -110,6 +124,17 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
             mismatches.append([slot, got, want])
     if len(actual) != len(expected) or mismatches:
         raise RuntimeError(('VM controller table differs', len(actual), mismatches))
+    if args.infra_probe:
+        station=manifest['classes']['IO80211InfraProtocol']
+        table=tables['__ZTV10R16VMInfra']; errors=[]
+        for slot,(got,want) in enumerate(zip(table,station['table'])):
+            if slot in (2,3) or want=='___cxa_pure_virtual' or 'getMetaClass' in (want or ''):
+                compare=station.get('pure_implementations',{}).get(str(slot),want)
+                if not got or 'R16VMInfra' not in got or audit.method_identity(got)!=audit.method_identity(compare):
+                    errors.append([slot,got,compare])
+            elif got!=want: errors.append([slot,got,want])
+        if len(table)!=len(station['table']) or errors:
+            raise RuntimeError(('VM station table differs',len(table),errors))
     report = dict(scope=('VM-only contained base-start/stop; support retained, cleanup unproved'
                          if args.start_probe else 'VM-only allocation/init/free experiment; no start, interface or radio'),
                   start_probe=args.start_probe,
@@ -120,6 +145,7 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
                   controller_raw_slots=len(actual), compiled=True, linked=False,
                   identity_imports=sorted(identity_imports),
                   loaded=False, native_wifi_verified=False)
+    report['infra_probe']=args.infra_probe
     if not args.zig:
         if sys.platform != 'darwin':
             raise RuntimeError('Link step requires macOS toolchain')

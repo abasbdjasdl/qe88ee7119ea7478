@@ -205,3 +205,40 @@ serial log continued into Recovery userspace. `cc-termination.log` and
 `cc-termination.json` preserve the bounded result and exact binary/log hashes.
 Remaining references and native PostOffice/TimerFactory/RNGAgent lifetimes
 still require ownership analysis; this result must not be called safe unload.
+
+Stage 4 adds return of the six factory-owned CC references, only after the
+four services have terminated: wrapper, raw reporter, data stream, log stream,
+data pipe, log pipe. Pointers and borrowed aliases are cleared before release;
+no object is read through a possibly final-released pointer. The controller,
+provider and native queue remain retained for the unresolved native consumers.
+This is a separate experiment, not established by the stage-3 results.
+
+The lifetime-only reporter declarations now encode their verified base types:
+CCFaultReporter constructor `0xffffff80031b0bc1` calls IOService::C2, and
+IO80211FaultReporter constructor `0xffffff80022489e7` calls OSObject::C2.
+The wrapper releases the raw reporter at `2248c4b`. Raw reporter freeResources
+at `31b094c` disables/removes/releases its timer, unregisters callbacks,
+detaches, then releases its stream and queue. These are inherited release
+calls on factory results; the test never sizes or constructs these objects.
+
+Stage 4 ran with `2eaa541`, Actions run `35838968756`, artifact `10740816185`.
+All four terminations and six owned-reference release calls returned. Before
+release the wrapper count was 1; reporter, both streams and both pipes each
+reported 2. Thus successful return does not establish their destruction, and
+the extra references must not be forcibly released. Recovery userspace boot
+continued. `cc-release.log` and `cc-release.json` record this result. Native
+controller/provider/queue remain retained and full cleanup is still unproved.
+
+`--infra-probe` includes a VM-only native station subclass generated from the
+audited InfraProtocol callback implementation. The metaclass and constructors
+are replaced for real IOKit allocation; the complete 658-slot table is checked
+against the exact KC, including override identities. Registration helper
+functions are omitted because this test does not call them.
+
+Stage 5 attempts station init(), attach(controller), and start(controller)
+after successful controller start. Each result is logged; dependent operations
+run only on success. The station, controller and support objects are retained
+even on partial failure. There is no station stop/free claim, packet-pool
+registration, fabricated MAC/SSID, hardware session or native-menu claim.
+This is a VM prerequisite experiment; physical deployment remains blocked
+until the accepted lifecycle and real-network tests pass.
