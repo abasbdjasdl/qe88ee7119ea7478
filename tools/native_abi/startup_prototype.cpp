@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// COMPILE ONLY. No caller, metaclass registration, kext target or runtime use.
+// Offline prototype, also included by the explicitly gated disposable VM test.
+// Not enabled in the physical driver; complete support teardown is unproved.
 // See startup-evidence.md before reusing even a single operation below.
 #ifndef R16_NATIVE_ABI_AUDIT_ONLY
 #error "This incomplete lifecycle prototype must never enter a driver build"
@@ -52,7 +53,7 @@ static_assert(__is_same(decltype(&IO80211Controller::getFaultReporterFromDriver)
 enum class StartupPhase : unsigned {offline,constructing,supportReady,baseEntered,baseReady,quarantined};
 enum class StartupFailure : unsigned {none,workQueue,logPipe,logPipeType,logPipeStart,
     logStream,logStreamType,dataPipe,dataPipeType,dataPipeStart,dataStream,dataStreamType,
-    rawReporter,wrapper,getterWiring,baseStart};
+    rawReporter,wrapper,getterWiring,baseStart,providerWorkQueue};
 
 struct StartupLedger {
     // Must be zero-initialized OWNER storage, embedded in the real controller
@@ -147,6 +148,13 @@ extern "C" bool r16_startup_enter_base(StartupLedger *ledger){
     if(s.controller->getLogger()!=s.logger||s.controller->getWorkQueue()!=s.workQueue||
        s.controller->getFaultReporterFromDriver()!=s.wrapper)
         return quarantine(s,StartupFailure::getterWiring);
+    // Darwin 24.4's native queue intentionally has no getThread(). The parent
+    // networking start applies ml_thread_policy without a null check unless
+    // its provider exposes that same workloop. Require the provider wrapper
+    // relationship before entering any partially initializing base method.
+    if(!s.workQueue||!s.provider||s.controller->getWorkLoop()!=s.workQueue||
+       s.provider->getWorkLoop()!=s.workQueue)
+        return quarantine(s,StartupFailure::providerWorkQueue);
     s.phase=StartupPhase::baseEntered; // set BEFORE a possibly partially successful base call
     if(!s.controller->IO80211Controller::start(s.provider))return quarantine(s,StartupFailure::baseStart);
     s.phase=StartupPhase::baseReady;return true;

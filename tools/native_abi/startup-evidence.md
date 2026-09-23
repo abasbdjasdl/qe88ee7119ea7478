@@ -113,5 +113,19 @@ Unresolved before any live frontend:
   removed hardware.
 - Native interface, packet queues, registration and BSD/WCL/data-path wiring.
 
-All validation reported for this prototype is offline compilation/static evidence.
-No factory, slot or support initialization has been executed on macOS.
+The original validation was offline compilation/static evidence. A later
+disposable VM test now executes this support preparation and base start/stop
+on the pinned Recovery kernel; see `../native_vm/README.md` and
+`outputs/R16-Native-VM/shared-provider-start-stop.json` in the workspace.
+Its successful base calls retain all support objects and do not establish
+normal teardown or make this prototype deployable on the physical machine.
+
+The VM exposed a mandatory provider relationship: native WorkQueue's
+`getThread()` returns null, and IONetworkController applies thread policy
+unless controller and provider return the same workloop. The common entry
+now checks both workloops against the owned queue before base initialization,
+recording `providerWorkQueue` and quarantining on mismatch. The actual entry
+body is tested by `tests/native_startup_entry_test.py`: null/different provider
+loop, different controller loop, missing provider, wrong queue getter,
+base-start failure, successful entry and rejected retries. These host tests
+prove control-flow guards only; they do not simulate native resource teardown.
