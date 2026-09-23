@@ -8,6 +8,7 @@
 #include "AuthenticationBinding.hpp"
 #include "NativeScanObservation.hpp"
 #include "NativeScanProbeTx.hpp"
+#include "NativeWclScanPlan.hpp"
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -619,7 +620,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         const auto &channel=ic.ic_channels[number];
         if(!channel.ic_freq||!IEEE80211_IS_CHAN_2GHZ(&channel)||
            (channel.ic_flags&IEEE80211_CHAN_PASSIVE))return false;
-        for(size_t i=0;i<identity.channelCount;++i)
+        for(size_t i=0;i<identity.channelCount&&i<sizeof(identity.channels)/sizeof(identity.channels[0]);++i)
             if(identity.channels[i].number==number&&!identity.channels[i].fiveGhz&&
                !identity.channels[i].passive)return true;
         return false;
@@ -787,6 +788,34 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             return kIOReturnError;
         }
         out=foregroundScan.status();return kIOReturnSuccess;
+    }
+    IOReturn beginWclScan(const void *ownedMessage,size_t length,bool profileVerified,
+                         foregroundscan::Status &out){
+        memset(&out,0,sizeof(out));
+        if(!profileVerified)return kIOReturnUnsupported;
+        if(!ownedMessage||length!=nativewclscan::messageBytes)return kIOReturnBadArgument;
+        nativewclscan::Policy policy{};
+        policy.profile=nativewclscan::TargetProfile::darwin24_4_0_d8b50fc2;
+        // This driver has no private scan-MAC generation facility. Apple has
+        // an explicit capability-disabled no-op for request byte +4.
+        policy.privateMac=nativewclscan::PrivateMacPolicy::unsupported;
+        for(size_t i=0;i<identity.channelCount&&i<sizeof(identity.channels)/sizeof(identity.channels[0]);++i){
+            const auto &allowed=identity.channels[i];
+            if(allowed.fiveGhz||allowed.number<1||allowed.number>11||
+               !isset(ic.ic_chan_active,allowed.number))continue;
+            const auto &channel=ic.ic_channels[allowed.number];
+            if(!channel.ic_freq||!IEEE80211_IS_CHAN_2GHZ(&channel))continue;
+            const auto bit=uint16_t(1u<<(allowed.number-1));
+            policy.permittedPassiveChannels|=bit;
+            if(activeProbeChannel(allowed.number))policy.permittedActiveChannels|=bit;
+        }
+        nativewclscan::Request decoded{};
+        const auto parsed=nativewclscan::decode(ownedMessage,length,policy,decoded);
+        if(parsed.status!=nativewclscan::Status::knownSubset)return kIOReturnUnsupported;
+        foregroundscan::RequestedPlan plan{};
+        const auto mapped=nativewclscanplan::map(parsed,decoded,plan);
+        if(mapped.status!=nativewclscanplan::Status::planned)return kIOReturnUnsupported;
+        return beginForeground(plan.active,out,&plan);
     }
     void advanceForeground(){
         if(!foregroundScan.active()||foregroundScan.draining()||foregroundCompletedThisPoll)return;
@@ -1202,6 +1231,10 @@ struct ForegroundScanRequest {
     unsigned operation;bool active;foregroundscan::Token token;
     const foregroundscan::RequestedPlan *plan;foregroundscan::Status *output;
 };
+struct WclScanRequest {
+    const void *message;size_t length;bool profileVerified;
+    foregroundscan::Status *output;
+};
 struct LinkStatusRequest {
     UInt32 status;const IONetworkMedium *medium;UInt64 speed;OSData *data;bool applied{};
 };
@@ -1247,6 +1280,15 @@ IOReturn R16NetworkController::foregroundScanGated(OSObject *owner,void *argumen
     if(state->faulted)return kIOReturnError;
     return state->foregroundScan.copy(request.token,*request.output)?kIOReturnSuccess:kIOReturnNotFound;
 }
+IOReturn R16NetworkController::wclScanGated(OSObject *owner,void *argument,void*,void*,void*){
+    if(!argument)return kIOReturnBadArgument;
+    const auto &request=*static_cast<WclScanRequest*>(argument);
+    if(!request.output)return kIOReturnBadArgument;
+    auto *state=static_cast<R16NetworkController*>(owner)->state_;
+    if(!state||state->stopping)return kIOReturnNotReady;
+    return state->beginWclScan(request.message,request.length,
+                               request.profileVerified,*request.output);
+}
 IOReturn R16NetworkController::beginNativeForegroundScan(bool active,foregroundscan::Status &output){
     memset(&output,0,sizeof(output));ForegroundScanRequest request{0,active,{},nullptr,&output};
     return runControlAction(foregroundScanGated,&request);
@@ -1257,6 +1299,24 @@ IOReturn R16NetworkController::beginNativePlannedForegroundScan(
     memset(&output,0,sizeof(output));
     ForegroundScanRequest request{0,copied.active,{},&copied,&output};
     return runControlAction(foregroundScanGated,&request);
+}
+IOReturn R16NetworkController::beginNativeWclScanRequest(const void *message,size_t length,
+    bool exactKernelProfileVerified,foregroundscan::Status &output){
+    if(!exactKernelProfileVerified){memset(&output,0,sizeof(output));return kIOReturnUnsupported;}
+    if(!message||length!=nativewclscan::messageBytes){memset(&output,0,sizeof(output));return kIOReturnBadArgument;}
+    // The gate may wait while the framework-owned caller buffer disappears.
+    // A separate, fixed-size heap copy keeps every decoder read owned here.
+    auto *copy=static_cast<uint8_t*>(IOMalloc(nativewclscan::messageBytes));
+    if(!copy){memset(&output,0,sizeof(output));return kIOReturnNoMemory;}
+    memcpy(copy,message,nativewclscan::messageBytes);
+    // A caller may place its output inside the readable request allocation.
+    // Clear only after the independent request copy has been made.
+    memset(&output,0,sizeof(output));
+    WclScanRequest request{copy,nativewclscan::messageBytes,true,&output};
+    const auto result=runControlAction(wclScanGated,&request);
+    bzero(copy,nativewclscan::messageBytes);
+    IOFree(copy,nativewclscan::messageBytes);
+    return result;
 }
 IOReturn R16NetworkController::copyNativeForegroundScanStatus(foregroundscan::Token token,foregroundscan::Status &output){
     memset(&output,0,sizeof(output));ForegroundScanRequest request{1,false,token,nullptr,&output};

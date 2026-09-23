@@ -1,0 +1,69 @@
+{
+  "kernel_sha256": "d8b50fc25bbe4c9f6923a9344ae34e760e1c98b06b23513e4a73e494019865e1",
+  "scope": "Compile-only exact-KC InfraProtocol subclass and registration callsites; no runtime pointer validity, symbol-set linkability, native-menu visibility, event delivery, authentication, or kernel lifecycle claim.",
+  "registration_helpers": [
+    "initRegistrationInfo",
+    "registerInfraEthernetInterface",
+    "deregisterEthernetInterface"
+  ],
+  "extra_imports": {
+    "O0": [
+      "__ZN20IO80211InfraProtocolD2Ev",
+      "__ZN8OSObjectdlEPvm",
+      "___stack_chk_fail",
+      "___stack_chk_guard"
+    ],
+    "O2": [
+      "__ZN20IO80211InfraProtocolD2Ev",
+      "__ZN8OSObjectdlEPvm"
+    ]
+  },
+  "runtime_symbol_evidence": {
+    "__ZN8OSObjectdlEPvm": {
+      "address": "0xffffff8000a49e00",
+      "n_type": 15,
+      "n_sect": 1,
+      "n_desc": 0
+    },
+    "___stack_chk_fail": {
+      "address": "0xffffff800038b100",
+      "n_type": 15,
+      "n_sect": 1,
+      "n_desc": 0
+    },
+    "___stack_chk_guard": {
+      "address": "0xffffff80011a9040",
+      "n_type": 15,
+      "n_sect": 17,
+      "n_desc": 0
+    },
+    "_bzero": {
+      "address": "0xffffff8000101100",
+      "n_type": 15,
+      "n_sect": 37,
+      "n_desc": 0
+    },
+    "_memcpy": {
+      "address": "0xffffff8000101050",
+      "n_type": 15,
+      "n_sect": 37,
+      "n_desc": 0
+    },
+    "_memset": {
+      "address": "0xffffff80001010c0",
+      "n_type": 15,
+      "n_sect": 37,
+      "n_desc": 0
+    },
+    "__ZN20IO80211InfraProtocolD2Ev": {
+      "address": "0xffffff80022523ee",
+      "n_type": 15,
+      "n_sect": 1,
+      "n_desc": 0
+    }
+  },
+  "full_target_table": "darwin24_4.json classes.IO80211InfraProtocol.table",
+  "own_pure_override_count": 191,
+  "raw_table_entries": 658,
+  "setWCL_SCAN_REQ_raw_slot": 594
+}

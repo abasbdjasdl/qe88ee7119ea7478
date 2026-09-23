@@ -156,13 +156,26 @@ filter or send any result/terminal event; a future dispatcher must keep the
 owned request and apply that filter. Test coverage is in
 `tests/network_native_wcl_scan_plan_test.cpp`.
 
+`R16NetworkController::beginNativeWclScanRequest` is a kernel-side backend
+entry point, not an IO80211 callback. It requires an independently verified
+exact runtime profile and a readable fixed-length request, copies all 5456
+bytes into controller-owned storage before waiting for its command gate,
+derives the active and passive channel masks from the current boot policy and
+net80211 state inside that gate, decodes/maps the request, and invokes the
+existing idle-only foreground scan. Failed admission clears its status output;
+the temporary request copy is wiped and freed after the gated call. An
+accepted return means only that a hardware scan operation was queued. No
+native frontend calls this entry point yet; the WCL callback's raw pointer
+alone does not prove its readable extent or lifetime.
+
 Before any live admission, the native dispatcher must additionally establish
 runtime profile, controller/interface lifetime, current request and operation
 generation, radio/regulatory policy, truthful private-MAC capability, actual
 active/passive backend support, dwell/home scheduling semantics, and correct
 scan completion/cancellation/error notifications. An associated scan also
 needs a valid home-channel policy. These are not implemented or bypassed by
-this parser, and it does not call `NativeForegroundScan` or emit native events.
+this parser or the backend entry point. The parser itself does not call
+`NativeForegroundScan`, and the backend entry point emits no native events.
 
 The supported subset excludes directed SSIDs/BSSIDs, saved-network filters,
 short SSIDs, zero/default channel lists, channel 12+, 5/6 GHz, other bandwidths,

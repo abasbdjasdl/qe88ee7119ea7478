@@ -1,0 +1,26 @@
+{
+  "kernel_sha256": "d8b50fc25bbe4c9f6923a9344ae34e760e1c98b06b23513e4a73e494019865e1",
+  "scope": "Compile-only startup factory/member-slot contract; never executed, linked into a driver, deployed or treated as successful native registration.",
+  "undefined_symbols": [
+    "__ZN10CCDataPipe9metaClassE",
+    "__ZN11CCLogStream9metaClassE",
+    "__ZN12CCDataStream9metaClassE",
+    "__ZN15CCFaultReporter18withStreamWorkloopEP12CCDataStreamP10IOWorkLoop",
+    "__ZN15OSMetaClassBase12safeMetaCastEPKS_PK11OSMetaClass",
+    "__ZN16IO80211WorkQueue9workQueueEv",
+    "__ZN20IO80211FaultReporter15allocWithParamsEP15CCFaultReporter",
+    "__ZN6CCPipe21withOwnerNameCapacityEP9IOServicePKcS3_PK13CCPipeOptions",
+    "__ZN8CCStream15withPipeAndNameEP6CCPipePKcPK15CCStreamOptions",
+    "__ZN9CCLogPipe9metaClassE",
+    "__ZTV17IO80211Controller",
+    "_bzero"
+  ],
+  "member_pointer_constants": {
+    "_r16_startup_base_start_slot": {"raw_slot": 186, "vptr_byte_offset": 1472, "return": "bool AL", "target": "IO80211Controller::start(IOService*)", "evidence": "0xffffff800221d268"},
+    "_r16_startup_pipe_slot": {"raw_slot": 271, "vptr_byte_offset": 2152, "return": "bool AL", "target": "CCPipe::startPipe()", "evidence": "0xffffff80031a4454"},
+    "_r16_startup_logger_slot": {"raw_slot": 426, "vptr_byte_offset": 3392, "return": "CCLogStream*", "target": "IO80211Controller::getLogger() const", "evidence": "darwin24_4.json class IO80211Controller raw slot 426"},
+    "_r16_startup_work_queue_slot": {"raw_slot": 399, "vptr_byte_offset": 3176, "return": "IO80211WorkQueue*", "target": "IO80211Controller::getWorkQueue() const", "evidence": "darwin24_4.json class IO80211Controller raw slot 399"},
+    "_r16_startup_fault_slot": {"raw_slot": 434, "vptr_byte_offset": 3456, "return": "IO80211FaultReporter*", "target": "IO80211Controller::getFaultReporterFromDriver()", "evidence": "0xffffff800158f0de"}
+  },
+  "excluded": ["complete CC instance/vtable layout", "kext symbol-set export eligibility", "runtime base initialization", "normal or partial-start teardown", "provider removal safety", "native registration/BSD attach", "hardware or WCL activation"]
+}

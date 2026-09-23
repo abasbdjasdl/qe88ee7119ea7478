@@ -22,7 +22,7 @@ jobs:
           git -C MacKernelSDK remote add origin https://github.com/acidanthera/MacKernelSDK.git
           git -C MacKernelSDK fetch --depth 1 origin 05094e5e88cec7caedbfb35e8449ed0db94bf95b
           git -C MacKernelSDK checkout --detach FETCH_HEAD
-      - name: Check selection queue and private declarations
+      - name: Audit native declarations, scan sequencing, and packet ownership
         run: |
           set -o pipefail
           mkdir -p build/native-contract
@@ -34,6 +34,9 @@ jobs:
           build/native-contract/wcl-scan-test | tee build/native-contract/wcl-scan-test-result.txt
           xcrun clang++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_wcl_scan_plan_test.cpp -o build/native-contract/wcl-scan-plan-test
           build/native-contract/wcl-scan-plan-test | tee build/native-contract/wcl-scan-plan-test-result.txt
+          xcrun clang++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_wcl_scan_results_test.cpp -o build/native-contract/wcl-scan-results-test
+          build/native-contract/wcl-scan-results-test | tee build/native-contract/wcl-scan-results-test-result.txt
+          xcrun clang++ -target x86_64-apple-macos15.0 -std=c++17 -O2 -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector -Wframe-larger-than=512 -Werror -c tests/network_native_wcl_scan_results_kernel_compile.cpp -o build/native-contract/wcl-scan-results-kernel.o
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_scan_cache_test.cpp -o build/native-contract/scan-cache-test
           build/native-contract/scan-cache-test | tee build/native-contract/scan-cache-test-result.txt
           xcrun clang++ -std=c++17 -O2 -DNDEBUG -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_scan_observation_test.cpp -o build/native-contract/scan-observation-test
@@ -46,6 +49,8 @@ jobs:
           build/native-contract/scan-probe-tx-test | tee build/native-contract/scan-probe-tx-test-result.txt
           xcrun clang++ -std=c++17 -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer tests/network_native_wcl_beacon_test.cpp -o build/native-contract/wcl-beacon-test
           build/native-contract/wcl-beacon-test | tee build/native-contract/wcl-beacon-test-result.txt
+          xcrun clang++ -std=c++14 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -DR16_NATIVE_ABI_AUDIT_ONLY=1 tools/native_abi/native_infra_scan_bridge_test.cpp -o build/native-contract/infra-scan-bridge-test
+          build/native-contract/infra-scan-bridge-test | tee build/native-contract/infra-scan-bridge-test-result.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_wireless_selection_test.cpp -o build/native-contract/selection-test
           build/native-contract/selection-test
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_wireless_rsn_test.cpp -o build/native-contract/rsn-test
@@ -53,6 +58,9 @@ jobs:
           python3 tools/build_native_contract.py build-itlwm MacKernelSDK
           python3 tools/build_native_sequoia.py build-itlwm MacKernelSDK --out build/native-contract/sequoia
           python3 tests/network_native_sequoia_audit_test.py build/native-contract/sequoia
+          python3 tools/native_abi/audit_startup_prototype.py build-itlwm MacKernelSDK build/native-contract/sequoia --out build/native-contract/startup
+          python3 tools/native_abi/audit_infra_frontend.py build-itlwm MacKernelSDK build/native-contract/sequoia --out build/native-contract/infra
+          python3 tools/native_abi/native_cpu_packet_bridge_test.py --out build/native-contract/cpu-packet-bridge
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: native-contract-${{ github.sha }}

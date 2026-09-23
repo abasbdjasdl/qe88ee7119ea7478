@@ -94,6 +94,7 @@ class R16NetworkController : public IOEthernetController {
     static IOReturn authenticationGated(OSObject*,void*,void*,void*,void*);
     static IOReturn nativeScanGated(OSObject*,void*,void*,void*,void*);
     static IOReturn foregroundScanGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn wclScanGated(OSObject*,void*,void*,void*,void*);
     bool applyLinkStatus(UInt32,const IONetworkMedium*,UInt64,OSData*);
     static void timer(OSObject*,IOTimerEventSource*);
     void releaseResources();
@@ -159,6 +160,14 @@ public:
     // disconnected station is accepted. This does not emit WCL messages.
     IOReturn beginNativePlannedForegroundScan(
         const rtl8852be::network::foregroundscan::RequestedPlan&,
+        rtl8852be::network::foregroundscan::Status&);
+    // Kernel caller supplies a readable fixed-KC WCL request. This method
+    // copies it into owned storage, then derives policy/decodes/starts under
+    // the hardware gate. The caller must independently verify the running KC
+    // and supplies that fact explicitly; false never starts a scan. Success
+    // means hardware scan admission, not WCL delivery or menu completion.
+    IOReturn beginNativeWclScanRequest(const void *message,size_t length,
+        bool exactKernelProfileVerified,
         rtl8852be::network::foregroundscan::Status&);
     IOReturn copyNativeForegroundScanStatus(rtl8852be::network::foregroundscan::Token,
                                            rtl8852be::network::foregroundscan::Status&);
