@@ -1,51 +1,57 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+// Exact-profile reader using public KPI and this bundle's retained dependencies.
 #include "native_runtime_identity.hpp"
-#include <libkern/c++/OSObject.h>
-#include <libkern/c++/OSData.h>
+#include "native_macho_uuid.hpp"
 #include <libkern/version.h>
+#include <libkern/sysctl.h>
+#include <mach/kmod.h>
+#include <IOKit/IOLib.h>
 
-// The pinned SDK OSKext header requires absent kernel-private headers. This
-// callsite-only declaration uses the observed OSObject base and direct methods;
-// never construct, size, subclass, or access fields of OSKext through it.
-class OSKext : public OSObject {
-public:
-    static OSKext *lookupKextWithIdentifier(const char *);
-    bool isLoaded(); // direct call only, actual implementation returns bool in AL
-    OSData *copyTextUUID();
-};
-
-extern "C" {
-extern void (OSObject::*const r16_identity_release_slot)()const=&OSObject::release;
-extern unsigned (OSData::*const r16_identity_length_slot)()const=&OSData::getLength;
-extern const void *(OSData::*const r16_identity_bytes_slot)()const=&OSData::getBytesNoCopy;
-}
+extern "C" kmod_info_t kmod_info; // This bundle's definition in VMModule.c.
 
 namespace r16_native_identity {
+static bool sameName(const char *fixed,const char *expected) {
+    for(size_t i=0;i<KMOD_MAX_NAME;++i){
+        if(fixed[i]!=expected[i])return false;
+        if(!fixed[i])return true;
+    }
+    return false;
+}
 Result inspectLoadedComponents(){
     Result result{};
     if(version_major!=24||version_minor!=4||version_revision!=0)return result;
-    for(size_t i=0;i<componentCount;++i){
-        result.component=i;
-        for(auto &byte:result.observed)byte=0;
-        OSKext *kext=OSKext::lookupKextWithIdentifier(components[i].identifier);
-        if(!kext){result.status=Status::missing;return result;}
-        // Explicit qualification avoids calling OSKext virtual slots through
-        // an unverified SDK vtable. The exact symbols are separately audited.
-        if(!kext->OSKext::isLoaded()){
-            kext->release();result.status=Status::notLoaded;return result;
+    char kernelUUID[37]{};size_t length=sizeof(kernelUUID);
+    if(sysctlbyname("kern.uuid",kernelUUID,&length,nullptr,0)!=0){result.status=Status::noUUID;return result;}
+    if(!readUUIDString(kernelUUID,length,result.observed)){result.status=Status::invalidUUID;return result;}
+    for(size_t j=0;j<16;++j)if(result.observed[j]!=components[0].uuid[j]){
+        result.status=Status::mismatch;return result;
+    }
+    // The loader owns this fixed dependency list for our loaded lifetime.
+    // Never walk the mutable global kmod list, call OSKext private methods,
+    // scan memory for a header, or use addresses supplied by user space.
+    for(size_t i=1;i<componentCount;++i){
+        result.component=i;for(auto &byte:result.observed)byte=0;
+        if(kmod_info.info_version!=KMOD_INFO_VERSION||kmod_info.id==UINT32_MAX){
+            result.status=Status::notLoaded;return result;
         }
-        // copyUUID can return the aggregate kernel UUID for built-in kexts.
-        // copyTextUUID reads that component's own loaded Mach-O LC_UUID.
-        OSData *uuid=kext->copyTextUUID();
-        kext->release();
-        if(!uuid){result.status=Status::noUUID;return result;}
-        const auto length=uuid->getLength();
-        const auto *bytes=length==16?static_cast<const uint8_t*>(uuid->getBytesNoCopy()):nullptr;
-        if(!bytes){uuid->release();result.status=Status::invalidUUID;return result;}
-        bool equal=true;
-        for(size_t j=0;j<16;++j){result.observed[j]=bytes[j];equal=equal&&(bytes[j]==components[i].uuid[j]);}
-        uuid->release();
-        if(!equal){result.status=Status::mismatch;return result;}
+        const kmod_info_t *found=nullptr;unsigned count=0;
+        for(auto *ref=kmod_info.reference_list;ref;ref=ref->next){
+            if(++count>128||!ref->info){result.status=Status::invalidUUID;return result;}
+            if(sameName(ref->info->name,components[i].identifier)){
+                if(found){result.status=Status::invalidUUID;return result;}
+                found=ref->info;
+            }
+        }
+        if(!found){result.status=Status::missing;return result;}
+        if(found->info_version!=KMOD_INFO_VERSION||!found->address||found->size<32||
+           found->size>UINTPTR_MAX-found->address){result.status=Status::invalidUUID;return result;}
+        if(!readMachOUUID(reinterpret_cast<const uint8_t*>(found->address),found->size,result.observed)){
+            result.status=Status::invalidUUID;return result;
+        }
+        for(size_t j=0;j<16;++j)if(result.observed[j]!=components[i].uuid[j]){
+            result.status=Status::mismatch;return result;
+        }
+        IOLog("R16VM retained dependency UUID matched: %s\n",components[i].identifier);
     }
     result.component=componentCount;result.status=Status::matched;
     for(auto &byte:result.observed)byte=0;

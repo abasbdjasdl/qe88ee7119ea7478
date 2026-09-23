@@ -73,6 +73,6 @@ int main(){
 }
 '''
 p=argparse.ArgumentParser();p.add_argument('output',type=Path);a=p.parse_args()
-source=(ROOT/'tools/native_vm/dependency_identity.cpp').read_text()
+source=(ROOT/'tools/native_abi/native_runtime_identity.cpp').read_text()
 body=source[source.index('namespace r16_native_identity {'):]
 a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text(PRE+body+POST)

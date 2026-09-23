@@ -1,0 +1,38 @@
+{
+  "kernel_sha256": "d8b50fc25bbe4c9f6923a9344ae34e760e1c98b06b23513e4a73e494019865e1",
+  "scope": "Loaded component build identity only; not full KC byte integrity, load permission or native menu",
+  "symbols": {
+    "_kernel_sysctlbyname": "0xffffff800091b440",
+    "_version_major": "0xffffff8000c1c068",
+    "_version_minor": "0xffffff8000c1c06c",
+    "_version_revision": "0xffffff8000c1c070",
+    "_IOLog": "0xffffff8000ab44b0"
+  },
+  "vtable_slots": [],
+  "member_pointer_constants": {},
+  "components": {
+    "com.apple.kernel": "e632680988f43ecc93bbd2cbdf235588",
+    "com.apple.iokit.IO80211Family": "b193f4b75a7f33b7a66787112588aae7",
+    "com.apple.iokit.IOSkywalkFamily": "9af084d1884f38c5b07d4b362219fdc6",
+    "com.apple.driver.corecapture": "4dbebf77f63c3a84b8d450c8e510bca3"
+  },
+  "direct_imports": [
+    "_sysctlbyname",
+    "_kmod_info",
+    "_version_major",
+    "_version_minor",
+    "_version_revision",
+    "_IOLog"
+  ],
+  "optional_compiler_helpers": [
+    "_memset",
+    "_bzero",
+    "_memcpy"
+  ],
+  "export_aliases": {
+    "_sysctlbyname": "_kernel_sysctlbyname"
+  },
+  "bundle_defined_symbols": [
+    "_kmod_info"
+  ]
+}

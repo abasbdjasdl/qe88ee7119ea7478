@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #ifndef R16_NATIVE_ABI_AUDIT_ONLY
-#error "Runtime identity collector still needs target link/load verification"
+#error "Native identity provider is not yet wired to a production controller"
 #endif
 #include <stdint.h>
 #include <stddef.h>
@@ -22,8 +22,9 @@ struct Result {
     size_t component{}; // componentCount on complete match; first failure otherwise.
     uint8_t observed[16]{};
 };
-// Run before hardware/native startup and outside driver gates (OSKext lookup
-// takes the global kext lock). A match identifies builds, not executable bytes:
+// Run before hardware/native startup and outside driver gates (sysctl takes
+// kernel locks). The bundle must explicitly link all three family dependencies
+// and define its own kmod_info through its module entry. A match identifies builds, not executable bytes:
 // deployment must separately verify the pinned KC hash. No authorization token,
 // session, PCI claim, registry mutation or native registration is produced.
 Result inspectLoadedComponents();

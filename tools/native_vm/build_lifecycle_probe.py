@@ -74,7 +74,7 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
              '-I' + str(upstream / 'itl80211'), '-I' + str(upstream / 'itl80211/openbsd'),
              '-I' + str(sdk / 'Headers'), '-I' + str(ROOT / 'tools/native_abi')]
     objects = []
-    for path in (generated, HERE / 'dependency_identity.cpp'):
+    for path in (generated, ROOT / 'tools/native_abi/native_runtime_identity.cpp'):
         obj = out / (path.stem + '.o')
         subprocess.run(compiler + flags + ['-c', str(path), '-o', str(obj)], check=True)
         objects.append(obj)
@@ -103,7 +103,7 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
         raise RuntimeError(('VM controller table differs', len(actual), mismatches))
     report = dict(scope='VM-only allocation/init/free experiment; no start, interface or radio',
                   source_sha256=hashlib.sha256(source.encode()).hexdigest(),
-                  identity_source_sha256=hashlib.sha256((HERE/'dependency_identity.cpp').read_bytes()).hexdigest(),
+                  identity_source_sha256=hashlib.sha256((ROOT/'tools/native_abi/native_runtime_identity.cpp').read_bytes()).hexdigest(),
                   controller_raw_slots=len(actual), compiled=True, linked=False,
                   identity_imports=sorted(identity_imports),
                   loaded=False, native_wifi_verified=False)
