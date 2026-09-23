@@ -48,8 +48,10 @@ The pinned net80211 stack's two link-status calls are redirected through this
 host; the Ethernet host preserves its original current-medium/status calls.
 `MacNetworkSession.hpp` exposes one opaque create/prepare/start/stop/poll/destroy
 boundary and the same RTL8852BE boot-service factory used by the Ethernet
-owner. A future native owner can use this hardware session without inheriting
-from the Ethernet controller, but no native owner calls it yet.
+owner. It also exposes gate-only status, completed-scan snapshots, WCL scan
+admission and network selection; the Ethernet owner now uses those same calls.
+A future native owner can use this hardware session without inheriting from
+the Ethernet controller, but no native owner calls it yet.
 This is a source-level ownership seam, not a native service: the state still
 needs an IO80211 owner with a safe base start/stop transaction. Changing the
 Info.plist class name or adding a second PCI personality will not turn `en1`

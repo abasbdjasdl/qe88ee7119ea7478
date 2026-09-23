@@ -1159,6 +1159,48 @@ bool startMacNetworkState(MacNetworkState *state){return state&&state->startHard
 bool stopMacNetworkState(MacNetworkState *state){return !state||state->shutdown();}
 void pollMacNetworkState(MacNetworkState *state){if(state)state->poll();}
 void destroyMacNetworkState(MacNetworkState *state){delete state;}
+IOReturn copyMacNetworkWirelessStatus(MacNetworkState *state,wireless::Snapshot &out){
+    bzero(&out,sizeof(out));
+    return state&&state->inGate()?state->copyWirelessStatus(out):kIOReturnNotReady;
+}
+IOReturn copyMacNetworkLinkPublication(MacNetworkState *state,MacLinkPublication &out){
+    out={};
+    if(!state||!state->inGate()||!state->linkPublicationValid||
+       !state->linkPublication.revision)return kIOReturnNotReady;
+    out=state->linkPublication;return kIOReturnSuccess;
+}
+IOReturn queueMacNetworkSelection(MacNetworkState *state,const selection::Join *request){
+    return state&&state->inGate()?state->queueSelection(request):kIOReturnNotReady;
+}
+IOReturn copyMacNetworkScanSummary(MacNetworkState *state,nativescan::Summary &out){
+    bzero(&out,sizeof(out));
+    if(!state||!state->inGate()||state->stopping||!state->scanObservations)
+        return kIOReturnNotReady;
+    return state->scanObservations->copySummary(out)?kIOReturnSuccess:kIOReturnNotReady;
+}
+IOReturn copyMacNetworkScanEntry(MacNetworkState *state,nativescan::Token token,
+                                 size_t index,nativescan::Entry &out){
+    bzero(&out,sizeof(out));
+    if(!state||!state->inGate()||state->stopping||!state->scanObservations)
+        return kIOReturnNotReady;
+    return state->scanObservations->copyEntry(token,index,out)?
+        kIOReturnSuccess:kIOReturnNotFound;
+}
+IOReturn copyMacNetworkScanChannel(MacNetworkState *state,nativescan::Token token,
+                                   size_t index,nativescan::Channel &out){
+    bzero(&out,sizeof(out));
+    if(!state||!state->inGate()||state->stopping||!state->scanObservations)
+        return kIOReturnNotReady;
+    return state->scanObservations->copyChannel(token,index,out)?
+        kIOReturnSuccess:kIOReturnNotFound;
+}
+IOReturn beginMacNetworkWclScan(MacNetworkState *state,const void *message,
+                                size_t length,bool exactProfileVerified,
+                                foregroundscan::Status &out){
+    bzero(&out,sizeof(out));
+    if(!state||!state->inGate()||state->stopping)return kIOReturnNotReady;
+    return state->beginWclScan(message,length,exactProfileVerified,out);
+}
 } }
 // The pinned net80211 source calls this from a two-site, hash-checked source
 // override. Its if_softc already points at this session before ifattach.
@@ -1290,7 +1332,7 @@ IOReturn R16NetworkController::enable(IONetworkInterface*){return gate_?gate_->r
 IOReturn R16NetworkController::disable(IONetworkInterface*){return gate_?gate_->runAction(enableGated):kIOReturnNotReady;}
 IOReturn R16NetworkController::selectionGated(OSObject *o,void *request,void*,void*,void*){
     auto *s=static_cast<R16NetworkController*>(o)->state_;
-    return s?s->queueSelection(static_cast<const selection::Join*>(request)):kIOReturnNotReady;
+    return queueMacNetworkSelection(s,static_cast<const selection::Join*>(request));
 }
 IOReturn R16NetworkController::selectWirelessNetwork(const selection::Join &request){
     return runControlAction(selectionGated,const_cast<selection::Join*>(&request));
@@ -1299,7 +1341,7 @@ IOReturn R16NetworkController::disconnectWirelessNetwork(){return runControlActi
 IOReturn R16NetworkController::wirelessStatusGated(OSObject *o,void *output,void*,void*,void*){
     auto *self=static_cast<R16NetworkController*>(o);
     if(!output)return kIOReturnBadArgument;
-    return self->state_?self->state_->copyWirelessStatus(*static_cast<wireless::Snapshot*>(output)):kIOReturnNotReady;
+    return copyMacNetworkWirelessStatus(self->state_,*static_cast<wireless::Snapshot*>(output));
 }
 IOReturn R16NetworkController::copyWirelessStatus(wireless::Snapshot &out){
     memset(&out,0,sizeof(out));
@@ -1308,9 +1350,7 @@ IOReturn R16NetworkController::copyWirelessStatus(wireless::Snapshot &out){
 IOReturn R16NetworkController::linkPublicationGated(OSObject *o,void *output,void*,void*,void*){
     if(!output)return kIOReturnBadArgument;
     auto *state=static_cast<R16NetworkController*>(o)->state_;
-    if(!state||!state->linkPublicationValid||!state->linkPublication.revision)return kIOReturnNotReady;
-    *static_cast<MacLinkPublication*>(output)=state->linkPublication;
-    return kIOReturnSuccess;
+    return copyMacNetworkLinkPublication(state,*static_cast<MacLinkPublication*>(output));
 }
 IOReturn R16NetworkController::copyLinkPublication(MacLinkPublication &out){
     out={};return runControlAction(linkPublicationGated,&out);
@@ -1355,12 +1395,14 @@ IOReturn R16NetworkController::nativeScanGated(OSObject *owner,void *arg,void*,v
     if(!arg)return kIOReturnBadArgument;
     const auto &request=*static_cast<NativeScanRequest*>(arg);
     auto *state=static_cast<R16NetworkController*>(owner)->state_;
-    if(!state||state->stopping||!state->scanObservations||!request.output)return kIOReturnNotReady;
-    auto &observer=*state->scanObservations;
+    if(!state||state->stopping||!state->scanObservations||!request.output)
+        return kIOReturnNotReady;
     switch(request.operation){
-    case 0:return observer.copySummary(*static_cast<nativescan::Summary*>(request.output))?kIOReturnSuccess:kIOReturnNotReady;
-    case 1:return observer.copyEntry(request.token,request.index,*static_cast<nativescan::Entry*>(request.output))?kIOReturnSuccess:kIOReturnNotFound;
-    case 2:return observer.copyChannel(request.token,request.index,*static_cast<nativescan::Channel*>(request.output))?kIOReturnSuccess:kIOReturnNotFound;
+    case 0:return copyMacNetworkScanSummary(state,*static_cast<nativescan::Summary*>(request.output));
+    case 1:return copyMacNetworkScanEntry(state,request.token,request.index,
+                                           *static_cast<nativescan::Entry*>(request.output));
+    case 2:return copyMacNetworkScanChannel(state,request.token,request.index,
+                                             *static_cast<nativescan::Channel*>(request.output));
     default:return kIOReturnBadArgument;
     }
 }
@@ -1398,8 +1440,8 @@ IOReturn R16NetworkController::wclScanGated(OSObject *owner,void *argument,void*
     if(!request.output)return kIOReturnBadArgument;
     auto *state=static_cast<R16NetworkController*>(owner)->state_;
     if(!state||state->stopping)return kIOReturnNotReady;
-    return state->beginWclScan(request.message,request.length,
-                               request.profileVerified,*request.output);
+    return beginMacNetworkWclScan(state,request.message,request.length,
+                                  request.profileVerified,*request.output);
 }
 IOReturn R16NetworkController::wclResultsGated(OSObject *owner,void *argument,void*,void*,void*){
     if(!argument)return kIOReturnBadArgument;
