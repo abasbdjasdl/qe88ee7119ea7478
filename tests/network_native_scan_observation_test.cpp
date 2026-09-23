@@ -15,7 +15,7 @@ static void check(bool condition,const char *expression,int line){
 }
 #define CHECK(x) check(bool(x),#x,__LINE__)
 static const Channel channels[]={{Band::ghz2,6},{Band::ghz5,36}};
-static const Signal signal={SignalUnit::percent,67};
+static const Signal scanSignalSample={SignalUnit::percent,67};
 static void ie(std::vector<uint8_t> &frame,uint8_t tag,const std::vector<uint8_t> &bytes){
     CHECK(bytes.size()<=255);
     frame.push_back(tag);frame.push_back(uint8_t(bytes.size()));
@@ -35,7 +35,7 @@ static std::vector<uint8_t> frameFor(Channel channel,bool probe=false,bool hidde
     return frame;
 }
 static bool parse(const std::vector<uint8_t> &frame,Input &out,Channel channel=channels[0]){
-    return advertisement(frame.data(),frame.size(),channel,signal,123456,out);
+    return advertisement(frame.data(),frame.size(),channel,scanSignalSample,123456,out);
 }
 static bool empty(const Input &out){
     return !out.bssid&&!out.ssid&&!out.ies&&!out.ssidLength&&!out.ieLength&&
@@ -64,9 +64,9 @@ static void parsing(){
     frame=frameFor(channels[0]);ie(frame,221,{1,2,3,4});ie(frame,255,{35});
     std::vector<uint8_t> ht(22,0);ht[0]=6;ie(frame,61,ht);CHECK(parse(frame,out));
     for(size_t n=0;n<36;++n){std::vector<uint8_t> shortFrame(n,0);reject(shortFrame);}
-    CHECK(!advertisement(nullptr,40,channels[0],signal,1,out)&&empty(out));
+    CHECK(!advertisement(nullptr,40,channels[0],scanSignalSample,1,out)&&empty(out));
     frame=frameFor(channels[0]);
-    CHECK(!advertisement(frame.data(),frame.size(),{Band::ghz5,35},signal,1,out)&&empty(out));
+    CHECK(!advertisement(frame.data(),frame.size(),{Band::ghz5,35},scanSignalSample,1,out)&&empty(out));
     CHECK(!advertisement(frame.data(),frame.size(),channels[0],{SignalUnit::percent,-1},1,out)&&empty(out));
     CHECK(!advertisement(frame.data(),frame.size(),channels[0],{SignalUnit::percent,101},1,out)&&empty(out));
     for(uint8_t fc0:std::vector<uint8_t>{0x81,0x84,0x08,0x40,0x90}){
@@ -86,7 +86,7 @@ static void parsing(){
     // FCS ownership contract: this parser receives a frame without FCS. It
     // cannot identify all possible CRC byte values; the DMA caller strips it.
     frame.insert(frame.end(),{0xde,0xad,0xbe,0xef});
-    CHECK(advertisement(frame.data(),frame.size()-4,channels[0],signal,1,out));
+    CHECK(advertisement(frame.data(),frame.size()-4,channels[0],scanSignalSample,1,out));
     reject(frame); // these particular unstripped bytes form a truncated IE
 }
 static void elements(){
@@ -125,10 +125,10 @@ static Token publish(Observer &observer,uint64_t epoch,uint64_t firstOperation,u
     CHECK(observer.begin(epoch,17,true,channels,2));
     auto frame=frameFor(channels[0]);const DwellToken first{epoch,firstOperation},second{epoch,firstOperation+1};
     CHECK(observer.channelAccepted(epoch,17,true,channels[0],first));
-    CHECK(observer.observe(first,frame.data(),frame.size(),channels[0],signal,time));
+    CHECK(observer.observe(first,frame.data(),frame.size(),channels[0],scanSignalSample,time));
     CHECK(observer.channelFinished(first,false));
     CHECK(observer.channelAccepted(epoch,17,true,channels[1],second));
-    frame=frameFor(channels[1]);CHECK(observer.observe(second,frame.data(),frame.size(),channels[1],signal,time+1));
+    frame=frameFor(channels[1]);CHECK(observer.observe(second,frame.data(),frame.size(),channels[1],scanSignalSample,time+1));
     CHECK(observer.channelFinished(second,false));CHECK(observer.finish(epoch,17,true,time+2));
     Summary summary;CHECK(observer.copySummary(summary)&&summary.count==2&&summary.channelCount==2);
     return summary.token;
@@ -141,18 +141,18 @@ static void lifecycle(){
     CHECK(observer.begin(7,17,true,channels,2)&&observer.open());
     CHECK(!observer.begin(7,17,true,channels,2));
     const DwellToken first{7,40},second{7,41};auto frame=frameFor(channels[0]);
-    CHECK(!observer.observe(first,frame.data(),frame.size(),channels[0],signal,100));
+    CHECK(!observer.observe(first,frame.data(),frame.size(),channels[0],scanSignalSample,100));
     CHECK(observer.channelAccepted(7,17,true,channels[0],first));
     CHECK(observer.observing(first,channels[0])&&!observer.observing({7,39},channels[0]));
-    CHECK(!observer.observe({7,39},frame.data(),frame.size(),channels[0],signal,99));
+    CHECK(!observer.observe({7,39},frame.data(),frame.size(),channels[0],scanSignalSample,99));
     CHECK(!observer.channelFinished({7,39},true)&&observer.observing(first,channels[0]));
-    CHECK(observer.observe(first,frame.data(),frame.size(),channels[0],signal,100));
+    CHECK(observer.observe(first,frame.data(),frame.size(),channels[0],scanSignalSample,100));
     frame[38]='X'; // Store must have already copied the complete observation.
     CHECK(observer.channelFinished(first,false));
     CHECK(!observer.copySummary(summary)); // channel completion never publishes
     CHECK(!observer.channelFinished(first,false)); // stale completion is harmless
     CHECK(observer.channelAccepted(7,17,true,channels[1],second));
-    frame=frameFor(channels[1]);CHECK(observer.observe(second,frame.data(),frame.size(),channels[1],signal,101));
+    frame=frameFor(channels[1]);CHECK(observer.observe(second,frame.data(),frame.size(),channels[1],scanSignalSample,101));
     CHECK(observer.channelFinished(second,false));CHECK(!observer.copySummary(summary));
     CHECK(observer.finish(7,17,true,102)&&!observer.open());
     CHECK(observer.copySummary(summary)&&summary.count==2&&summary.channelCount==2);

@@ -15,8 +15,11 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / 'tools/native_abi/darwin24_4.json'
-SCOPE = ('Offline emitted symbol/slot identity and compile-time native object sizes only; '
-         'not return/calling ABI, kernel linkage, lifecycle, WCL or native menu validation')
+SCOPE = ('Offline emitted vtable and selected nonvirtual call-symbol identity, explicit '
+         'status-return assertions and compile-time native object sizes only; not complete '
+         'return/calling ABI, kernel linkage, lifecycle, WCL or native menu validation')
+REGISTRATION_SOURCE = ROOT / 'tools/native_abi/registration_probe.cpp'
+REGISTRATION_SYMBOLS = ROOT / 'tools/native_abi/registration-symbols.json'
 
 
 def digest(path):
@@ -52,7 +55,7 @@ def generate_overlay(manifest, upstream, sdk, out):
         prefix = prefix.replace('typedef UInt apple80211_offload_tcpka_enable_t;', 'struct apple80211_offload_tcpka_enable_t;')
         extras = ['#ifndef R16_NATIVE_ABI_AUDIT_ONLY', '#error "Experimental declarations require the offline audit"', '#endif',
                   'class IO80211FlowQueue; class IO80211PeerManager; class IO80211Controller; class CCLogStream;',
-                  'class IO80211IORecursiveLock; class IO80211PostOffice;',
+                  'class IO80211IORecursiveLock; class IO80211PostOffice; class IO80211FaultReporter;',
                   'struct bss_blacklist; struct appl80211_sleep_on_inactivity_config;',
                   'struct apple80211_data_path_interface_stats; struct apple80211_data_path_peer_stats;',
                   'struct apple80211_latency_all_ac; struct apple80211_platform_config;']
@@ -77,9 +80,10 @@ def generate_overlay(manifest, upstream, sdk, out):
             lines += ['    OSString* setInterfaceRole(unsigned int);', '    void* setInterfaceId(unsigned int);', '    int getInterfaceRole();']
         if name == 'IOSkywalkEthernetInterface':
             lines += ['    bool initRegistrationInfo(RegistrationInfo*, unsigned int, unsigned long);',
-                      '    IOReturn registerEthernetInterface(RegistrationInfo const*, IOSkywalkPacketQueue**, unsigned int, IOSkywalkPacketBufferPool*, IOSkywalkPacketBufferPool*, unsigned int);']
+                      '    IOReturn registerEthernetInterface(RegistrationInfo const*, IOSkywalkPacketQueue**, unsigned int, IOSkywalkPacketBufferPool*, IOSkywalkPacketBufferPool*, unsigned int);',
+                      '    IOReturn deregisterEthernetInterface(unsigned int);']
         if name == 'IO80211InfraInterface':
-            lines += ['    IOReturn registerInfraEthernetInterface(IOSkywalkEthernetInterface::RegistrationInfo const*, IOSkywalkPacketQueue**, unsigned int, IOSkywalkPacketBufferPool*, IOSkywalkPacketBufferPool*);']
+            lines += ['    IOReturn registerInfraEthernetInterface(IOSkywalkEthernetInterface::RegistrationInfo*, IOSkywalkPacketQueue**, unsigned int, IOSkywalkPacketBufferPool*, IOSkywalkPacketBufferPool*);']
         if name != 'IO80211InfraProtocol':
             lines += ['private:', f'    uint8_t reserved_[{data["size"]} - sizeof({data["parent"]})];']
         lines += ['};', f'static_assert(sizeof({name}) == {data["size"]}, "Target native object size mismatch");', '#endif']
@@ -89,7 +93,11 @@ def generate_overlay(manifest, upstream, sdk, out):
 
 
 def probe_source(manifest):
-    lines = ['#include <Airport/Apple80211.h>', '// Offline objects: never link or instantiate these probe classes in a kext.']
+    lines = ['#include <Airport/Apple80211.h>', '// Offline objects: never link or instantiate these probe classes in a kext.',
+             '// Mangled slot names alone cannot catch a bool/status return mismatch.',
+             'static_assert(__is_same(decltype(((IO80211Controller*)nullptr)->isCommandProhibited(0)), IOReturn), "Controller command prohibition must preserve the 32-bit status");',
+             'static_assert(__is_same(decltype(((IO80211SkywalkInterface*)nullptr)->isCommandProhibited(0)), IOReturn), "Skywalk command prohibition must preserve the 32-bit status");',
+             'static_assert(__is_same(decltype(((IO80211Controller*)nullptr)->getFaultReporterFromDriver()), IO80211FaultReporter*), "Controller must return the native fault-reporter wrapper");']
     for name in manifest['classes']:
         pure, chain, current = {}, [], name
         while current in manifest['classes']:
@@ -170,6 +178,45 @@ def object_vtables(path):
     return tables
 
 
+def object_undefined(path):
+    """Read external undefined nlist entries from a target x86_64 MH_OBJECT."""
+    data = path.read_bytes()
+    if struct.unpack_from('<IiiI', data) != (0xfeedfacf, 0x1000007, 3, 1):
+        raise ValueError('Expected x86_64 MH_OBJECT')
+    pos, symtab = 32, None
+    for _ in range(struct.unpack_from('<I', data, 16)[0]):
+        command, size = struct.unpack_from('<II', data, pos)
+        if size < 8 or pos + size > len(data):
+            raise ValueError('Invalid load command')
+        if command == 2:
+            symtab = struct.unpack_from('<IIII', data, pos + 8)
+        pos += size
+    if symtab is None:
+        raise ValueError('Missing symbol table')
+    offset, count, stroff, strsize = symtab
+    result = set()
+    for index in range(count):
+        string, kind, section, _, value = struct.unpack_from('<IBBHQ', data, offset + 16 * index)
+        if kind & 0xe0 or kind & 0x0e or not kind & 1:
+            continue
+        if string >= strsize or section or value:
+            raise ValueError('Unexpected common/invalid undefined symbol')
+        start = stroff + string
+        name = data[start:data.index(b'\0', start, stroff + strsize)].decode()
+        result.add(name)
+    return result
+
+
+def audit_helper_symbols(evidence, references):
+    expected = {helper['symbol'] for helper in evidence['helpers']}
+    if len(expected) != len(evidence['helpers']) or not expected:
+        raise ValueError('Duplicate or empty helper evidence')
+    return dict(scope='Offline external callsite mangling only; not runtime registration or kext linker/load proof',
+                kernel_sha256=evidence['kernel_sha256'], expected_count=len(expected),
+                references=sorted(references), missing=sorted(expected - references),
+                unexpected=sorted(references - expected))
+
+
 def method_identity(symbol):
     if symbol is None:
         return None
@@ -219,7 +266,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     # Invalidate earlier success BEFORE any failure-prone work. Never audit an
     # old object after a failed build of new declarations.
-    for name in ('probe.o', 'slot-audit.json', 'slot-failure.json', 'metadata.json'):
+    for name in ('probe.o', 'slot-audit.json', 'slot-failure.json', 'metadata.json',
+                 'registration-probe.o', 'registration-symbol-audit.json'):
         (out / name).unlink(missing_ok=True)
     pinned_checkout(upstream, manifest['upstream_commit'])
     pinned_checkout(sdk, manifest['sdk_commit'])
@@ -242,8 +290,22 @@ def main():
     if report['mismatches']:
         (out / 'slot-failure.json').write_text(json.dumps(report, indent=2))
         raise RuntimeError('Native slot mismatches: ' + repr(report['mismatches'][:10]))
-    inputs = [ROOT / 'tools/build_native_sequoia.py', MANIFEST]
-    generated = [out / 'probe.cpp', out / 'probe.o', *sorted((out / 'include').rglob('*.h'))]
+    helper_evidence = json.loads(REGISTRATION_SYMBOLS.read_text())
+    if helper_evidence['kernel_sha256'] != manifest['kernel_sha256']:
+        raise ValueError('Registration helpers and vtables must have the same KC profile')
+    with (out / 'registration-compiler-diagnostics.txt').open('w') as diagnostics:
+        # This object is never executed: inspect only its eight direct calls.
+        # Disable Zig's implicit debug instrumentation instead of silently
+        # accepting additional sanitizer imports as registration helpers.
+        subprocess.run([*compiler, *flags, '-fno-sanitize=all', '-c', str(REGISTRATION_SOURCE), '-o',
+                        str(out / 'registration-probe.o')], stdout=diagnostics, stderr=diagnostics, check=True)
+    helper_report = audit_helper_symbols(helper_evidence, object_undefined(out / 'registration-probe.o'))
+    (out / 'registration-symbol-audit.json').write_text(json.dumps(helper_report, indent=2))
+    if helper_report['missing'] or helper_report['unexpected']:
+        raise RuntimeError('Registration helper symbol mismatch: ' + repr(helper_report))
+    inputs = [ROOT / 'tools/build_native_sequoia.py', MANIFEST, REGISTRATION_SOURCE, REGISTRATION_SYMBOLS]
+    generated = [out / 'probe.cpp', out / 'probe.o', out / 'registration-probe.o',
+                 out / 'registration-symbol-audit.json', *sorted((out / 'include').rglob('*.h'))]
     metadata = dict(scope=SCOPE, manifest_sha256=digest(MANIFEST), kernel_sha256=manifest['kernel_sha256'],
                     upstream=manifest['upstream_commit'], sdk=manifest['sdk_commit'],
                     port_revision=subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
@@ -252,6 +314,7 @@ def main():
     (out / 'metadata.json').write_text(json.dumps(metadata, indent=2))
     (out / 'slot-audit.json').write_text(json.dumps(report, indent=2))
     print('Exact target vtable audit passed:', {c: d['slots'] for c, d in report['classes'].items()})
+    print('Exact target registration helper call symbols passed:', helper_report['expected_count'])
 
 
 if __name__ == '__main__':

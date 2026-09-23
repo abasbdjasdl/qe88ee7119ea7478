@@ -18,6 +18,8 @@ static void fixture(uint8_t *p){
     memset(p,0,nativewcl::messageBytes);word(p,0x0c,2,2);word(p,0x10,1);word(p,0x14,8);
     word(p,0x1c,sizeof(name));memcpy(p+0x20,name,sizeof(name));
     word(p,0x44,32);word(p,0x48,6);
+    // Exact-KC fillAssocCandidatesList sets this marker for selector zero.
+    p[0x1e4]=2;
     for(unsigned i=0;i<32;++i)p[0x50+i]=uint8_t(i^0xa5); // Synthetic, never a real credential.
     word(p,0xd4,sizeof(rsn),2);memcpy(p+0xd6,rsn,sizeof(rsn));
     word(p,nativewcl::countOffset,1);memcpy(p+nativewcl::recordOffset+4,mac,6);
@@ -45,9 +47,25 @@ int main(){
     for(unsigned auth:{0u,1u,2u,4u,9u,0xffffffffu}){fixture(p);word(p,0x14,auth);failure(p,nativewcl::messageBytes,JoinResult::unsupportedAuthentication);}
     fixture(p);word(p,0x10,2);failure(p,nativewcl::messageBytes,JoinResult::unsupportedAuthentication);
     fixture(p);word(p,0x18,1);failure(p,nativewcl::messageBytes,JoinResult::unsupportedAuthentication);
-    for(size_t offset:{size_t(0x1e0),size_t(0x1e1),size_t(0x1e4),size_t(0x1e8)}){
-        for(unsigned bit=1;bit<=128;bit<<=1){
-            fixture(p);word(p,offset,bit,1);failure(p,nativewcl::messageBytes,JoinResult::unsupportedPolicy);
+    // Prove the exact two admitted bytes, including every unknown individual
+    // bit and combination. The native default marker is not a wildcard mask.
+    for(unsigned policy=0;policy<256;++policy){
+        fixture(p);p[0x1e4]=uint8_t(policy);
+        if(policy==0||policy==2){
+            assert(nativewcl::decodeWpa2Join(p,nativewcl::messageBytes,out)==JoinResult::ok);
+            assert(selection::valid(out)&&!memcmp(out.pmk,p+0x50,32));
+            assert(!memcmp(out.ssid,name,sizeof(name))&&!memcmp(out.bssid,mac,6));
+            selection::wipe(&out,sizeof(out));
+        }else failure(p,nativewcl::messageBytes,JoinResult::unsupportedPolicy);
+    }
+    for(unsigned allowed:{0u,2u}){
+        for(size_t offset:{size_t(0x1e0),size_t(0x1e1),size_t(0x1e8)}){
+            for(unsigned bit=1;bit<=128;bit<<=1){
+                fixture(p);p[0x1e4]=uint8_t(allowed);word(p,offset,bit,1);
+                failure(p,nativewcl::messageBytes,JoinResult::unsupportedPolicy);
+            }
+            fixture(p);p[0x1e4]=uint8_t(allowed);p[offset]=0xff;
+            failure(p,nativewcl::messageBytes,JoinResult::unsupportedPolicy);
         }
     }
     // Only the demonstrated u16/byte reads are policy fields. Nonzero adjacent

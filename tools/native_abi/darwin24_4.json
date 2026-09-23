@@ -2602,8 +2602,8 @@
         {
           "slot": 410,
           "signature": "isCommandProhibited(int)",
-          "return": "bool",
-          "return_evidence": "pinned-reference-return-unverified",
+          "return": "IOReturn",
+          "return_evidence": "same-kc-status32-producer-consumer",
           "pure": false,
           "symbol": "__ZN23IO80211SkywalkInterface19isCommandProhibitedEi"
         },
@@ -6926,8 +6926,8 @@
         {
           "slot": 396,
           "signature": "isCommandProhibited(int)",
-          "return": "bool",
-          "return_evidence": "pinned-reference-return-unverified",
+          "return": "IOReturn",
+          "return_evidence": "same-kc-status32-producer-consumer",
           "pure": true,
           "symbol": "___cxa_pure_virtual"
         },
@@ -7230,8 +7230,8 @@
         {
           "slot": 434,
           "signature": "getFaultReporterFromDriver()",
-          "return": "void *",
-          "return_evidence": "pinned-reference-return-unverified",
+          "return": "IO80211FaultReporter*",
+          "return_evidence": "same-kc-wrapper-factory-setter-getter",
           "pure": true,
           "symbol": "___cxa_pure_virtual"
         },

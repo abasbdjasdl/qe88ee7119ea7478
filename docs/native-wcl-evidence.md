@@ -133,12 +133,30 @@ full IE header (ID 48/221) at `0xffffff800164d0aa..0b7`. Extraction independentl
 requires a single WPA2-PSK AKM, CCMP pairwise/group suites, and no unsupported PMF.
 Empty RSN input does not inherit the older helper's default cipher selection.
 
-Nonzero policy values at `0x1e0`, `0x1e4` or `0x1e8` are conservatively rejected.
-These are separate fields; normal native requests may legitimately set them, so
-this restriction limits the decoder and is not a claim that such requests are
-malformed. Unknown channel/security candidate words are not mapped to radio
-policy. A future frontend must bind this result to a current scan/request and
-validate supported hardware policy before submitting it.
+The u16 policy at `0x1e0` and byte at `0x1e8` must remain zero. The separate
+`0x1e4` byte admits **only 0 or 2**. In the same KC, `fillAssocCandidatesList`
+sets bit 1 (`0x02`) when private-state+`0x2a4` masked with `0x30000` is zero
+(`0xffffff800222c5ae..5bc`). `initWCLJoinRequest` copies the incoming association
+bytes to private-state+`0x28`, so this selector originates at incoming
+`apple80211_assoc_data+0x27c`; it is not the output payload's same offset.
+This establishes a zero-selector default, not how frequently userspace sends it.
+
+The audited driver route (`setWCL_ASSOCIATE`, `performJoin`, and `adjustMfp`)
+does not consume bit `0x02`. `performJoin` consumes bits `0x04/0x08` to derive
+a 0/1/2 value at `0xffffff8001581329..1342`, with separate tests for `0x01`
+and `0x20`. `setAssocWsecInfo` type `0x10a` identifies that derived value in its
+own log as `SAEPK state` at `0xffffff800158288a`; none of those bits is enabled
+by admitting byte 2. Other policy bits still fail closed. The bounded audit is
+recorded in `wcl-join-policy-findings.md` and reproducible with
+`wcl-join-policy-inspect.py` in the local evidence directory.
+
+Normal native requests can set other legitimate policy values, which this
+decoder deliberately rejects without calling them malformed. Tests cover both
+admitted values, all 256 `0x1e4` bytes and each other policy bit combined with
+either admitted byte. Unknown channel/security candidate words are not mapped
+to radio policy. This remains offline extraction: a future frontend must bind
+the result to a current scan/request and validate hardware policy before
+submitting it; no native admission or event emission is connected here.
 
 An independent `setCIPHER_KEY` callback also reaches the native driver with a
 148-byte key. Thus a first WCL association request is not guaranteed to contain

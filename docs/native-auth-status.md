@@ -47,8 +47,10 @@ available. No new package was installed or reboot armed for this work.
 - `NativeWclJoin.hpp` separately extracts the confirmed embedded raw-PMK
   WPA2-PSK/CCMP case from that same 988-byte message. It requires explicit
   infrastructure/open-system/WPA2-PSK values, a nonempty valid RSN IE and one
-  unicast BSSID. Unknown policy, empty/ambiguous keys, password/MSK input, PMF
-  and other AKMs are rejected; all failed outputs and temporary keys are wiped.
+  unicast BSSID. At policy byte `0x1e4`, only 0 and the exact-KC zero-selector
+  marker 2 are admitted; other policy/transition bits remain rejected. Empty or
+  ambiguous keys, password/MSK input, PMF and other AKMs are rejected; all
+  failed outputs and temporary keys are wiped.
   This is isolated credential extraction, not a live admission/dispatch binding.
   The native stack can supply keys separately, which remains an integration task.
 - `SaeSession` uses hostap's group-19 SAE H2E and hunting-and-pecking. Corrected

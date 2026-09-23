@@ -38,9 +38,11 @@ inline JoinResult decodeWpa2Join(const void *bytes,size_t length,selection::Join
     // The target consumer reads a u16 at +0x1e0 and individual bytes at +0x1e4
     // and +0x1e8. Adjacent bytes have no established policy-field meaning.
     // These are separate policy fields, NOT a version or a single flags word.
-    // Until their behavior is integrated, fail closed even when a legitimate
-    // native producer sets them. This decoder does not claim all menu joins.
-    if(little16(p+0x1e0)||p[0x1e4]||p[0x1e8])
+    // In this KC the producer sets 1e4 bit1 when its policy selector is zero.
+    // The audited direct single-link WPA2 consumer ignores that bit: its other
+    // 1e4 masks are 0x0c (SAE-PK state), 0x01 and 0x20. Admit only {0,2}; do
+    // not discard other policy/transition bits or claim all menu joins work.
+    if(little16(p+0x1e0)||(p[0x1e4]!=0&&p[0x1e4]!=2)||p[0x1e8])
         return joinResult(out,decoded,JoinResult::unsupportedPolicy);
     if(little32(p+0x44)!=32||little32(p+0x48)!=6||little32(p+0x1ec))
         return joinResult(out,decoded,JoinResult::unsupportedKey);

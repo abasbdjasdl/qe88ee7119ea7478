@@ -1,0 +1,83 @@
+{
+  "kernel_sha256": "d8b50fc25bbe4c9f6923a9344ae34e760e1c98b06b23513e4a73e494019865e1",
+  "scope": "Exact-KC offline compiler-mangling callsite audit only. No runtime calls, loadable pool/queue class layouts, link/load success, BSD attachment, or native Wi-Fi functionality are established.",
+  "helpers": [
+    {
+      "name": "workQueue",
+      "wrapper": "_r16_registration_work_queue",
+      "symbol": "__ZN16IO80211WorkQueue9workQueueEv",
+      "address": "0xffffff80022537f2",
+      "return_contract": "Owned IO80211WorkQueue pointer on success; null after failed init and release. First-created default pointer has separate unproved teardown lifetime.",
+      "return_evidence": ["0xffffff8002253837", "0xffffff8002253854", "0xffffff800225385d"],
+      "mach_o": {"n_type": 15, "n_sect": 1, "n_desc": 0, "external": true, "private_external": false}
+    },
+    {
+      "name": "poolWithName",
+      "wrapper": "_r16_registration_pool",
+      "symbol": "__ZN25IOSkywalkPacketBufferPool8withNameEPKcP8OSObjectjPKNS_11PoolOptionsE",
+      "address": "0xffffff8002970858",
+      "return_contract": "Owned IOSkywalkPacketBufferPool pointer on success; null after failed Boolean initializer and release.",
+      "return_evidence": ["0xffffff80029708c4", "0xffffff80029708ce", "0xffffff80029708d1", "0xffffff80029708d3"],
+      "input_contract": "PoolOptions is 32 bytes: six unsigned words at offsets 0..20, optional DMA specification pointer at +0x18; the pointed-to DMA layout is intentionally opaque. Packet type 0..2, non-null options; downstream validation may still fail.",
+      "input_evidence": ["0xffffff8002970925", "0xffffff800297092b", "0xffffff8002970cc2", "0xffffff800297ae77", "0xffffff800297ae9b"],
+      "mach_o": {"n_type": 15, "n_sect": 1, "n_desc": 0, "external": true, "private_external": false}
+    },
+    {
+      "name": "txSimpleWithPool",
+      "wrapper": "_r16_registration_tx_queue",
+      "symbol": "__ZN26IOSkywalkTxSubmissionQueue8withPoolEP25IOSkywalkPacketBufferPooljjP8OSObjectPFjS3_PS_PKP15IOSkywalkPacketjPvES9_j",
+      "address": "0xffffff8002977d5a",
+      "return_contract": "Owned IOSkywalkTxSubmissionQueue pointer or null, forwarded from the full factory.",
+      "return_evidence": ["0xffffff8002977d74", "0xffffff8002977d15", "0xffffff8002977d1f", "0xffffff8002977d22", "0xffffff8002977d24"],
+      "input_contract": "Seven-argument simple factory. TX callback returns unsigned and receives IOSkywalkPacket * const * (PKP), not const IOSkywalkPacket **. This simple form supplies null query callback and UINT_MAX service class to the full factory; it does not use the obsolete full-overload signature.",
+      "mach_o": {"n_type": 15, "n_sect": 1, "n_desc": 0, "external": true, "private_external": false}
+    },
+    {
+      "name": "rxSimpleWithPool",
+      "wrapper": "_r16_registration_rx_queue",
+      "symbol": "__ZN26IOSkywalkRxCompletionQueue8withPoolEP25IOSkywalkPacketBufferPooljjP8OSObjectPFjS3_PS_PP15IOSkywalkPacketjPvES8_j",
+      "address": "0xffffff800297a078",
+      "return_contract": "Owned IOSkywalkRxCompletionQueue pointer on success; null after failed Boolean initializer and release.",
+      "return_evidence": ["0xffffff800297a100", "0xffffff800297a10a", "0xffffff800297a10d", "0xffffff800297a10f"],
+      "input_contract": "Seven-argument factory. RX callback returns unsigned and receives IOSkywalkPacket **. No callback body or ownership behavior is implemented by this probe.",
+      "mach_o": {"n_type": 15, "n_sect": 1, "n_desc": 0, "external": true, "private_external": false}
+    },
+    {
+      "name": "initRegistrationInfo",
+      "wrapper": "_r16_registration_init_info",
+      "symbol": "__ZN26IOSkywalkEthernetInterface20initRegistrationInfoEPNS_16RegistrationInfoEjm",
+      "address": "0xffffff800297bb6e",
+      "return_contract": "Boolean: non-null info, version exactly 1 and size exactly 0x130 are required. The probe borrows the pointer and forwards version/size without constructing a description.",
+      "return_evidence": ["0xffffff800297bb6e", "0xffffff800297bbb4", "0xffffff800297bbbe"],
+      "mach_o": {"n_type": 15, "n_sect": 1, "n_desc": 0, "external": true, "private_external": false}
+    },
+    {
+      "name": "registerEthernetInterface",
+      "wrapper": "_r16_registration_ethernet",
+      "symbol": "__ZN26IOSkywalkEthernetInterface25registerEthernetInterfaceEPKNS_16RegistrationInfoEPP20IOSkywalkPacketQueuejP25IOSkywalkPacketBufferPoolS7_j",
+      "address": "0xffffff800297bd10",
+      "return_contract": "Full 32-bit IOReturn, zero success; never interpret as bool. This array overload takes const RegistrationInfo * and a final unsigned options argument.",
+      "return_evidence": ["0xffffff800297bd31", "0xffffff800297bd6b", "0xffffff80022d68f5", "0xffffff80015663c8"],
+      "mach_o": {"n_type": 15, "n_sect": 1, "n_desc": 0, "external": true, "private_external": false}
+    },
+    {
+      "name": "registerInfraEthernetInterface",
+      "wrapper": "_r16_registration_infra",
+      "symbol": "__ZN21IO80211InfraInterface30registerInfraEthernetInterfaceEPN26IOSkywalkEthernetInterface16RegistrationInfoEPP20IOSkywalkPacketQueuejP25IOSkywalkPacketBufferPoolS7_",
+      "address": "0xffffff80022d675e",
+      "return_contract": "Full 32-bit IOReturn, zero success. Input RegistrationInfo * is mutable, unlike the Ethernet helper; no final options argument.",
+      "return_evidence": ["0xffffff80022d68ec", "0xffffff80022d68f5", "0xffffff80022d6926", "0xffffff80015663c8"],
+      "input_evidence": ["0xffffff80022d68a0", "0xffffff80022d68d3"],
+      "mach_o": {"n_type": 15, "n_sect": 1, "n_desc": 0, "external": true, "private_external": false}
+    },
+    {
+      "name": "deregisterEthernetInterface",
+      "wrapper": "_r16_registration_deregister",
+      "symbol": "__ZN26IOSkywalkEthernetInterface27deregisterEthernetInterfaceEj",
+      "address": "0xffffff800297bd80",
+      "return_contract": "Full 32-bit IOReturn; propagates network deregistration status. Frees the Ethernet registration description only when that status is zero. This is not proof of hardware/callback drain.",
+      "return_evidence": ["0xffffff800297bd8d"],
+      "mach_o": {"n_type": 15, "n_sect": 1, "n_desc": 0, "external": true, "private_external": false}
+    }
+  ]
+}

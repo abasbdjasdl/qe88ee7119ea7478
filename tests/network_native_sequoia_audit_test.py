@@ -40,3 +40,24 @@ assert audit.audit_slots(manifest, {})['mismatches']
 # Const qualification is retained when normalizing only the owning class.
 assert audit.method_identity('__ZNK1A9getLoggerEv') != audit.method_identity('__ZN1B9getLoggerEv')
 print('Native slot audit negative checks passed (swapped pure callbacks, owner, inherited slot, missing table, const).')
+
+# Nonvirtual registration/factory calls never appear in the vtable. Check their
+# actual undefined references separately, including the easy-to-confuse pointer
+# qualification of Infra's mutable record and TX's array of const pointers.
+evidence = json.loads(audit.REGISTRATION_SYMBOLS.read_text())
+references = audit.object_undefined(out / 'registration-probe.o')
+result = audit.audit_helper_symbols(evidence, references)
+assert not result['missing'] and not result['unexpected'] and result['expected_count'] == 8
+infra = next(name for name in references if 'registerInfraEthernetInterface' in name)
+old_const = infra.replace('EPN26IOSkywalkEthernetInterface', 'EPKN26IOSkywalkEthernetInterface')
+assert old_const != infra
+changed = references - {infra} | {old_const}
+result = audit.audit_helper_symbols(evidence, changed)
+assert result['missing'] == [infra] and result['unexpected'] == [old_const]
+tx = next(name for name in references if 'IOSkywalkTxSubmissionQueue8withPool' in name)
+wrong_const = tx.replace('PKP15IOSkywalkPacket', 'PPK15IOSkywalkPacket')
+assert wrong_const != tx
+result = audit.audit_helper_symbols(evidence, references - {tx} | {wrong_const})
+assert result['missing'] == [tx] and result['unexpected'] == [wrong_const]
+assert audit.audit_helper_symbols(evidence, references - {infra})['missing'] == [infra]
+print('Native helper call audit negative checks passed (mutable record, TX callback qualification, missing factory).')
