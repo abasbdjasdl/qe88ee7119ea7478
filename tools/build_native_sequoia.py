@@ -20,6 +20,9 @@ SCOPE = ('Offline emitted vtable and selected nonvirtual call-symbol identity, e
          'return/calling ABI, kernel linkage, lifecycle, WCL or native menu validation')
 REGISTRATION_SOURCE = ROOT / 'tools/native_abi/registration_probe.cpp'
 REGISTRATION_SYMBOLS = ROOT / 'tools/native_abi/registration-symbols.json'
+SUPPORT_SOURCE = ROOT / 'tools/native_abi/support_probe.cpp'
+SUPPORT_OPTIONS = ROOT / 'tools/native_abi/support_options.hpp'
+SUPPORT_SYMBOLS = ROOT / 'tools/native_abi/support-symbols.json'
 
 
 def digest(path):
@@ -267,7 +270,8 @@ def main():
     # Invalidate earlier success BEFORE any failure-prone work. Never audit an
     # old object after a failed build of new declarations.
     for name in ('probe.o', 'slot-audit.json', 'slot-failure.json', 'metadata.json',
-                 'registration-probe.o', 'registration-symbol-audit.json'):
+                 'registration-probe.o', 'registration-symbol-audit.json',
+                 'support-probe.o', 'support-symbol-audit.json'):
         (out / name).unlink(missing_ok=True)
     pinned_checkout(upstream, manifest['upstream_commit'])
     pinned_checkout(sdk, manifest['sdk_commit'])
@@ -303,9 +307,21 @@ def main():
     (out / 'registration-symbol-audit.json').write_text(json.dumps(helper_report, indent=2))
     if helper_report['missing'] or helper_report['unexpected']:
         raise RuntimeError('Registration helper symbol mismatch: ' + repr(helper_report))
-    inputs = [ROOT / 'tools/build_native_sequoia.py', MANIFEST, REGISTRATION_SOURCE, REGISTRATION_SYMBOLS]
+    support_evidence = json.loads(SUPPORT_SYMBOLS.read_text())
+    if support_evidence['kernel_sha256'] != manifest['kernel_sha256']:
+        raise ValueError('Support helpers and vtables must have the same KC profile')
+    with (out / 'support-compiler-diagnostics.txt').open('w') as diagnostics:
+        subprocess.run([*compiler, *flags, '-fno-sanitize=all', '-c', str(SUPPORT_SOURCE), '-o',
+                        str(out / 'support-probe.o')], stdout=diagnostics, stderr=diagnostics, check=True)
+    support_report = audit_helper_symbols(support_evidence, object_undefined(out / 'support-probe.o'))
+    (out / 'support-symbol-audit.json').write_text(json.dumps(support_report, indent=2))
+    if support_report['missing'] or support_report['unexpected']:
+        raise RuntimeError('Support helper symbol mismatch: ' + repr(support_report))
+    inputs = [ROOT / 'tools/build_native_sequoia.py', MANIFEST, REGISTRATION_SOURCE, REGISTRATION_SYMBOLS,
+              SUPPORT_SOURCE, SUPPORT_OPTIONS, SUPPORT_SYMBOLS]
     generated = [out / 'probe.cpp', out / 'probe.o', out / 'registration-probe.o',
-                 out / 'registration-symbol-audit.json', *sorted((out / 'include').rglob('*.h'))]
+                 out / 'registration-symbol-audit.json', out / 'support-probe.o',
+                 out / 'support-symbol-audit.json', *sorted((out / 'include').rglob('*.h'))]
     metadata = dict(scope=SCOPE, manifest_sha256=digest(MANIFEST), kernel_sha256=manifest['kernel_sha256'],
                     upstream=manifest['upstream_commit'], sdk=manifest['sdk_commit'],
                     port_revision=subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
@@ -315,6 +331,7 @@ def main():
     (out / 'slot-audit.json').write_text(json.dumps(report, indent=2))
     print('Exact target vtable audit passed:', {c: d['slots'] for c, d in report['classes'].items()})
     print('Exact target registration helper call symbols passed:', helper_report['expected_count'])
+    print('Exact target support factory call symbols passed:', support_report['expected_count'])
 
 
 if __name__ == '__main__':

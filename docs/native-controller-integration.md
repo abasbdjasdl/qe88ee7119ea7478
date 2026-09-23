@@ -107,12 +107,27 @@ result because they are not guaranteed to produce a successful assoc-done event.
 WPA2 data link-up still comes from controlled-port authorization, never from
 `queueSelection` success or the earlier association event.
 
-## Scanning is a missing operation, not just a missing result getter
+## Foreground scanning and remaining native request work
 
-The current startup poll begins a scan only when `enabled && credentials`.
-With no provisioned network, merely registering the native interface will not
-produce the menu's initial list. Add an explicit scan request independent of
-credentials, with a bounded request, generation, cancellation and deadline.
+The legacy startup poll begins a scan only when `enabled && credentials`.
+`beginNativeForegroundScan`, `copyNativeForegroundScanStatus` and
+`cancelNativeForegroundScan` now provide an independent, kernel-only passive
+operation without provisioned credentials. Admission requires an enabled, idle,
+unconnected station in net80211 INIT, no legacy credentials/AUTO_JOIN, pending
+join or deferred work. Connected requests return Busy without disconnecting;
+active requests currently return Unsupported. No native framework callback
+calls these APIs yet, so this is not menu scanning.
+
+The operation snapshots actual boot policy intersected with currently allowed
+net80211 channels, starts one real station scan per channel and waits for its
+restore/end completion. The completion callback only records the result;
+the next poll starts another channel after StationController has cleared the
+old token. A distinct hardware epoch/request counter binds status/cancellation,
+and exact dwell tokens bind RX and channel completion. Only a full observer
+publication supplies a completed snapshot token. Cancellation/selection/power-off
+and a two-minute request deadline first enter draining; cancellation acceptance
+does not claim hardware drain. Hardware failure requires the existing proven
+shutdown path, preserving the prior complete scan cache.
 
 `State::scanFinished` sets `scanDone` after one StationController channel visit;
 poll then calls `ieee80211_next_scan`. It now marks only that channel complete
@@ -143,12 +158,30 @@ failure. `copyNativeScanSummary/Entry/Channel` use the external control-lock/gat
 fence and exact epoch/generation/index checks. Cancellation retains the last
 complete snapshot; overflow/truncation or an incomplete channel plan cannot
 publish a new complete result. Entries are copied to caller-owned storage,
-without retaining node pointers. This is passive observation of existing scans,
-not a new foreground-scan scheduler. It deliberately excludes background scans.
+without retaining node pointers. The observer serves both legacy scans and the
+new independent passive scheduler. It deliberately excludes background scans.
 The unattended recovery collector also records count-only `R16NativeScan*`
 properties (observer availability, open pass and last complete token/count/channel
 count). Complete means a retained full pass exists, not a live WCL request
 completed. These diagnostics contain no SSID/BSSID or raw IE data.
+
+The foreground scheduler's tests exercise the real StationController and Observer
+with simulated hardware completions, including stale tokens, all scan phases,
+cancel/timeout/failure, no probes or protocol autojoin, and old-cache retention.
+They are not real-radio or native-menu tests. `NativeScanProbe.hpp` separately
+encodes a wildcard SSID and existing legacy rate IEs for a future active path;
+it does not enqueue/transmit a frame. Reusing `ieee80211_send_mgmt(PROBE_REQ)`
+blindly would arm net80211's management timer, while its stock probe body reads
+`ic_des_essid`, which may still contain an earlier selection. Active scans need
+an independently owned node/frame and verified TX ownership without those effects.
+
+Exact-target WCL inspection establishes selector 1 as Active and 2 as Passive;
+capabilities do not rewrite ordinary selector 1 to Passive. The +4 private-MAC
+trigger has a legitimate no-op when the driver explicitly lacks that capability
+or the feature is disabled, but it is not an arbitrary flag to ignore. Normal
+non-ID requests also acquire flag 0x08; remaining policy/dwell fields still need
+admission semantics. Do not connect a default active request to the passive API
+and report success, or interpret payload timing values as the WCL watchdog.
 
 `NativeWclBeacon.hpp` can produce an offline 64-byte metadata plus raw-IE draft
 from one such entry for the pinned KC. It revalidates bounds, names, channels

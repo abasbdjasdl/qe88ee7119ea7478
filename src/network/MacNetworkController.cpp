@@ -39,6 +39,8 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     int (*savedState)(ieee80211com*,enum ieee80211_state,int){};
     void (*savedEvent)(ieee80211com*,int,void*){};
     nativescan::Observer *scanObservations{}; // ~300 KiB, heap only; optional.
+    foregroundscan::Controller foregroundScan;
+    bool foregroundCompletedThisPoll{};
     bool bound{},attached{},visible{},runtimeAttempted{},prepared{},bootStarted{},stationStarted{},interruptAttached{},credentials{};
     bool enabled{},faulted{},stopping{},scanDone{},authPending{},probePending{},runPending{},resetPending{};
     bool stateDeferred{};int deferredState{},deferredArgument{};
@@ -59,7 +61,10 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             if(packet.info.pkt_type==0&&!hardwareDecrypted(packet.info)&&packet.length>=28)
                 authenticationEvents.observe(packet.payload,packet.length-4,channel,now());
             if(scanObservations&&packet.info.pkt_type==0&&!hardwareDecrypted(packet.info)&&
-               packet.length>=40&&ic.ic_state==IEEE80211_S_SCAN&&!(ic.ic_flags&IEEE80211_F_BGSCAN)&&
+               packet.length>=40&&
+               ((ic.ic_state==IEEE80211_S_SCAN&&!(ic.ic_flags&IEEE80211_F_BGSCAN))||
+                (ic.ic_state==IEEE80211_S_INIT&&foregroundScan.observing(
+                    {station.scanToken().epoch,station.scanToken().operation})))&&
                station.state()==station::State::scanningDwell&&channel&&ic.ic_channels[channel].ic_freq){
                 const nativescan::Channel observedChannel{
                     IEEE80211_IS_CHAN_5GHZ(&ic.ic_channels[channel])?nativescan::Band::ghz5:nativescan::Band::ghz2,channel};
@@ -114,6 +119,9 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     bool inGate(){return owner.loop_->inGate();}
     void fail(const char *reason){
         if(faulted)return;faulted=true;traffic=station::Traffic::none;enabled=false;
+        // The station failure path never calls scanFinished. Do not reenter it
+        // from this callback; a later proven shutdown releases the drain debt.
+        foregroundScan.fail(foregroundscan::Reason::backend,now());
         if(scanObservations&&inGate())scanObservations->cancel();
         authenticationEvents.disable();
         pendingSelection.clear();
@@ -184,12 +192,30 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     }
     bool sendProbe(station::Token,const station::Peer*,const station::ScanChannel&){probePending=true;return true;}
     bool cancelProtocol(station::Token){
+        cancelForeground(foregroundscan::Reason::protocol,false);
         if(scanObservations)scanObservations->cancel();
         authenticationEvents.invalidate();authPending=probePending=runPending=false;resetPending=true;return true;
     }
     void scanFinished(station::Token token,bool cancelled){
+        if(foregroundScan.owns({token.epoch,token.operation})){
+            const auto timestamp=now();
+            const bool cancelling=foregroundScan.draining()||timestamp>=foregroundScan.status().deadlineUs;
+            bool observed=false;
+            if(scanObservations){
+                if(cancelled||cancelling)scanObservations->cancel();
+                else observed=scanObservations->channelFinished({token.epoch,token.operation},false);
+            }
+            foregroundScan.channelFinished({token.epoch,token.operation},cancelled,timestamp);
+            if(!cancelled&&!cancelling&&!observed){
+                foregroundScan.fail(foregroundscan::Reason::observation,timestamp);
+                if(scanObservations)scanObservations->cancel();
+            }
+            // StationController clears its scanToken only AFTER this callback.
+            // Starting the next scan here would reenter it and lose that token.
+            foregroundCompletedThisPoll=true;return;
+        }
         if(scanObservations)scanObservations->channelFinished({token.epoch,token.operation},cancelled);
-        if(!cancelled)scanDone=true; // Only advances the existing net80211 scan.
+        if(!cancelled&&ic.ic_state==IEEE80211_S_SCAN&&!foregroundScan.active())scanDone=true;
     }
     void recoveryRequired(station::Token,station::Error){fail("station operation failed; physical firmware reset required");}
     bool firmwareRestartVerified(uint64_t epoch){return prepared&&identity.epoch==epoch&&commands&&commands->epoch()==epoch;}
@@ -224,7 +250,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     }
     static void protocolEvent(ieee80211com *ic,int event,void *data){
         auto *s=from(ic);if(!s)return;
-        if(event==IEEE80211_EVT_SCAN_DONE&&s->scanObservations){
+        if(event==IEEE80211_EVT_SCAN_DONE&&s->scanObservations&&!s->foregroundScan.active()){
             if(s->inGate()&&!s->stopping&&!s->faulted&&ic->ic_state==IEEE80211_S_SCAN&&
                !(ic->ic_flags&IEEE80211_F_BGSCAN))
                 s->scanObservations->finish(s->identity.epoch,int(ic->ic_curmode),
@@ -237,6 +263,10 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     static int newState(ieee80211com *ic,enum ieee80211_state next,int arg){
         auto &s=*from(ic);if(s.stopping||s.faulted)return ENETDOWN;
         if(!s.inGate()){s.fail("net80211 state outside gate");return EIO;}
+        if(s.foregroundScan.active()){
+            if(next!=IEEE80211_S_INIT)return EBUSY;
+            s.cancelForeground(foregroundscan::Reason::protocol,false);
+        }
         if(next!=IEEE80211_S_SCAN&&s.scanObservations)s.scanObservations->cancel();
         if(unsigned(next)<5)++s.stateRequests[unsigned(next)];
         // State/argument only, no frame contents, network names or key material.
@@ -461,7 +491,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         memset(&out,0,sizeof(out));out.sampledAtUs=now();
         out.selectionGeneration=pendingSelection.generation();
         out.selectionPending=pendingSelection.waiting();
-        out.scanInProgress=attached&&ic.ic_state==IEEE80211_S_SCAN;
+        out.scanInProgress=attached&&(ic.ic_state==IEEE80211_S_SCAN||foregroundScan.active());
         const bool run=attached&&ic.ic_state==IEEE80211_S_RUN;
         const bool authorized=station.state()==station::State::authorized&&
             (!(ic.ic_flags&IEEE80211_F_RSNON)||(ic.ic_bss&&ic.ic_bss->ni_port_valid));
@@ -502,12 +532,119 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         bindAuthenticationEventsIfReady();
         return kIOReturnSuccess;
     }
+    void cancelForeground(foregroundscan::Reason reason,bool cancelStation){
+        if(!foregroundScan.active())return;
+        const auto timestamp=now();
+        foregroundScan.cancel(foregroundScan.token(),reason,timestamp);
+        if(scanObservations)scanObservations->cancel();
+        if(cancelStation&&foregroundScan.draining()){
+            const auto operation=foregroundScan.operation();
+            if(!station.cancelScan({operation.epoch,operation.operation},timestamp))
+                fail("foreground scan cancellation rejected");
+        }
+    }
+    bool submitForegroundChannel(){
+        nativescan::Channel target;
+        if(!foregroundScan.next(target)||station.state()!=station::State::idle||
+           actionInFlight||!dataDrained())return false;
+        station::ScanChannel request{};
+        request.channel={uint8_t(target.band==nativescan::Band::ghz5),0,target.number,target.number};
+        request.dwellMs=foregroundscan::dwellMs;request.active=false;
+        if(!station.scan(&request,1,now())){
+            foregroundScan.fail(foregroundscan::Reason::backend,now());
+            if(scanObservations)scanObservations->cancel();return false;
+        }
+        const auto operation=station.scanToken();
+        if(!foregroundScan.accepted({operation.epoch,operation.operation})){
+            fail("foreground scan ownership mismatch");return false;
+        }
+        if(!scanObservations||!scanObservations->channelAccepted(identity.epoch,
+                foregroundscan::observerMode,false,target,{operation.epoch,operation.operation})){
+            cancelForeground(foregroundscan::Reason::observation,true);return false;
+        }
+        return true;
+    }
+    IOReturn beginForeground(bool active,foregroundscan::Status &out){
+        memset(&out,0,sizeof(out));
+        nativescan::Channel plan[nativescan::maxChannels]{};size_t count=0;
+        const foregroundscan::Readiness readiness{
+            attached&&stationStarted&&enabled&&!faulted&&!stopping&&scanObservations,
+            station.state()==station::State::idle,ic.ic_state==IEEE80211_S_INIT,
+            station.associated()||ic.ic_state==IEEE80211_S_RUN,pendingSelection.waiting(),
+            credentials||(ic.ic_flags&IEEE80211_F_AUTO_JOIN),
+            actionInFlight||actionDeferred||completedCount||stateDeferred||resetPending||
+                authPending||probePending||runPending||scanDone||!dataDrained()||
+                (scanObservations&&scanObservations->open())};
+        // Snapshot the intersection of actual boot policy and current net80211
+        // allowed channels. No capability-derived channels, mode changes,
+        // active probes, power changes or credential changes are introduced.
+        for(size_t i=0;i<identity.channelCount&&i<nativescan::maxChannels;++i){
+            const auto &allowed=identity.channels[i];
+            if(!allowed.number||!isset(ic.ic_chan_active,allowed.number))continue;
+            const auto &channel=ic.ic_channels[allowed.number];
+            if(!channel.ic_freq||!channel.ic_flags||
+               bool(IEEE80211_IS_CHAN_5GHZ(&channel))!=allowed.fiveGhz)continue;
+            plan[count++]={allowed.fiveGhz?nativescan::Band::ghz5:nativescan::Band::ghz2,allowed.number};
+        }
+        foregroundscan::Status accepted;
+        const auto admitted=foregroundScan.begin(readiness,active,identity.epoch,now(),plan,count,accepted);
+        switch(admitted){
+        case foregroundscan::Admission::busy:return kIOReturnBusy;
+        case foregroundscan::Admission::notReady:return kIOReturnNotReady;
+        case foregroundscan::Admission::unsupported:return kIOReturnUnsupported;
+        case foregroundscan::Admission::invalid:return kIOReturnBadArgument;
+        case foregroundscan::Admission::accepted:break;
+        }
+        if(!scanObservations->begin(identity.epoch,foregroundscan::observerMode,false,plan,count)){
+            scanObservations->cancel();foregroundScan.fail(foregroundscan::Reason::observation,now());
+            return kIOReturnError;
+        }
+        // Do not return success for a request that never reached station.scan.
+        if(!submitForegroundChannel()){
+            if(foregroundScan.active()&&!foregroundScan.draining())
+                cancelForeground(foregroundscan::Reason::backend,true);
+            return kIOReturnError;
+        }
+        out=foregroundScan.status();return kIOReturnSuccess;
+    }
+    void advanceForeground(){
+        if(!foregroundScan.active()||foregroundScan.draining()||foregroundCompletedThisPoll)return;
+        const auto timestamp=now();
+        if(!foregroundScan.clockValid(timestamp)){fail("foreground scan clock regressed");return;}
+        if(foregroundScan.expired(timestamp)){
+            expireForegroundHardware();return;
+        }
+        if(foregroundScan.readyToFinish()){
+            nativescan::Summary snapshot;
+            const bool complete=scanObservations&&scanObservations->finish(identity.epoch,
+                foregroundscan::observerMode,false,timestamp)&&scanObservations->copySummary(snapshot);
+            if(!complete||!foregroundScan.complete(snapshot.token,timestamp)){
+                foregroundScan.fail(foregroundscan::Reason::observation,timestamp);
+                if(scanObservations)scanObservations->cancel();
+            }
+            return;
+        }
+        nativescan::Channel next;
+        if(foregroundScan.next(next)&&!submitForegroundChannel()&&!faulted)
+            cancelForeground(foregroundscan::Reason::backend,true);
+    }
+    void expireForegroundHardware(){
+        // expired() may already be terminal between channels, so cleanup cannot
+        // depend on active()==true. Preserve the previous completed snapshot.
+        if(scanObservations)scanObservations->cancel();
+        if(foregroundScan.draining()){
+            const auto operation=foregroundScan.operation();
+            if(!station.cancelScan({operation.epoch,operation.operation},now()))
+                fail("foreground scan timeout cancellation rejected");
+        }
+    }
     IOReturn queueSelection(const selection::Join *requested){
         if(!attached||!stationStarted||faulted||stopping||!enabled)return kIOReturnNotReady;
         if(requested){
             if(!selection::valid(*requested))return kIOReturnBadArgument;
             if(!pendingSelection.submit(*requested))return kIOReturnBusy;
         }else pendingSelection.clear();
+        cancelForeground(foregroundscan::Reason::selection,false);
         if(scanObservations)scanObservations->cancel();
         // Keep the old protocol keys until all old-channel TX and hardware work
         // has drained. Never install the new credentials from this call stack.
@@ -659,7 +796,10 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     }
     void poll(){
         if(stopping||faulted)return;
+        foregroundCompletedThisPoll=false;
         const auto timestamp=now();
+        if(!foregroundScan.clockValid(timestamp)){fail("foreground scan clock regressed");return;}
+        if(foregroundScan.expired(timestamp)){expireForegroundHardware();if(faulted)return;}
         if(!lastStatus||timestamp-lastStatus>=1000000){lastStatus=timestamp;publishStatus();}
         if(!commands->service()){fail("firmware service failed");return;}
         if(stationStarted&&!station.tick(timestamp)){fail("station deadline expired");return;}
@@ -688,12 +828,13 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         }
         if(authPending){authPending=false;savedState(&ic,IEEE80211_S_AUTH,-1);}
         if(probePending){probePending=false;savedState(&ic,IEEE80211_S_SCAN,-1);}
-        if(scanDone){scanDone=false;ieee80211_next_scan(&ic.ic_if);}
+        if(scanDone){scanDone=false;if(!foregroundScan.active())ieee80211_next_scan(&ic.ic_if);}
         if(!applyPendingSelection()){fail("network selection failed");return;}
         if(runPending&&station.state()==station::State::associated){
             runPending=false;if(!savedState(&ic,IEEE80211_S_RUN,-1)&&ic.ic_state==IEEE80211_S_RUN)++runCommitted;
         }
-        if(enabled&&credentials&&station.state()==station::State::idle&&ic.ic_state==IEEE80211_S_INIT&&!stateDeferred)
+        if(enabled&&credentials&&!foregroundScan.active()&&!foregroundCompletedThisPoll&&
+           station.state()==station::State::idle&&ic.ic_state==IEEE80211_S_INIT&&!stateDeferred)
             newState(&ic,IEEE80211_S_SCAN,-1);
         if(ic.ic_state==IEEE80211_S_RUN&&station.state()==station::State::associated&&
            (!(ic.ic_flags&IEEE80211_F_RSNON)||ic.ic_bss->ni_port_valid)){
@@ -702,11 +843,13 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         }
         if(station.state()==station::State::authorized&&(ic.ic_flags&IEEE80211_F_RSNON)&&!ic.ic_bss->ni_port_valid)
             station.revokePort(auth,now());
+        advanceForeground();if(faulted)return;
         if(attached&&timestamp-lastWatchdog>=1000000){lastWatchdog=timestamp;ieee80211_watchdog(&ic.ic_if);}
         bindAuthenticationEventsIfReady();pumpTx();
         if(!faulted&&owner.timer_->setTimeoutMS(10)!=kIOReturnSuccess)fail("controller timer failed");
     }
     bool shutdown(){
+        cancelForeground(foregroundscan::Reason::shutdown,false);
         if(scanObservations)scanObservations->cancel();
         authenticationEvents.disable();
         stopping=true;enabled=false;traffic=station::Traffic::none;owner.timer_->cancelTimeout();
@@ -718,6 +861,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(visible&&(!runtime.result.stopped))idle=runtime.stop()&&idle;
         const bool backendStopped=boot->stop();
         if(!idle||!backendStopped||(queues&&queues->serving())||(interrupt&&interrupt->servicing()))return false;
+        foregroundScan.hardwareStopped(now());
         if(interruptAttached&&!interrupt->detach())return false;interruptAttached=false;
         if(interrupt){interrupt->release();interrupt=nullptr;}
         if(pendingTx.frame)releaseTx(&ic,pendingTx);
@@ -831,7 +975,8 @@ IOReturn R16NetworkController::enableGated(OSObject *o,void *on,void*,void*,void
     auto &owner=*static_cast<R16NetworkController*>(o);auto *s=owner.state_;
     if(!s||s->faulted||s->stopping)return kIOReturnNotReady;s->enabled=on!=nullptr;
     if(s->enabled){s->ic.ic_if.if_flags|=IFF_UP|IFF_RUNNING;s->lastWatchdog=s->now();}
-    else{if(s->scanObservations)s->scanObservations->cancel();
+    else{s->cancelForeground(foregroundscan::Reason::disabled,false);
+        if(s->scanObservations)s->scanObservations->cancel();
         s->authenticationEvents.disable();s->pendingSelection.clear();s->ic.ic_if.if_flags&=~(IFF_UP|IFF_RUNNING);s->stateDeferred=true;s->deferredState=IEEE80211_S_INIT;s->deferredArgument=-1;
         if(s->stationStarted)s->station.disconnect(s->now());
         owner.setLinkStatus(kIONetworkLinkValid);}
@@ -869,6 +1014,9 @@ IOReturn R16NetworkController::copyLinkPublication(MacLinkPublication &out){
 namespace {
 struct AuthenticationRequest {void *client;uint32_t operation;authevents::Event *output;};
 struct NativeScanRequest {unsigned operation; nativescan::Token token;size_t index;void *output;};
+struct ForegroundScanRequest {
+    unsigned operation;bool active;foregroundscan::Token token;foregroundscan::Status *output;
+};
 struct LinkStatusRequest {
     UInt32 status;const IONetworkMedium *medium;UInt64 speed;OSData *data;bool applied{};
 };
@@ -897,6 +1045,34 @@ IOReturn R16NetworkController::copyNativeScanEntry(nativescan::Token token,size_
 IOReturn R16NetworkController::copyNativeScanChannel(nativescan::Token token,size_t index,nativescan::Channel &output){
     memset(&output,0,sizeof(output));NativeScanRequest request{2,token,index,&output};
     return runControlAction(nativeScanGated,&request);
+}
+IOReturn R16NetworkController::foregroundScanGated(OSObject *owner,void *argument,void*,void*,void*){
+    if(!argument)return kIOReturnBadArgument;
+    const auto &request=*static_cast<ForegroundScanRequest*>(argument);
+    if(!request.output)return kIOReturnBadArgument;
+    auto *state=static_cast<R16NetworkController*>(owner)->state_;
+    if(!state||state->stopping)return kIOReturnNotReady;
+    if(request.operation==0)return state->beginForeground(request.active,*request.output);
+    if(request.operation==1)return state->foregroundScan.copy(request.token,*request.output)?
+        kIOReturnSuccess:kIOReturnNotFound;
+    if(request.operation!=2)return kIOReturnBadArgument;
+    if(!foregroundscan::same(request.token,state->foregroundScan.token())||
+       !state->foregroundScan.active())return kIOReturnNotFound;
+    state->cancelForeground(foregroundscan::Reason::caller,true);
+    if(state->faulted)return kIOReturnError;
+    return state->foregroundScan.copy(request.token,*request.output)?kIOReturnSuccess:kIOReturnNotFound;
+}
+IOReturn R16NetworkController::beginNativeForegroundScan(bool active,foregroundscan::Status &output){
+    memset(&output,0,sizeof(output));ForegroundScanRequest request{0,active,{},&output};
+    return runControlAction(foregroundScanGated,&request);
+}
+IOReturn R16NetworkController::copyNativeForegroundScanStatus(foregroundscan::Token token,foregroundscan::Status &output){
+    memset(&output,0,sizeof(output));ForegroundScanRequest request{1,false,token,&output};
+    return runControlAction(foregroundScanGated,&request);
+}
+IOReturn R16NetworkController::cancelNativeForegroundScan(foregroundscan::Token token,foregroundscan::Status &output){
+    memset(&output,0,sizeof(output));ForegroundScanRequest request{2,false,token,&output};
+    return runControlAction(foregroundScanGated,&request);
 }
 IOReturn R16NetworkController::authenticationGated(OSObject *owner,void *arg,void*,void*,void*){
     const auto &request=*static_cast<AuthenticationRequest*>(arg);

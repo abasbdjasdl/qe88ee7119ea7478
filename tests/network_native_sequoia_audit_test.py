@@ -61,3 +61,19 @@ result = audit.audit_helper_symbols(evidence, references - {tx} | {wrong_const})
 assert result['missing'] == [tx] and result['unexpected'] == [wrong_const]
 assert audit.audit_helper_symbols(evidence, references - {infra})['missing'] == [infra]
 print('Native helper call audit negative checks passed (mutable record, TX callback qualification, missing factory).')
+
+# The fault factory consumes a genuine CCDataStream, and the controller's getter
+# requires the IO80211FaultReporter wrapper. Reject nearby but wrong types even
+# when a programmer could reinterpret_cast them and make a C++ build succeed.
+support = json.loads(audit.SUPPORT_SYMBOLS.read_text())
+references = audit.object_undefined(out / 'support-probe.o')
+result = audit.audit_helper_symbols(support, references)
+assert not result['missing'] and not result['unexpected'] and result['expected_count'] == 4
+raw = next(name for name in references if 'withStreamWorkloop' in name)
+log_instead_of_data = raw.replace('P12CCDataStream', 'P11CCLogStream')
+assert log_instead_of_data != raw
+result = audit.audit_helper_symbols(support, references - {raw} | {log_instead_of_data})
+assert result['missing'] == [raw] and result['unexpected'] == [log_instead_of_data]
+wrapper = next(name for name in references if 'IO80211FaultReporter' in name)
+assert audit.audit_helper_symbols(support, references - {wrapper})['missing'] == [wrapper]
+print('Native support factory negative checks passed (wrong stream class, missing wrapper).')

@@ -1,0 +1,38 @@
+{
+  "kernel_sha256": "d8b50fc25bbe4c9f6923a9344ae34e760e1c98b06b23513e4a73e494019865e1",
+  "scope": "Compile-only factory symbol and argument-record audit; no live services, object layouts, concrete casts, lifecycle, link/load, or menu success.",
+  "helpers": [
+    {
+      "name": "pipeFactory",
+      "wrapper": "_r16_support_pipe",
+      "symbol": "__ZN6CCPipe21withOwnerNameCapacityEP9IOServicePKcS3_PK13CCPipeOptions",
+      "address": "0xffffff80031a69e4",
+      "return_contract": "Owned concrete CCPipe subtype pointer or null; actual kind dispatch uses u32 options+0, log=0/data=1. Options pointer must be non-null.",
+      "evidence": ["0xffffff80031a6a1f", "0xffffff80031a6a39", "0xffffff80031a6a4c"]
+    },
+    {
+      "name": "streamFactory",
+      "wrapper": "_r16_support_stream",
+      "symbol": "__ZN8CCStream15withPipeAndNameEP6CCPipePKcPK15CCStreamOptions",
+      "address": "0xffffff80031aa982",
+      "return_contract": "Owned concrete CCStream subtype pointer or null; requires matching real pipe subtype. The log initializer consumes the entire 0x358-byte record.",
+      "evidence": ["0xffffff80031aa98d", "0xffffff80031aa9a8", "0xffffff80031ba60c"]
+    },
+    {
+      "name": "faultReporterFactory",
+      "wrapper": "_r16_support_reporter",
+      "symbol": "__ZN15CCFaultReporter18withStreamWorkloopEP12CCDataStreamP10IOWorkLoop",
+      "address": "0xffffff80031b0ca0",
+      "return_contract": "Owned CCFaultReporter pointer or null. Retains real CCDataStream and IOWorkLoop and owns a timer/event source; not a log stream or arbitrary OSObject.",
+      "evidence": ["0xffffff80031b0cd5", "0xffffff80031b0ce4", "0xffffff80031b0d76", "0xffffff80031b0fbf"]
+    },
+    {
+      "name": "wifiFaultWrapperFactory",
+      "wrapper": "_r16_support_wrapper",
+      "symbol": "__ZN20IO80211FaultReporter15allocWithParamsEP15CCFaultReporter",
+      "address": "0xffffff8002248b6e",
+      "return_contract": "Owned IO80211FaultReporter wrapper pointer or null. Retains the raw CCFaultReporter; this wrapper is the controller getFaultReporterFromDriver return type.",
+      "evidence": ["0xffffff8002248bb9", "0xffffff8002248bc8", "0xffffff8002248c19", "0xffffff8002248c4b"]
+    }
+  ]
+}

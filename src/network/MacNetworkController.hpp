@@ -12,6 +12,7 @@
 #include "WirelessStatus.hpp"
 #include "AuthenticationEvents.hpp"
 #include "NativeScanCache.hpp"
+#include "NativeForegroundScan.hpp"
 struct ieee80211com;
 class IOEthernetInterface;
 namespace rtl8852be { namespace network {
@@ -92,6 +93,7 @@ class R16NetworkController : public IOEthernetController {
     static IOReturn linkPublicationGated(OSObject*,void*,void*,void*,void*);
     static IOReturn authenticationGated(OSObject*,void*,void*,void*,void*);
     static IOReturn nativeScanGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn foregroundScanGated(OSObject*,void*,void*,void*,void*);
     bool applyLinkStatus(UInt32,const IONetworkMedium*,UInt64,OSData*);
     static void timer(OSObject*,IOTimerEventSource*);
     void releaseResources();
@@ -136,5 +138,21 @@ public:
                                 rtl8852be::network::nativescan::Entry&);
     IOReturn copyNativeScanChannel(rtl8852be::network::nativescan::Token,size_t,
                                   rtl8852be::network::nativescan::Channel&);
+    // Kernel callers only, controlLock -> gate; never call while holding the
+    // hardware gate. Passive-only: active requests return Unsupported. Accepts
+    // an enabled, idle, unconnected backend with no legacy credentials/pending
+    // join. Success means the first actual station operation was accepted,
+    // not a complete scan. A complete status supplies a real cache snapshot
+    // token for copyNativeScanEntry/Channel. No credentials are changed.
+    // Cancellation is asynchronous: poll status until drained, or failed; a
+    // failed undrained request requires the existing hardware-stop/recovery path.
+    // The fixed two-minute request deadline does not override hardware timeouts.
+    // All failure returns clear output; stale request tokens cannot cancel/read
+    // a replacement request. Output contains no network names, IEs or keys.
+    IOReturn beginNativeForegroundScan(bool active,rtl8852be::network::foregroundscan::Status&);
+    IOReturn copyNativeForegroundScanStatus(rtl8852be::network::foregroundscan::Token,
+                                           rtl8852be::network::foregroundscan::Status&);
+    IOReturn cancelNativeForegroundScan(rtl8852be::network::foregroundscan::Token,
+                                       rtl8852be::network::foregroundscan::Status&);
     IOReturn authenticationEvents(void *client,uint32_t operation,rtl8852be::network::authevents::Event* = nullptr);
 };
