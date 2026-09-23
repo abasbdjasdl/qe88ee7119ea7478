@@ -252,3 +252,19 @@ KC helpers at `225c7ac`, `225fb8c` and `225c594` respectively own these private
 state accesses; the probe does not write instance offsets or use setter return
 values. Role 1 also enables native scan-manager creation during Infra start,
 which the preceding default-role experiment did not establish.
+
+Stage 6 ran with `5345992`, run `35839865269`, artifact `10740579161`.
+Role readback was 1, attach/start returned true, and the native log included
+`Exit : IO80211ScanManager::initWithControllerAndSkywalkInterface()` before
+the successful start return. `infra-role-start.log/json` preserve this evidence.
+This validates the role-specific initialization path, not a scan transaction,
+registered Skywalk queues, SSID publication, menu connection or teardown.
+
+Stage 7 additionally creates real TX and RX pools after role-1 station start.
+The options are retained in the harness: 32 packets/buffers, 2048-byte buffers,
+one buffer per packet, 4096-byte segments, no flags or DMA specification.
+Packet type 1 selects the ordinary network-packet path in the pinned KC.
+`skywalk_pool.hpp` suppresses the old unverified full pool header and declares
+only the audited static factory and 32-byte option record. No pool is sized,
+subclassed, manually allocated, field-accessed or released. Failure preserves
+the owner and acquired pool; queues/registration/networking remain absent.

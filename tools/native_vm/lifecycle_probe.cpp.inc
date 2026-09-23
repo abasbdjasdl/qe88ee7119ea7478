@@ -8,6 +8,11 @@
 
 class R16VMHarness final : public IOService {
     OSDeclareDefaultStructors(R16VMHarness);
+#ifdef R16_VM_INFRA_PROBE
+    // Retained experiment owner storage; never temporary option/context buffers.
+    IOSkywalkPacketBufferPool::PoolOptions poolOptions_{32,32,2048,1,4096,0,nullptr};
+    IOSkywalkPacketBufferPool *txPool_{},*rxPool_{};
+#endif
 #ifdef R16_VM_START_PROBE
     // Borrowed from the retained startup ledger. The provider and controller
     // must expose the same native queue: its getThread() deliberately returns
@@ -45,7 +50,7 @@ public:
             return false;
 #ifdef R16_VM_START_PROBE
 #ifdef R16_VM_INFRA_PROBE
-        if(enabled<1||enabled>6)return false;
+        if(enabled<1||enabled>7)return false;
 #else
         if(enabled<1||enabled>4)return false;
 #endif
@@ -91,13 +96,13 @@ public:
             }
             if(started){
 #ifdef R16_VM_INFRA_PROBE
-                if(enabled==5||enabled==6){
+                if(enabled>=5){
                     IOLog("R16VM station allocate begin\n");
                     auto *station=new R16VMInfra;
                     const bool initializedStation=station&&station->init();
                     IOLog("R16VM station init result=%u\n",unsigned(initializedStation));
                     bool roleReady=initializedStation;
-                    if(initializedStation&&enabled==6){
+                    if(initializedStation&&enabled>=6){
                         // Observed native station role; use family-owned setters,
                         // never write private expansion offsets. Ignore setters'
                         // legacy return declarations; read the actual role back.
@@ -111,6 +116,19 @@ public:
                     if(attached)IOLog("R16VM station start begin\n");
                     const bool stationStarted=attached&&station->start(controller);
                     IOLog("R16VM station start result=%u\n",unsigned(stationStarted));
+                    if(stationStarted&&enabled==7){
+                        // Type 1 is the exact-KC ordinary network-packet path.
+                        // No DMA spec, offload, queue enable or registration.
+                        IOLog("R16VM TX pool factory begin\n");
+                        txPool_=IOSkywalkPacketBufferPool::withName("R16VM-TX",this,1,&poolOptions_);
+                        IOLog("R16VM TX pool result=%u\n",unsigned(txPool_!=nullptr));
+                        if(txPool_){
+                            IOLog("R16VM RX pool factory begin\n");
+                            rxPool_=IOSkywalkPacketBufferPool::withName("R16VM-RX",this,1,&poolOptions_);
+                            IOLog("R16VM RX pool result=%u\n",unsigned(rxPool_!=nullptr));
+                        }
+                        setProperty("R16VMPoolsCreated",txPool_&&rxPool_);
+                    }
                     // Keep even partially initialized station and all providers
                     // alive. No fake MAC, SSID, pools or hardware are supplied.
                     setProperty("R16VMStationStarted",stationStarted);

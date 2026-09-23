@@ -72,6 +72,7 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
 '''
     source = '// GENERATED VM-ONLY EXPERIMENT. Not a deployable network driver.\n' + source
     if args.infra_probe:
+        source='#include "skywalk_pool.hpp"\n'+source
         infra=(ROOT/'tools/native_abi/infra_frontend_prototype.cpp').read_text()
         infra=infra.split('// Borrowed registration arguments only.')[0]
         infra=infra.replace('R16InfraFrontend','R16VMInfra')
@@ -95,7 +96,7 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
              '-include', str(upstream / 'itlwm/PrivateSPI.pch'),
              '-I' + str(out / 'include'), '-I' + str(upstream / 'include'),
              '-I' + str(upstream / 'itl80211'), '-I' + str(upstream / 'itl80211/openbsd'),
-             '-I' + str(sdk / 'Headers'), '-I' + str(ROOT / 'tools/native_abi')]
+             '-I' + str(sdk / 'Headers'), '-I' + str(ROOT / 'tools/native_abi'), '-I' + str(HERE)]
     objects = []
     for path in (generated, ROOT / 'tools/native_abi/native_runtime_identity.cpp'):
         obj = out / (path.stem + '.o')
