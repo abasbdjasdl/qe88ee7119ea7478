@@ -148,7 +148,8 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
                     CFBundleVersion='0.0.1', CFBundleShortVersionString='0.0.1',
                     OSBundleRequired='Root', OSBundleLibraries=libraries,
                     IOKitPersonalities={'VM-only harness': dict(CFBundleIdentifier='local.r16.nativevm',
-                       IOClass='R16VMHarness', IOProviderClass='IOResources', IOResourceMatch='IOKit')})
+                       IOClass='R16VMHarness', IOProviderClass='IOResources',
+                       IOResourceMatch='IOBSD' if args.start_probe else 'IOKit')})
         (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
         report.update(linked=True, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest())
     (out / 'probe-build.json').write_text(json.dumps(report, indent=2) + '\n')
