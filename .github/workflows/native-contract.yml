@@ -28,6 +28,8 @@ jobs:
           mkdir -p build/native-contract
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_wcl_candidates_test.cpp -o build/native-contract/wcl-candidates-test
           build/native-contract/wcl-candidates-test | tee build/native-contract/wcl-candidates-test-result.txt
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_wcl_join_test.cpp -o build/native-contract/wcl-join-test
+          build/native-contract/wcl-join-test | tee build/native-contract/wcl-join-test-result.txt
           xcrun clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_native_scan_cache_test.cpp -o build/native-contract/scan-cache-test
           build/native-contract/scan-cache-test | tee build/native-contract/scan-cache-test-result.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_wireless_selection_test.cpp -o build/native-contract/selection-test

@@ -7,6 +7,14 @@ available. No new package was installed or reboot armed for this work.
 
 ## Source changes and evidence
 
+- The exact-target Sequoia declaration probe now matches seven complete native
+  vtables and observed object sizes, including inherited and pure callback
+  ordering. It passed macOS [CI 35804109463](https://github.com/abasbdjasdl/qe88ee7119ea7478/actions/runs/35804109463).
+  Unknown returns remain unavailable, and the generated object cannot be used
+  as a kext. [ABI scope and remaining registration work](native-sequoia-abi.md).
+  The existing controller's link updates now have a gated revision/epoch
+  publication point. A bounded complete-scan/IE cache is implemented and tested,
+  but is not yet fed by hardware scans or connected to WCL.
 - `WirelessUserClient` provides an administrator-only IOKit control connection
   (`0x52313601`) to the actual controller. It rechecks caller privilege for every
   operation and accepts only fixed-size pointer-free v1 status/join messages.
@@ -36,6 +44,13 @@ available. No new package was installed or reboot armed for this work.
   unknown fields, credentials and mode enums are not reinterpreted. The decoder
   is not wired to join or framework registration. See
   [version-specific evidence](native-wcl-evidence.md).
+- `NativeWclJoin.hpp` separately extracts the confirmed embedded raw-PMK
+  WPA2-PSK/CCMP case from that same 988-byte message. It requires explicit
+  infrastructure/open-system/WPA2-PSK values, a nonempty valid RSN IE and one
+  unicast BSSID. Unknown policy, empty/ambiguous keys, password/MSK input, PMF
+  and other AKMs are rejected; all failed outputs and temporary keys are wiped.
+  This is isolated credential extraction, not a live admission/dispatch binding.
+  The native stack can supply keys separately, which remains an integration task.
 - `SaeSession` uses hostap's group-19 SAE H2E and hunting-and-pecking. Corrected
   an erroneous ordinary-SAE AKM selector requirement. Exchange, wrong password,
   modified confirmation and export-before-confirm rejection passed in macOS

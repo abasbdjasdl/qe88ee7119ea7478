@@ -106,7 +106,46 @@ overflow-safe span checks, owned output, and success/failure with output aliasin
 the actual count and candidate bytes. Passing these tests validates the local
 decoder; it does not establish real macOS dispatch or successful Wi-Fi access.
 
-## Remaining native ABI questions
+## Separate WPA2 credential extraction
+
+`NativeWclJoin.hpp` adds a distinct, target-pinned byte decoder. The original
+candidate observation above still does not expose keys. Its evidence is the
+same-KC `wcl-join-prefix-findings.md/json` and `wcl-join-prefix-inspect.py` in the
+local evidence directory. No live callbacks call this decoder yet.
+
+Confirmed input offsets: mode is u16 at `0x0c` (2 = infrastructure), lower auth
+u32 at `0x10` (1 = open-system authentication), upper auth u32 at `0x14` (8 =
+WPA2-PSK), extension at `0x18`, SSID length u32 at `0x1c`, SSID bytes at `0x20`.
+`fillAssocCandidatesList` writes the auth fields at `0xffffff800222c620..65b`
+and copies SSID at `0xffffff800222c753..75f`; independent WCLJoinRequest getters
+agree. The target's mode/auth string mappings independently identify these values.
+
+The embedded key starts at `0x40`: length at `0x44`, type at `0x48`, bytes at
+`0x50`. Target cipher type 6 is PMK; its consumer branch at
+`0xffffff8001581ddc..1e90` uses length/type/key bytes. The decoder requires exactly
+32 bytes and does not treat cipher 9 (MSK), cipher 10 (password) or the optional
+PMK at `0x1f0` as interchangeable. No version/flags/index semantics are invented
+from the raw-PMK path's lack of reads of those fields.
+
+RSN IE length is u16 at `0xd4`, complete IE bytes at `0xd6`, capacity 257. The
+producer trims but does not validate RSN syntax; the consumer recognizes the
+full IE header (ID 48/221) at `0xffffff800164d0aa..0b7`. Extraction independently
+requires a single WPA2-PSK AKM, CCMP pairwise/group suites, and no unsupported PMF.
+Empty RSN input does not inherit the older helper's default cipher selection.
+
+Nonzero policy values at `0x1e0`, `0x1e4` or `0x1e8` are conservatively rejected.
+These are separate fields; normal native requests may legitimately set them, so
+this restriction limits the decoder and is not a claim that such requests are
+malformed. Unknown channel/security candidate words are not mapped to radio
+policy. A future frontend must bind this result to a current scan/request and
+validate supported hardware policy before submitting it.
+
+An independent `setCIPHER_KEY` callback also reaches the native driver with a
+148-byte key. Thus a first WCL association request is not guaranteed to contain
+a PMK. Empty keys must not cause an open-network fallback or reuse an old PMK.
+The extraction helper rejects them and makes no request-success or link claim.
+
+## Remaining native ABI questions (runtime)
 
 The observed setter `apple80211setWCL_ASSOCIATE` at `0xffffff80021fa71a`
 performs an `IO80211InfraProtocol` metaclass check and dispatches through vtable
