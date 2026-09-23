@@ -19,8 +19,10 @@ and is **not** interchangeable.
 
 The bounded encoder preserves the observed SSID (including embedded NUL),
 BSSID, band/channel, beacon interval, capabilities, supported rates, measured
-dBm, age, and raw RSN/WPA security TLVs. It rejects unknown/percent-only
-signal, malformed IEs, and over-capacity output. Noise and SNR are left unset
+dBm, age, and raw RSN/WPA security TLVs. It checks TLV boundaries and minimum
+RSN/WPA body lengths, but does not parse their full suite grammar or imply
+authentication support. It rejects unknown/percent-only signal, malformed
+lengths, and over-capacity output. Noise and SNR are left unset
 because the current backend has no verified noise measurement. It does not
 claim that an RSSI sample belongs to the exact received MPDU.
 

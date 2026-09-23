@@ -14,9 +14,22 @@
 #endif
 static_assert(sizeof(apple80211_scan_result) == 1164,
               "Ventura apple80211_scan_result layout changed");
-static_assert(offsetof(apple80211_scan_result, asr_rates) == 0x24 &&
+static_assert(sizeof(apple80211_channel) == 12 &&
+              offsetof(apple80211_channel, version) == 0 &&
+              offsetof(apple80211_channel, channel) == 4 &&
+              offsetof(apple80211_channel, flags) == 8,
+              "Ventura apple80211_channel layout changed");
+static_assert(offsetof(apple80211_scan_result, asr_channel) == 0x04 &&
+              offsetof(apple80211_scan_result, asr_rssi) == 0x16 &&
+              offsetof(apple80211_scan_result, asr_beacon_int) == 0x18 &&
+              offsetof(apple80211_scan_result, asr_cap) == 0x1a &&
+              offsetof(apple80211_scan_result, asr_bssid) == 0x1c &&
+              offsetof(apple80211_scan_result, asr_nrates) == 0x22 &&
+              offsetof(apple80211_scan_result, asr_rates) == 0x24 &&
               offsetof(apple80211_scan_result, asr_ssid_len) == 0x60 &&
+              offsetof(apple80211_scan_result, asr_ssid) == 0x61 &&
               offsetof(apple80211_scan_result, asr_age) == 0x84 &&
+              offsetof(apple80211_scan_result, asr_ie_len) == 0x8a &&
               offsetof(apple80211_scan_result, asr_ie_data) == 0x8c,
               "Ventura scan fields moved");
 
@@ -58,6 +71,10 @@ inline IOReturn scanResult(const nativescan::Entry &entry,
             entry.ies[pos + 2] == 0x00 && entry.ies[pos + 3] == 0x50 &&
             entry.ies[pos + 4] == 0xf2 && entry.ies[pos + 5] == 0x01;
         if (id == 48 || wpaVendor) {
+            // Require enough bytes to hold the fixed fields and one pairwise
+            // and AKM suite. This is not a full suite-grammar/auth check.
+            if ((id == 48 && bytes < 20) || (wpaVendor && bytes < 24))
+                return kIOReturnBadArgument;
             if (securityBytes + bytes > sizeof(out.asr_ie_data))
                 return kIOReturnUnsupported;
             securityBytes += bytes;

@@ -50,6 +50,23 @@ int main() {
         return 4;
     --entry.ieLength;
 
+    // A TLV can fit the buffer while being too short to contain an RSN body.
+    entry.ies[entry.ieLength++] = 48;
+    entry.ies[entry.ieLength++] = 0;
+    if (legacyairport::scanResult(entry, 1027000, result) != kIOReturnBadArgument ||
+        result.version != 0)
+        return 6;
+    entry.ieLength -= 2;
+
+    // The WPA vendor OUI/type alone is not a complete WPA information element.
+    const uint8_t shortWpa[] = {221, 4, 0, 0x50, 0xf2, 1};
+    memcpy(entry.ies + entry.ieLength, shortWpa, sizeof(shortWpa));
+    entry.ieLength += sizeof(shortWpa);
+    if (legacyairport::scanResult(entry, 1027000, result) != kIOReturnBadArgument ||
+        result.version != 0)
+        return 7;
+    entry.ieLength -= sizeof(shortWpa);
+
     // A 5 GHz result is emitted only when the backend observed that band.
     entry.channel = {nativescan::Band::ghz5, 36};
     if (legacyairport::scanResult(entry, 1027000, result) != kIOReturnSuccess ||
