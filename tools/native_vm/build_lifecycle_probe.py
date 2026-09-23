@@ -11,6 +11,7 @@ import importlib.util
 import json
 from pathlib import Path
 import plistlib
+import struct
 import subprocess
 import sys
 
@@ -73,10 +74,14 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
              '-I' + str(upstream / 'itl80211'), '-I' + str(upstream / 'itl80211/openbsd'),
              '-I' + str(sdk / 'Headers'), '-I' + str(ROOT / 'tools/native_abi')]
     objects = []
-    for path in (generated, ROOT / 'tools/native_abi/native_runtime_identity.cpp'):
+    for path in (generated, HERE / 'dependency_identity.cpp'):
         obj = out / (path.stem + '.o')
         subprocess.run(compiler + flags + ['-c', str(path), '-o', str(obj)], check=True)
         objects.append(obj)
+    identity_imports=set(audit.object_undefined(objects[1]))
+    allowed={'_version_major','_version_minor','_version_revision','_kmod_info','_sysctlbyname','_IOLog'}
+    if not allowed<=identity_imports or identity_imports-allowed-{'_memset','_bzero','_memcpy'}:
+        raise RuntimeError(('Unexpected dependency identity imports',sorted(identity_imports)))
     # Full emitted controller table, allowing only the metaclass override added
     # by OSDeclareDefaultStructors. Check against the audited baseline table.
     tables = audit.object_vtables(objects[0])
@@ -98,7 +103,9 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
         raise RuntimeError(('VM controller table differs', len(actual), mismatches))
     report = dict(scope='VM-only allocation/init/free experiment; no start, interface or radio',
                   source_sha256=hashlib.sha256(source.encode()).hexdigest(),
+                  identity_source_sha256=hashlib.sha256((HERE/'dependency_identity.cpp').read_bytes()).hexdigest(),
                   controller_raw_slots=len(actual), compiled=True, linked=False,
+                  identity_imports=sorted(identity_imports),
                   loaded=False, native_wifi_verified=False)
     if not args.zig:
         if sys.platform != 'darwin':
@@ -113,6 +120,9 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
         subprocess.run(['xcrun', 'ld', '-arch', 'x86_64', '-kext', '-undefined', 'dynamic_lookup',
                         '-o', str(binary), *map(str, objects), str(module),
                         str(sdk / 'Library/x86_64/libkmod.a')], check=True)
+        header=struct.unpack_from('<4I',binary.read_bytes())
+        if header[0]!=0xfeedfacf or header[1]!=0x1000007 or header[3]!=11:
+            raise RuntimeError('Linker did not produce an x86_64 MH_KEXT_BUNDLE')
         libraries = {'com.apple.kpi.bsd': '8.0.0', 'com.apple.kpi.iokit': '8.0.0',
                      'com.apple.kpi.libkern': '8.0.0', 'com.apple.kpi.mach': '8.0.0',
                      'com.apple.kpi.unsupported': '8.0.0',
