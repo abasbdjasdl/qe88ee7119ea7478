@@ -193,3 +193,10 @@ Apple-Clang path and records whether it appears at each optimization level;
 all pinned inherited methods, registration helpers and other imports remain
 exactly checked. This is a compiler-lowering allowance, not a private ABI
 symbol substitution or evidence of runtime startup.
+
+The next macOS CI O2 pass exposed runner-default stack-canary imports
+`___stack_chk_guard` and `___stack_chk_fail` for the large owned scratch
+member. The audit now compiles with `-fno-stack-protector -mno-red-zone`,
+matching the existing network-kext build flags, rather than allowing those
+imports into an unlinked private-ABI prototype. The target class and helper
+imports remain exact after this flag alignment.
