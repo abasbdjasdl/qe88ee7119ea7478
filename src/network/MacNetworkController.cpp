@@ -518,7 +518,7 @@ struct MacNetworkState final : MacNetworkBootSink {
         }
         if(!ic.ic_channels[identity.interface.home.primary].ic_flags)return false;
         ic.ic_ibss_chan=&ic.ic_channels[identity.interface.home.primary];ic.ic_max_rssi=100;
-        if_attach(&ifp);ieee80211_ifattach(&ifp,&owner);attached=true;
+        if_attach(&ifp);ieee80211_ifattach(&ifp,owner.legacyEthernet_);attached=true;
         savedState=ic.ic_newstate;ic.ic_newstate=newState;ieee80211_media_init(&ifp);
         savedEvent=ic.ic_event_handler;ic.ic_event_handler=protocolEvent;
         return savedState&&ic.ic_bss&&ifp.if_snd.queue;
@@ -1184,7 +1184,8 @@ bool R16NetworkController::start(IOService *provider){
         recordStartup(provider,8);
         stateHost_.controller_=this;stateHost_.registry_=this;
         stateHost_.loop_=loop_;stateHost_.gate_=gate_;stateHost_.timer_=timer_;
-        stateHost_.pci_=pci_;stateHost_.bar_=bar_;stateHost_.interface_=stateHostInterface;
+        stateHost_.pci_=pci_;stateHost_.bar_=bar_;stateHost_.legacyEthernet_=this;
+        stateHost_.interface_=stateHostInterface;
         stateHost_.linkStatus_=stateHostLinkStatus;stateHost_.startup_=stateHostStartup;
         state_=new MacNetworkState(stateHost_,boot);if(!state_){delete boot;goto failed;}
         recordStartup(provider,9);

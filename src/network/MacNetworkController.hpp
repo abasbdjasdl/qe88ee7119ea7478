@@ -85,6 +85,7 @@ struct MacNetworkStateHost {
     IOTimerEventSource *timer_{};
     IOPCIDevice *pci_{};
     IOMemoryMap *bar_{};
+    IOEthernetController *legacyEthernet_{};
     IOService *(*interface_)(void *){};
     bool (*linkStatus_)(void *,UInt32){};
     void (*startup_)(void *,IOService *,unsigned,bool){};
