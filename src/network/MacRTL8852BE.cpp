@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "MacRTL8852BE.hpp"
+#include "MacNetworkSession.hpp"
 #include "MacProbeAndFirmware.hpp"
 #include "MacRadioBoot.hpp"
 #include "MacStationIo.hpp"
@@ -227,6 +228,9 @@ public:
     }
 };
 }
+MacNetworkBootService *createRtl8852beBootService(){return new BootService;}
 } }
 OSDefineMetaClassAndStructors(R16RTL8852BE,R16NetworkController)
-rtl8852be::network::MacNetworkBootService *R16RTL8852BE::createBootService(){return new rtl8852be::network::BootService;}
+rtl8852be::network::MacNetworkBootService *R16RTL8852BE::createBootService(){
+    return rtl8852be::network::createRtl8852beBootService();
+}

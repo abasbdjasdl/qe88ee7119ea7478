@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "MacNetworkController.hpp"
+#include "MacNetworkSession.hpp"
 #include "Net80211Runtime.hpp"
 #include "MacPciRingIo.hpp"
 #include "MacNetworkPhyWait.hpp"
@@ -169,6 +170,26 @@ struct MacNetworkState final : MacNetworkBootSink {
         scanObservations=new nativescan::Observer;
     }
     ~MacNetworkState(){delete wclResults;delete scanObservations;delete events;delete boot;delete commands;delete transport;delete queues;}
+    // Allocate one PCI session before the owner enters its workloop gate.
+    // Failed stages remain owned here for the existing shutdown/drain path.
+    bool prepareHardware(){
+        if(!owner.ready()||!boot->allocate(*owner.pci_,*owner.bar_,*owner.loop_))return false;
+        for(unsigned i=0;i<6;++i){
+            owner.recordStartup(owner.pci_,10+i);
+            if(!tx[i].allocate(owner.pci_,owner.loop_))return false;
+        }
+        owner.recordStartup(owner.pci_,16);if(!firmware.allocate(owner.pci_,owner.loop_))return false;
+        owner.recordStartup(owner.pci_,17);if(!rxq.allocate(owner.pci_,owner.loop_))return false;
+        owner.recordStartup(owner.pci_,18);if(!rpq.allocate(owner.pci_,owner.loop_))return false;
+        owner.recordStartup(owner.pci_,19);
+        interrupt=new R16PciInterrupts;if(!interrupt)return false;
+        int msi=-1;for(int index=0;index<32;++index){int kind=0;
+            if(owner.pci_->getInterruptType(index,&kind)!=kIOReturnSuccess)break;
+            if(kind&kIOInterruptTypePCIMessaged){msi=index;break;}}
+        owner.recordStartup(owner.pci_,20);
+        if(msi<0||!interrupt->attach(owner.pci_,owner.loop_,msi))return false;
+        interruptAttached=true;owner.recordStartup(owner.pci_,21);return true;
+    }
     uint64_t now(){return runtimeIo.nowUs();}
     bool inGate(){return owner.loop_->inGate();}
     void abortWclDraft(){
@@ -1129,6 +1150,16 @@ struct MacNetworkState final : MacNetworkBootSink {
         return true;
     }
 };
+namespace rtl8852be { namespace network {
+MacNetworkState *createMacNetworkState(MacNetworkStateHost &host,MacNetworkBootService *boot){
+    return host.ready()&&boot?new MacNetworkState(host,boot):nullptr;
+}
+bool prepareMacNetworkState(MacNetworkState *state){return state&&state->prepareHardware();}
+bool startMacNetworkState(MacNetworkState *state){return state&&state->startHardware();}
+bool stopMacNetworkState(MacNetworkState *state){return !state||state->shutdown();}
+void pollMacNetworkState(MacNetworkState *state){if(state)state->poll();}
+void destroyMacNetworkState(MacNetworkState *state){delete state;}
+} }
 // The pinned net80211 source calls this from a two-site, hash-checked source
 // override. Its if_softc already points at this session before ifattach.
 void r16_net80211_link_status(_ifnet *ifp,bool up){
@@ -1138,12 +1169,16 @@ void r16_net80211_link_status(_ifnet *ifp,bool up){
 bool R16NetworkController::createWorkLoop(){if(!loop_)loop_=IOWorkLoop::workLoop();return loop_!=nullptr;}
 IOWorkLoop *R16NetworkController::getWorkLoop()const{return loop_;}
 IOReturn R16NetworkController::startGated(OSObject *o,void*,void*,void*,void*){
-    auto *s=static_cast<R16NetworkController*>(o)->state_;return s->startHardware()?kIOReturnSuccess:kIOReturnError;
+    auto *s=static_cast<R16NetworkController*>(o)->state_;
+    return startMacNetworkState(s)?kIOReturnSuccess:kIOReturnError;
 }
 IOReturn R16NetworkController::stopGated(OSObject *o,void*,void*,void*,void*){
-    auto *s=static_cast<R16NetworkController*>(o)->state_;return !s||s->shutdown()?kIOReturnSuccess:kIOReturnBusy;
+    auto *s=static_cast<R16NetworkController*>(o)->state_;
+    return stopMacNetworkState(s)?kIOReturnSuccess:kIOReturnBusy;
 }
-void R16NetworkController::timer(OSObject *o,IOTimerEventSource*){auto *s=static_cast<R16NetworkController*>(o)->state_;if(s)s->poll();}
+void R16NetworkController::timer(OSObject *o,IOTimerEventSource*){
+    pollMacNetworkState(static_cast<R16NetworkController*>(o)->state_);
+}
 void R16NetworkController::recordStartup(IOService *provider,unsigned stage,bool failed){
     startupStage_=stage;
     // The PCI provider outlives a failed/detached controller. Only constant
@@ -1201,21 +1236,9 @@ bool R16NetworkController::start(IOService *provider){
         stateHost_.linkStatus_=stateHostLinkStatus;
         stateHost_.protocolLink_=stateHostProtocolLink;stateHost_.startup_=stateHostStartup;
         if(!stateHost_.ready()){delete boot;goto failed;}
-        state_=new MacNetworkState(stateHost_,boot);if(!state_){delete boot;goto failed;}
+        state_=createMacNetworkState(stateHost_,boot);if(!state_){delete boot;goto failed;}
         recordStartup(provider,9);
-        if(!boot->allocate(*pci_,*bar_,*loop_))goto failed;
-        for(unsigned i=0;i<6;++i){recordStartup(provider,10+i);if(!state_->tx[i].allocate(pci_,loop_))goto failed;}
-        recordStartup(provider,16);if(!state_->firmware.allocate(pci_,loop_))goto failed;
-        recordStartup(provider,17);if(!state_->rxq.allocate(pci_,loop_))goto failed;
-        recordStartup(provider,18);if(!state_->rpq.allocate(pci_,loop_))goto failed;
-        recordStartup(provider,19);
-        state_->interrupt=new R16PciInterrupts;if(!state_->interrupt)goto failed;
-        int msi=-1;for(int index=0;index<32;++index){int kind=0;
-            if(pci_->getInterruptType(index,&kind)!=kIOReturnSuccess)break;
-            if(kind&kIOInterruptTypePCIMessaged){msi=index;break;}}
-        recordStartup(provider,20);
-        if(msi<0||!state_->interrupt->attach(pci_,loop_,msi))goto failed;state_->interruptAttached=true;
-        recordStartup(provider,21);
+        if(!prepareMacNetworkState(state_))goto failed;
         if(gate_->runAction(startGated)!=kIOReturnSuccess)goto failed;
         recordStartup(provider,50);
         auto *dict=OSDictionary::withCapacity(1);auto *medium=IONetworkMedium::medium(kIOMediumEthernetAuto,0);
@@ -1585,7 +1608,7 @@ void R16NetworkController::releaseResources(){
         setProperty("R16Failure","shutdown not proven; owner and DMA retained");return;
     }
     if(interface_){detachInterface(interface_);interface_=nullptr;}
-    delete state_;state_=nullptr;
+    destroyMacNetworkState(state_);state_=nullptr;
     if(timer_){timer_->cancelTimeout();if(timer_->getWorkLoop())loop_->removeEventSource(timer_);timer_->release();timer_=nullptr;}
     if(gate_){if(gate_->getWorkLoop())loop_->removeEventSource(gate_);gate_->release();gate_=nullptr;}
     if(bar_){bar_->release();bar_=nullptr;}
