@@ -1,5 +1,21 @@
 # Native Wi-Fi dependency boundary, exact recovery KC
 
+## macOS 15 runner library resolution (2026-09-23)
+
+The isolated audit-object bundle from commit `1480441` was passed to
+`kmutil libraries -p` on an x86_64 macOS **15.7.9 (24G830)** CI runner.
+The probe Mach-O linked, and `kmutil libraries` returned zero after resolving
+its 693 undefined symbols, including references to IO80211Family (221 lines),
+IOSkywalkFamily (83) and CoreCapture (7). The complete tool output, runner
+build and object list are saved in the `native-contract` artifact of
+[CI run 35820865016](https://github.com/abasbdjasdl/qe88ee7119ea7478/actions/runs/35820865016).
+The bundle has no matching personality and was **never loaded**. This removes
+a dependency-resolution concern on that runner only. The target Recovery KC
+is macOS 15.4.1, and neither its runtime kext symbol-set policy nor native
+controller initialization, shutdown, interface registration, WCL discovery,
+events or packet queues was exercised by this probe.
+
+
 `audit_native_export_dependencies.py` read the x86_64 macOS 15.4.1 recovery
 `BootKernelExtensions.kc`, SHA-256
 `d8b50fc25bbe4c9f6923a9344ae34e760e1c98b06b23513e4a73e494019865e1`.

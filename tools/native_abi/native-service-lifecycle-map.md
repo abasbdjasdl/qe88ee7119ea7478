@@ -47,6 +47,15 @@ interface object or passing placeholder queues is not a substitute.
 
 ## Failure and shutdown rule before any loadable attempt
 
+Apple's [IOService `start` contract](https://github.com/apple-oss-distributions/xnu/blob/main/iokit/IOKit/IOService.h)
+states that a false `start` normally detaches and frees the instance, and that
+a subclass failing after a successful superclass `start` must balance it with
+superclass `stop`. The fixed IO80211 superclass has failed-start paths after
+publishing private services, while its `stop` is not established safe for every
+partial stage. A self-retaining owner can avoid **its own** premature free,
+but cannot turn that mismatch into a proved rollback. This remains the
+blocking start/stop proof before real registration or event delivery.
+
 `IO80211Controller::start` may retain its provider, publish CoreCapture
 services, borrow a global logger, retain the fault wrapper and create timers
 before it returns false. A false `CCPipe::startPipe` can also follow a successful
