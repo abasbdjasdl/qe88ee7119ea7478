@@ -31,6 +31,8 @@ def main():
     parser.add_argument('sdk', type=Path)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--zig', type=Path, help='Compile-only on Windows')
+    parser.add_argument('--start-probe', action='store_true',
+                        help='Include contained base-start/stop experiment; VM boot arg r16vmtest=2 required')
     args = parser.parse_args()
     upstream, sdk, out = [x.resolve() for x in (args.upstream, args.sdk, args.out)]
     out.mkdir(parents=True, exist_ok=True)
@@ -52,7 +54,14 @@ def main():
                           'OSDefineMetaClassAndStructors(R16VMController, IO80211Controller);')
     # The borrowed support objects are deliberately absent in an init/free test.
     # No start call can legally be made on this generated object.
-    source += '''
+    if args.start_probe:
+        source = replace_once(source,'    StartupLedger *ledger_{};',
+                              '    StartupLedger storage_{};\n    StartupLedger *ledger_{&storage_};')
+        source = replace_once(source,'public:\n',
+                              'public:\n    StartupLedger *startupLedger() { return ledger_; }\n')
+        source = '#define R16_VM_START_PROBE 1\n#include "startup_prototype.cpp"\n' + source
+    else:
+        source += '''
 extern "C" IO80211WorkQueue *r16_startup_work_queue(const StartupLedger *) { return nullptr; }
 extern "C" CCLogStream *r16_startup_logger(const StartupLedger *) { return nullptr; }
 extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *) { return nullptr; }
@@ -101,7 +110,11 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
             mismatches.append([slot, got, want])
     if len(actual) != len(expected) or mismatches:
         raise RuntimeError(('VM controller table differs', len(actual), mismatches))
-    report = dict(scope='VM-only allocation/init/free experiment; no start, interface or radio',
+    report = dict(scope=('VM-only contained base-start/stop; support retained, cleanup unproved'
+                         if args.start_probe else 'VM-only allocation/init/free experiment; no start, interface or radio'),
+                  start_probe=args.start_probe,
+                  startup_source_sha256=(hashlib.sha256((ROOT/'tools/native_abi/startup_prototype.cpp').read_bytes()).hexdigest()
+                                         if args.start_probe else None),
                   source_sha256=hashlib.sha256(source.encode()).hexdigest(),
                   identity_source_sha256=hashlib.sha256((ROOT/'tools/native_abi/native_runtime_identity.cpp').read_bytes()).hexdigest(),
                   controller_raw_slots=len(actual), compiled=True, linked=False,

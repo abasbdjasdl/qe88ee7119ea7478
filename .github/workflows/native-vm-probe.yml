@@ -27,10 +27,10 @@ jobs:
           python3 tests/native_dependency_identity_test.py build/native-vm/identity-test.cpp
           xcrun clang++ -std=c++14 -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -I . build/native-vm/identity-test.cpp -o build/native-vm/identity-test
           build/native-vm/identity-test
-          python3 tools/native_vm/build_lifecycle_probe.py build-itlwm MacKernelSDK --out build/native-vm
+          python3 tools/native_vm/build_lifecycle_probe.py build-itlwm MacKernelSDK --out build/native-vm --start-probe
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: native-vm-init-probe
+          name: native-vm-lifecycle-probe
           path: |
             build/native-vm/R16NativeVMProbe.kext
             build/native-vm/probe-build.json
