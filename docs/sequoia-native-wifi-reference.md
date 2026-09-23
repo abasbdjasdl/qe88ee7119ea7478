@@ -41,12 +41,15 @@ not evidence of Apple's Wi-Fi menu integration.
 | `AirportItlwm/AirportItlwmV2.cpp:181-320` and `AirportItlwmSkywalkInterface.cpp`: Sonoma Skywalk branch | Architecture contrast only | This is a different ABI. Its private `mExpansionData` writes must not be copied into the current Darwin 24.4 driver. |
 | `itlwm` Intel transport/firmware source | None | The RTL8852BE firmware, RFK, PCI interrupts and DMA stay in the present backend. |
 
-The existing `R16NetworkController` derives from `IOEthernetController` and
-contains its hardware state as an owner-bound nested `State`. Changing the
+The existing `R16NetworkController` derives from `IOEthernetController`.
+Its hardware session is now a separate `MacNetworkState` with a durable
+`MacNetworkStateHost` callback table rather than an Ethernet-only nested class.
+The pinned net80211 stack's two link-status calls are redirected through this
+host; the Ethernet host preserves its original current-medium/status calls.
+This is a source-level ownership seam, not a native service: the state still
+needs an IO80211 owner with a safe base start/stop transaction. Changing the
 Info.plist class name or adding a second PCI personality will not turn `en1`
-into an IO80211 station. The native frontend must own the same hardware once,
-with the backend factored out of the Ethernet subclass or moved under a single
-new controller. Existing WPA2 `en1` remains the rollback build.
+into an IO80211 station. Existing WPA2 `en1` remains the rollback build.
 
 For the Ventura target, the minimum adaptation is controller/interface
 publication, Apple80211 scan requests/results/events, association and key/link

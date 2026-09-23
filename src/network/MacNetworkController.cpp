@@ -1129,6 +1129,12 @@ struct MacNetworkState final : MacNetworkBootSink {
         return true;
     }
 };
+// The pinned net80211 source calls this from a two-site, hash-checked source
+// override. Its if_softc already points at this session before ifattach.
+void r16_net80211_link_status(_ifnet *ifp,bool up){
+    auto *state=ifp?static_cast<MacNetworkState*>(ifp->if_softc):nullptr;
+    if(state)state->owner.publishProtocolLink(up);
+}
 bool R16NetworkController::createWorkLoop(){if(!loop_)loop_=IOWorkLoop::workLoop();return loop_!=nullptr;}
 IOWorkLoop *R16NetworkController::getWorkLoop()const{return loop_;}
 IOReturn R16NetworkController::startGated(OSObject *o,void*,void*,void*,void*){
@@ -1154,6 +1160,12 @@ bool R16NetworkController::stateHostLinkStatus(void *controller,UInt32 status){
 }
 IOService *R16NetworkController::stateHostInterface(void *controller){
     return static_cast<R16NetworkController*>(controller)->interface_;
+}
+void R16NetworkController::stateHostProtocolLink(void *controller,bool up){
+    auto *self=static_cast<R16NetworkController*>(controller);
+    if(up)self->setLinkStatus(kIONetworkLinkValid|kIONetworkLinkActive,
+                              self->getCurrentMedium());
+    else self->setLinkStatus(kIONetworkLinkValid);
 }
 void R16NetworkController::stateHostStartup(void *controller,IOService *provider,
                                             unsigned stage,bool failed){
@@ -1186,7 +1198,9 @@ bool R16NetworkController::start(IOService *provider){
         stateHost_.loop_=loop_;stateHost_.gate_=gate_;stateHost_.timer_=timer_;
         stateHost_.pci_=pci_;stateHost_.bar_=bar_;stateHost_.legacyEthernet_=this;
         stateHost_.interface_=stateHostInterface;
-        stateHost_.linkStatus_=stateHostLinkStatus;stateHost_.startup_=stateHostStartup;
+        stateHost_.linkStatus_=stateHostLinkStatus;
+        stateHost_.protocolLink_=stateHostProtocolLink;stateHost_.startup_=stateHostStartup;
+        if(!stateHost_.ready()){delete boot;goto failed;}
         state_=new MacNetworkState(stateHost_,boot);if(!state_){delete boot;goto failed;}
         recordStartup(provider,9);
         if(!boot->allocate(*pci_,*bar_,*loop_))goto failed;

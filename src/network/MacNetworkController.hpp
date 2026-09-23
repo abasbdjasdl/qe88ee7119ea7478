@@ -88,12 +88,20 @@ struct MacNetworkStateHost {
     IOEthernetController *legacyEthernet_{};
     IOService *(*interface_)(void *){};
     bool (*linkStatus_)(void *,UInt32){};
+    void (*protocolLink_)(void *,bool){};
     void (*startup_)(void *,IOService *,unsigned,bool){};
+    bool ready()const{
+        return controller_&&registry_&&loop_&&gate_&&timer_&&pci_&&bar_&&
+               interface_&&linkStatus_&&protocolLink_&&startup_;
+    }
     bool setLinkStatus(UInt32 status)const{
         return linkStatus_&&linkStatus_(controller_,status);
     }
     IOService *interface()const{
         return interface_?interface_(controller_):nullptr;
+    }
+    void publishProtocolLink(bool up)const{
+        if(protocolLink_)protocolLink_(controller_,up);
     }
     void recordStartup(IOService *provider,unsigned stage,bool failed=false)const{
         if(startup_)startup_(controller_,provider,stage,failed);
@@ -110,6 +118,7 @@ class R16NetworkController : public IOEthernetController {
     bool providerOpened_{},providerRetained_{},superStarted_{},retainedFault_{};
     static bool stateHostLinkStatus(void *,UInt32);
     static IOService *stateHostInterface(void *);
+    static void stateHostProtocolLink(void *,bool);
     static void stateHostStartup(void *,IOService *,unsigned,bool);
     IOLock *controlLock_{};
     bool controlStopping_{true};

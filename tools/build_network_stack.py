@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the pinned protocol stack and integrated experimental network kext."""
 import hashlib,json,os,pathlib,plistlib,struct,subprocess,sys
-from network_source_overrides import without_tkip_key_logging
+from network_source_overrides import without_tkip_key_logging,with_session_link_callback
 root=pathlib.Path(__file__).resolve().parents[1]
 source=pathlib.Path(sys.argv[1]).resolve()
 sdk=pathlib.Path(os.environ['MAC_KERNEL_SDK']).resolve()
@@ -22,9 +22,15 @@ for i,p in enumerate(files):
     print('compile',p.relative_to(source),flush=True)
     log=dest/(output.stem+'.diagnostics')
     compiled_source=p
+    override_description=None
     if p.name=='ieee80211_crypto_tkip.c':
         compiled_source=dest/'ieee80211_crypto_tkip-no-key-log.c'
         compiled_source.write_text(without_tkip_key_logging(p.read_text()))
+        override_description='remove two raw TKIP key log calls'
+    elif p.relative_to(source).as_posix()=='itl80211/openbsd/net80211/ieee80211_proto.c':
+        compiled_source=dest/'ieee80211_proto-session-link.c'
+        compiled_source.write_text(with_session_link_callback(p.read_text()))
+        override_description='route two link notifications through session owner'
     result=subprocess.run(['xcrun','clang++',*flags,'-x','c++','-c',str(compiled_source),'-o',str(output)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
     log.write_text(result.stdout)
     if result.returncode:
@@ -32,7 +38,7 @@ for i,p in enumerate(files):
     objects.append(output)
     manifest.append({'path':p.relative_to(source).as_posix(),'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
                      'compiled_source_sha256':hashlib.sha256(compiled_source.read_bytes()).hexdigest(),
-                     'override':'remove two raw TKIP key log calls' if compiled_source!=p else None})
+                     'override':override_description})
 for bridge in sorted((root/'src/network').glob('*.cpp')):
     bridge_obj=dest/(bridge.stem+'.o')
     subprocess.run(['xcrun','clang++',*flags,'-c',str(bridge),'-o',str(bridge_obj)],check=True)
@@ -42,7 +48,7 @@ subprocess.run(['xcrun','ld','-r','-arch','x86_64','-o',str(dest/'NetworkStack-r
 undefined=subprocess.check_output(['xcrun','nm','-uj',str(dest/'NetworkStack-reloc.o')],text=True).splitlines()
 unresolved_protocol=[s for s in undefined if any(x in s for x in ('ieee80211_','HMAC_','pbkdf2_','rijndael','SHA1','SHA256','CTimeout','_fCommandGate','_fWorkloop'))]
 assert not unresolved_protocol, 'Protocol dependency still unresolved: '+repr(unresolved_protocol)
-unresolved_local=[s for s in undefined if any(x in s for x in ('rtl8852be','R16Pci','R16Network','R16RTL8852BE','__ZSt','__ZNSt'))]
+unresolved_local=[s for s in undefined if any(x in s for x in ('rtl8852be','R16Pci','R16Network','R16RTL8852BE','r16_net80211_link_status','__ZSt','__ZNSt'))]
 assert not unresolved_local, 'Native driver dependency still unresolved: '+repr(unresolved_local)
 archive=dest/'libR16Net80211.a'
 subprocess.run(['xcrun','libtool','-static','-o',str(archive),*map(str,objects)],check=True)
@@ -79,7 +85,8 @@ subprocess.run(['xcrun','nm','-uj',str(binary)],stdout=(dest/'kext-undefined-sym
 shutil.make_archive(str(dest/'RTL8852BENetwork-unsigned'), 'gztar',root_dir=dest,base_dir=bundle.name)
 report={'repository':'https://github.com/OpenIntelWireless/itlwm','commit':commit,'sources':manifest,
         'upstream_overrides':{'itl80211/openbsd/net80211/CTimeout.cpp':'src/network/Net80211Timers.cpp',
-                              'itl80211/openbsd/net80211/ieee80211_crypto_tkip.c':'tools/network_source_overrides.py: remove raw key logging only'},
+                              'itl80211/openbsd/net80211/ieee80211_crypto_tkip.c':'tools/network_source_overrides.py: remove raw key logging only',
+                              'itl80211/openbsd/net80211/ieee80211_proto.c':'tools/network_source_overrides.py: route two link notifications to session owner'},
         'local_headers':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((root/'src/network').glob('*.hpp'))},
         'local_includes':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((root/'src/network').glob('*.inc'))},
         'firmware_sha256':info['FirmwareSHA256'],'non_network_headers':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((root/'src').glob('*.hpp'))},
