@@ -66,6 +66,8 @@ jobs:
           python3 tools/native_abi/native_cpu_packet_bridge_test.py --out build/native-contract/cpu-packet-bridge
           python3 tools/native_abi/audit_native_packet_port.py --out build/native-contract/packet-port
           python3 tools/native_abi/audit_native_wcl_event_sender.py --out build/native-contract/wcl-event-sender
+      - name: Resolve native private imports without loading a kext
+        run: python3 tools/native_abi/probe_native_linkability.py MacKernelSDK build/native-contract --out build/native-contract/linkability
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: native-contract-${{ github.sha }}
