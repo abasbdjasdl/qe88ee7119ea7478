@@ -10,6 +10,7 @@
 #include "StationIoCore.hpp"
 #include "WirelessSelection.hpp"
 #include "WirelessStatus.hpp"
+#include "AuthenticationEvents.hpp"
 struct ieee80211com;
 class IOEthernetInterface;
 namespace rtl8852be { namespace network {
@@ -69,6 +70,7 @@ class R16NetworkController : public IOEthernetController {
     static IOReturn outputGated(OSObject*,void*,void*,void*,void*);
     static IOReturn selectionGated(OSObject*,void*,void*,void*,void*);
     static IOReturn wirelessStatusGated(OSObject*,void*,void*,void*,void*);
+    static IOReturn authenticationGated(OSObject*,void*,void*,void*,void*);
     static void timer(OSObject*,IOTimerEventSource*);
     void releaseResources();
     unsigned startupStage_{};
@@ -96,4 +98,5 @@ public:
     IOReturn selectWirelessNetwork(const rtl8852be::network::selection::Join&);
     IOReturn disconnectWirelessNetwork();
     IOReturn copyWirelessStatus(rtl8852be::network::wireless::Snapshot&);
+    IOReturn authenticationEvents(void *client,uint32_t operation,rtl8852be::network::authevents::Event* = nullptr);
 };

@@ -4,6 +4,8 @@
 #include "MacPciRingIo.hpp"
 #include "MacNetworkPhyWait.hpp"
 #include "RxTrace.hpp"
+#include "WirelessControl.hpp"
+#include "AuthenticationBinding.hpp"
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -38,6 +40,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     bool enabled{},faulted{},stopping{},scanDone{},authPending{},probePending{},runPending{},resetPending{};
     bool stateDeferred{};int deferredState{},deferredArgument{};
     selection::Pending pendingSelection;
+    authevents::Queue authenticationEvents;
     uint64_t stateRequests[5]{},runCommitted{},portAuthorizations{},rxBridgeOk{},rxBridgeError{},txPrepareErrors{};
     uint64_t lastStateRequest{},lastRxBridgeError{},lastTxPrepareError{};
     uint64_t rxTypes[4]{},rxHardwareCrypto{},rxSoftwareFallback{},rxEapol{},rxEapolGated{},rxEapolBridge{},lastDeauthReason{};
@@ -46,7 +49,11 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         receivingProtocol=true;++rxDeliveryAttempts;
         RxPacket packet;
         RxTrace metadata;
-        if(decodeRx(data,length,4,packet)==DescriptorStatus::ok)metadata=inspectRx(packet,identity.interface.address.bytes);
+        if(decodeRx(data,length,4,packet)==DescriptorStatus::ok){
+            metadata=inspectRx(packet,identity.interface.address.bytes);
+            if(packet.info.pkt_type==0&&!hardwareDecrypted(packet.info)&&packet.length>=28)
+                authenticationEvents.observe(packet.payload,packet.length-4,channel,now());
+        }
         const auto before=ic.ic_stats;RxDeliveryTrace trace;
         if(metadata.eapol){++rxEapolBridge;
             eapolHeader=uint64_t(packet.payload[0])|(uint64_t(packet.payload[1])<<8)|(uint64_t(packet.payload[22]&15)<<16)|(uint64_t(unsigned(ic.ic_state))<<24);
@@ -83,6 +90,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     bool inGate(){return owner.loop_->inGate();}
     void fail(const char *reason){
         if(faulted)return;faulted=true;traffic=station::Traffic::none;enabled=false;
+        authenticationEvents.disable();
         pendingSelection.clear();
         ic.ic_if.if_flags&=~IFF_RUNNING;
         owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
@@ -145,9 +153,12 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         traffic=station::Traffic::none;phyWait.clear();if(pendingTx.frame)releaseTx(&ic,pendingTx);
         activeAction=r;activePeer=peer;actionInFlight=actionDeferred=true;return true;
     }
-    bool beginAuthentication(station::Token t,const station::Peer&){auth=t;authPending=true;return true;}
+    bool beginAuthentication(station::Token t,const station::Peer &peer){
+        auth=t;authenticationEvents.bind(t.epoch,t.operation,identity.interface.address.bytes,
+            peer.bssid.bytes,peer.channel.primary);authPending=true;return true;
+    }
     bool sendProbe(station::Token,const station::Peer*,const station::ScanChannel&){probePending=true;return true;}
-    bool cancelProtocol(station::Token){authPending=probePending=runPending=false;resetPending=true;return true;}
+    bool cancelProtocol(station::Token){authenticationEvents.invalidate();authPending=probePending=runPending=false;resetPending=true;return true;}
     void scanFinished(station::Token,bool cancelled){if(!cancelled)scanDone=true;}
     void recoveryRequired(station::Token,station::Error){fail("station operation failed; physical firmware reset required");}
     bool firmwareRestartVerified(uint64_t epoch){return prepared&&identity.epoch==epoch&&commands&&commands->epoch()==epoch;}
@@ -393,6 +404,28 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         }
         return kIOReturnSuccess;
     }
+    void bindAuthenticationEventsIfReady(){
+        if(authenticationEvents.needsBinding()&&ic.ic_bss&&ic.ic_bss->ni_chan&&
+           ic.ic_bss->ni_chan!=IEEE80211_CHAN_ANYC&&
+           authevents::currentAssociation(station.state(),station.associationToken(),auth,pendingSelection.waiting())){
+            const auto channel=channelOf(&ic,ic.ic_bss->ni_chan);
+            authenticationEvents.bind(auth.epoch,auth.operation,identity.interface.address.bytes,
+                ic.ic_bss->ni_bssid,channel.primary);
+        }
+    }
+    IOReturn authenticationControl(void *client,uint32_t operation,authevents::Event *out){
+        if(!client)return kIOReturnBadArgument;
+        if(operation==control::captureEnd)
+            return authenticationEvents.disable(client)?kIOReturnSuccess:kIOReturnNotOpen;
+        if(!attached||faulted||stopping||!enabled)return kIOReturnNotReady;
+        if(operation==control::captureRead)
+            return out&&authenticationEvents.read(client,*out)?kIOReturnSuccess:kIOReturnNotOpen;
+        if(operation!=control::captureBegin)return kIOReturnUnsupported;
+        if(authenticationEvents.owned(client))return kIOReturnSuccess;
+        if(!authenticationEvents.enable(client))return kIOReturnExclusiveAccess;
+        bindAuthenticationEventsIfReady();
+        return kIOReturnSuccess;
+    }
     IOReturn queueSelection(const selection::Join *requested){
         if(!attached||!stationStarted||faulted||stopping||!enabled)return kIOReturnNotReady;
         if(requested){
@@ -582,10 +615,11 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(station.state()==station::State::authorized&&(ic.ic_flags&IEEE80211_F_RSNON)&&!ic.ic_bss->ni_port_valid)
             station.revokePort(auth,now());
         if(attached&&timestamp-lastWatchdog>=1000000){lastWatchdog=timestamp;ieee80211_watchdog(&ic.ic_if);}
-        pumpTx();
+        bindAuthenticationEventsIfReady();pumpTx();
         if(!faulted&&owner.timer_->setTimeoutMS(10)!=kIOReturnSuccess)fail("controller timer failed");
     }
     bool shutdown(){
+        authenticationEvents.disable();
         stopping=true;enabled=false;traffic=station::Traffic::none;owner.timer_->cancelTimeout();
         pendingSelection.clear();
         owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);
@@ -707,7 +741,7 @@ IOReturn R16NetworkController::enableGated(OSObject *o,void *on,void*,void*,void
     auto &owner=*static_cast<R16NetworkController*>(o);auto *s=owner.state_;
     if(!s||s->faulted||s->stopping)return kIOReturnNotReady;s->enabled=on!=nullptr;
     if(s->enabled){s->ic.ic_if.if_flags|=IFF_UP|IFF_RUNNING;s->lastWatchdog=s->now();}
-    else{s->pendingSelection.clear();s->ic.ic_if.if_flags&=~(IFF_UP|IFF_RUNNING);s->stateDeferred=true;s->deferredState=IEEE80211_S_INIT;s->deferredArgument=-1;
+    else{s->authenticationEvents.disable();s->pendingSelection.clear();s->ic.ic_if.if_flags&=~(IFF_UP|IFF_RUNNING);s->stateDeferred=true;s->deferredState=IEEE80211_S_INIT;s->deferredArgument=-1;
         if(s->stationStarted)s->station.disconnect(s->now());
         owner.IOEthernetController::setLinkStatus(kIONetworkLinkValid);}
     return kIOReturnSuccess;
@@ -730,6 +764,18 @@ IOReturn R16NetworkController::wirelessStatusGated(OSObject *o,void *output,void
 IOReturn R16NetworkController::copyWirelessStatus(wireless::Snapshot &out){
     memset(&out,0,sizeof(out));
     return runControlAction(wirelessStatusGated,&out);
+}
+namespace {
+struct AuthenticationRequest {void *client;uint32_t operation;authevents::Event *output;};
+}
+IOReturn R16NetworkController::authenticationGated(OSObject *owner,void *arg,void*,void*,void*){
+    const auto &request=*static_cast<AuthenticationRequest*>(arg);
+    auto *state=static_cast<R16NetworkController*>(owner)->state_;
+    return state?state->authenticationControl(request.client,request.operation,request.output):kIOReturnNotReady;
+}
+IOReturn R16NetworkController::authenticationEvents(void *client,uint32_t operation,authevents::Event *output){
+    if(output)memset(output,0,sizeof(*output));
+    AuthenticationRequest request{client,operation,output};return runControlAction(authenticationGated,&request);
 }
 IOReturn R16NetworkController::runControlAction(IOCommandGate::Action action,void *argument){
     // External control callers must not hold the hardware workloop gate: lock

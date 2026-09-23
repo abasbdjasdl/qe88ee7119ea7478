@@ -81,6 +81,13 @@ while [ "$attempt" -lt 40 ] && [ "$(date +%s)" -lt "$end" ]; do
 done
 wait_elapsed=$(($(date +%s)-start))
 end=0
+# When packaged with this test image, exercise the real administrator control
+# endpoint in the same boot. The probe never joins/disconnects or dumps frames.
+if [ -x "$here/r16-wireless-control" ]; then
+ phase probing_wireless_control
+ bounded 10 "$here/r16-wireless-control" probe > "$ram/wireless-control-probe.txt" 2>&1
+ printf 'probe_exit=%s\n' "$?" >> "$ram/wireless-control-probe.txt"
+fi
 phase collecting_final_evidence
 # User authorized this bounded network experiment. HEAD is bound to the verified
 # target; collector independently resolves its owner again before making a request.

@@ -2,13 +2,14 @@
 #pragma once
 #include "WirelessSelection.hpp"
 #include "WirelessStatus.hpp"
+#include "AuthenticationEvents.hpp"
 namespace rtl8852be { namespace network { namespace control {
 // Versioned, pointer-free local x86_64 ABI. No Apple private layouts cross here.
 constexpr uint32_t version=1,connectionType=0x52313601;
 // Keep output below the IOKit in-band structure limit. Larger outputs become
 // memory descriptors; this deliberately bounded v1 endpoint does not map them.
 constexpr uint32_t cacheCapacity=60;
-enum Selector : uint32_t { status=0,join=1,disconnect=2 };
+enum Selector : uint32_t { status=0,join=1,disconnect=2,captureBegin=3,captureEnd=4,captureRead=5 };
 struct Network {
     uint8_t ssid[32],bssid[6],ssidLength,channel,signalPercent,flags;
     uint16_t rsnCapabilities;

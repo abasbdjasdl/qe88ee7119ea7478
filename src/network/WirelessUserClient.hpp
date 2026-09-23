@@ -8,6 +8,7 @@ class R16WirelessUserClient : public IOUserClient {
     R16NetworkController *owner_{};
     IOLock *lock_{};
     bool closed_{};
+    void closeControl();
 public:
     bool initWithTask(task_t,void*,UInt32,OSDictionary*) override;
     bool start(IOService*) override;

@@ -5,7 +5,7 @@
 #include "common/wpa_common.h"
 #include "common/sae.h"
 #include "SaeSession.h"
-struct r16_sae { struct sae_data sae; int h2e,commit_sent,peer_commit,confirm_sent,accepted,failed; };
+struct r16_sae { struct sae_data sae; int h2e,commit_sent,peer_commit,confirm_sent,accepted,failed; u16 peer_confirm; };
 static int fail(struct r16_sae *s){
     if(s){sae_clear_data(&s->sae);s->failed=1;s->accepted=0;}return -1;
 }
@@ -36,14 +36,17 @@ error:r16_sae_destroy(s);return NULL;
 void r16_sae_destroy(struct r16_sae *s){if(s){sae_clear_data(&s->sae);bin_clear_free(s,sizeof(*s));}}
 static int output(struct r16_sae *s,uint8_t *out,size_t capacity,size_t *written,int confirm){
     if(written)*written=0;
-    if(!s||s->failed||!out||!written||s->accepted)return -1;
-    if(confirm?(!s->peer_commit||s->confirm_sent):s->commit_sent)return -1;
+    if(!s||s->failed||!out||!written)return -1;
+    if(confirm?!s->peer_commit:(s->accepted||s->commit_sent))return -1;
     struct wpabuf *b=wpabuf_alloc(confirm?SAE_CONFIRM_MAX_LEN:SAE_COMMIT_MAX_LEN);
     if(!b)return -1;
+    // AP SAE_ACCEPTED replies with 0xffff; otherwise hostap increments the
+    // counter for each newly generated protocol-level Confirm retry.
+    if(confirm&&s->accepted)s->sae.send_confirm=0xffff;
     int error=confirm?sae_write_confirm(&s->sae,b):sae_write_commit(&s->sae,b,NULL,NULL,0);
     if(error||wpabuf_len(b)>capacity){wpabuf_free(b);return fail(s);}
     *written=wpabuf_len(b);os_memcpy(out,wpabuf_head(b),*written);wpabuf_free(b);
-    if(confirm){s->confirm_sent=1;s->sae.state=SAE_CONFIRMED;}
+    if(confirm){s->confirm_sent=1;if(!s->accepted)s->sae.state=SAE_CONFIRMED;}
     else{s->commit_sent=1;s->sae.state=SAE_COMMITTED;}
     return 0;
 }
@@ -60,10 +63,18 @@ int r16_sae_receive_commit(struct r16_sae *s,const uint8_t *data,size_t length){
     s->peer_commit=1;return 0;
 }
 int r16_sae_receive_confirm(struct r16_sae *s,const uint8_t *data,size_t length){
-    if(!s||s->failed||!s->peer_commit||!s->confirm_sent||s->accepted||!data)return -1;
+    if(!s||s->failed||!s->peer_commit||!s->confirm_sent||!data)return -1;
     // Group19/SHA256 initial exchange only; no extra unhandled confirmation IEs.
-    if(length!=34||WPA_GET_LE16(data)==0||WPA_GET_LE16(data)==0xffff||
-       sae_check_confirm(&s->sae,data,length,NULL)||s->sae.pmk_len!=32)return fail(s);
+    // Invalid unauthenticated input cannot revoke an already accepted PMK.
+    // hostap's AP handle_auth_sae() leaves SAE data/rc unchanged on mismatch.
+    if(length!=34||WPA_GET_LE16(data)==0)return s->accepted?-1:fail(s);
+    u16 counter=WPA_GET_LE16(data);
+    // Match hostap's AP accepted-state replay check. A station still waiting
+    // for its first valid peer confirmation may receive the AP's 0xffff reply.
+    if(s->accepted&&(counter<=s->peer_confirm||counter==0xffff))return -1;
+    if(sae_check_confirm(&s->sae,data,length,NULL))return s->accepted?-1:fail(s);
+    if(s->sae.pmk_len!=32)return fail(s);
+    s->peer_confirm=counter;
     s->accepted=1;s->sae.state=SAE_ACCEPTED;return 0;
 }
 int r16_sae_export(struct r16_sae *s,uint8_t pmk[32],uint8_t pmkid[16]){

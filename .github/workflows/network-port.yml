@@ -33,6 +33,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p build/network-stack
+          xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_authentication_events_test.cpp -o build/network_authentication_events_test
+          ./build/network_authentication_events_test | tee build/network-stack/authentication-event-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined tests/network_wireless_control_test.cpp -o build/network_wireless_control_test
           ./build/network_wireless_control_test | tee build/network-stack/wireless-control-tests.txt
           xcrun clang++ -std=c++14 -Wall -Wextra -Werror tools/wireless_control.cpp -framework IOKit -framework CoreFoundation -o build/network-stack/r16-wireless-control

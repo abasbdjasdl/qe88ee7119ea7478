@@ -15,7 +15,12 @@ available. No new package was installed or reboot armed for this work.
   `r16-wireless-control` is the userspace endpoint (binary join input via stdin,
   never passwords or PMKs in argv/logs). This is a real driver control path in
   source, but it is not yet hardware validated or an Apple Wi-Fi registration.
-  It does not yet transport SAE management frames or EAPOL to a daemon.
+  The new exclusive RX observer exposes bounded, session-tagged unencrypted
+  authentication/association/EAPOL copies to an administrator. It preserves the
+  existing protocol owner; it does not add TX, key installation, or a daemon.
+  Overflow invalidates the transcript, disconnect invalidates its generation,
+  and client close/interface shutdown releases ownership. Tests cover late
+  readers during association hardware installation and obsolete tokens.
 
 - Native Apple association requests: open, WPA-Personal and WPA2-Personal with
   explicitly selected CCMP/TKIP, binary SSIDs and optional BSSID. Protected
@@ -28,7 +33,11 @@ available. No new package was installed or reboot armed for this work.
   an erroneous ordinary-SAE AKM selector requirement. Exchange, wrong password,
   modified confirmation and export-before-confirm rejection passed in macOS
   sanitizer run 35796749250. The wrapper deliberately rejects unhandled commit
-  extensions; anti-clogging tokens, retransmissions and timers remain pending.
+  extensions. `SaeExchange` now supplies authentication-body framing, source
+  checks, bounded retries, monotonic deadlines and cancellation for both methods.
+  Confirm retries increment the counter and recompute the authenticator, including
+  the case where an AP has accepted but its response was lost. Anti-clogging
+  tokens and actual management TX/state-machine ownership remain pending.
 - `OweSession` uses hostap's ECDH/hash primitives and RFC 8110 key ordering and
   derivation. Group-19 peer agreement, PMKID, invalid group/length/point/reflection
   rejection passed with SAE in macOS ASan/UBSan run 35796953546. Derived keys
