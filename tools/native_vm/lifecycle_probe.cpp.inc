@@ -13,6 +13,18 @@ class R16VMHarness final : public IOService {
     // must expose the same native queue: its getThread() deliberately returns
     // null in 24.4, so IONetworkController must not apply thread policy to it.
     IOWorkLoop *sharedWorkQueue_{};
+    static bool terminateSupport(IOService *service,const char *name) {
+        if(!service)return false;
+        IOLog("R16VM terminate %s begin inactive=%u attached=%u refs=%u\n",name,
+              unsigned(service->isInactive()),unsigned(service->getProvider()!=nullptr),
+              unsigned(service->getRetainCount()));
+        const bool accepted=service->terminate(kIOServiceSynchronous);
+        const bool detached=service->getProvider()==nullptr;
+        IOLog("R16VM terminate %s returned=%u inactive=%u detached=%u refs=%u\n",name,
+              unsigned(accepted),unsigned(service->isInactive()),unsigned(detached),
+              unsigned(service->getRetainCount()));
+        return accepted&&service->isInactive()&&detached;
+    }
 #endif
 public:
 #ifdef R16_VM_START_PROBE
@@ -23,7 +35,7 @@ public:
         if (!PE_parse_boot_argn("r16vmtest", &enabled, sizeof(enabled)))
             return false;
 #ifdef R16_VM_START_PROBE
-        if(enabled!=1&&enabled!=2)return false;
+        if(enabled!=1&&enabled!=2&&enabled!=3)return false;
 #else
         if(enabled!=1)return false;
 #endif
@@ -42,7 +54,7 @@ public:
         IOLog("R16VM controller init begin\n");
         const bool initialized=controller->init(nullptr);
 #ifdef R16_VM_START_PROBE
-        if(initialized&&enabled==2){
+        if(initialized&&(enabled==2||enabled==3)){
             if(!controller->attach(this)){
                 IOLog("R16VM controller attach failed\n");
                 controller->release();IOService::stop(provider);return false;
@@ -68,6 +80,19 @@ public:
                 IOLog("R16VM base stop begin\n");
                 controller->IO80211Controller::stop(this);
                 IOLog("R16VM base stop returned\n");
+                if(enabled==3){
+                    // Experiment only: enter through IOKit's termination path,
+                    // never manually double-stop/detach a published CC child.
+                    // The ledger keeps every object and the workqueue alive.
+                    // Stop the consumers before pipes; abort on any deferred or
+                    // incomplete result. Other native consumers remain unproved.
+                    bool terminated=terminateSupport(ledger->dataStream,"dataStream");
+                    if(terminated)terminated=terminateSupport(ledger->logStream,"logStream");
+                    if(terminated)terminated=terminateSupport(ledger->dataPipe,"dataPipe");
+                    if(terminated)terminated=terminateSupport(ledger->logPipe,"logPipe");
+                    setProperty("R16VMCCServicesTerminated",terminated);
+                    IOLog("R16VM CC services termination result=%u; references retained\n",unsigned(terminated));
+                }
             }
             // Disposable VM containment only. Partial factory/base rollback is
             // not established. Retain every dependency, including this provider,
