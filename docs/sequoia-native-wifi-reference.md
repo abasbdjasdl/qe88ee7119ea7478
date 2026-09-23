@@ -13,6 +13,26 @@ The source comparison below is pinned to upstream tag `v2.3.0`, commit
 `../itlwm-v2.3-reference` holds that tag. The neighboring
 `../itlwm-reference` checkout is a later 2.4.0 commit and is not the pin.
 
+A closer Realtek frontend reference is
+[`AirPort_RTW88` at `f67f5d3`](https://github.com/xnoah222/Airport_RTW88/tree/f67f5d3c1873519e1b8f85e792ff60c83d10ac3f/src/kext).
+Its `AirportRTW88.hpp/.cpp` implements an `IO80211Controller` on one PCI
+owner, `AirportRTW88Interface.cpp` handles EAPOL through `IO80211Interface`,
+and `AirportRTW88.cpp:589-674,1230-1335,1637-1671` handles Apple80211
+requests, scan results and link events. Its hardware backend is Linux `rtw88`
+for RTL8822BE/CE and RTL8821CE, **not** the `rtw89` RTL8852BE here; no PCI-ID
+addition can substitute for the different firmware/radio/descriptor backend.
+Its README claims macOS 15 operation with a restored legacy IO80211 stack, but
+the pinned source tree lacks the `AirPort_RTW88.kext/Contents/Info.plist`
+required by its `make airport` target, and the published HEAD
+[build run](https://github.com/xnoah222/Airport_RTW88/actions/runs/35444696568)
+failed. Treat its frontend source as a pattern, not as a reproducible binary or
+a tested RTL8852BE driver. In particular, it immediately reports scan success
+from cached results while connected and fills a constant noise value; the
+Realtek port must retain its actual scan completion and typed signal evidence.
+The related [Feixiao `rtw88` project](https://github.com/thegwchr/Feixiao)
+documents its own `rtw88ctl`/Starskiff network selector; its hardware scan is
+not evidence of Apple's Wi-Fi menu integration.
+
 | Reference code | Concrete part to adapt | RTL8852BE work still required |
 | --- | --- | --- |
 | `AirportItlwm/AirportItlwm.cpp:339-434`: controller `start`, `attachInterface`, `registerService` | Native controller/interface publication for the Ventura target | Replace its Intel `fHalService`/PCI owner with one Realtek hardware owner. Do not attach a second driver to `10ec:b852` while `R16NetworkController` owns it. |
