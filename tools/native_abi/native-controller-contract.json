@@ -1,0 +1,23 @@
+{
+  "kernel_sha256": "d8b50fc25bbe4c9f6923a9344ae34e760e1c98b06b23513e4a73e494019865e1",
+  "scope": "Offline controller vtable and undefined-symbol identity against one pinned Darwin 24.4 recovery KC; no construction, lifecycle, kext link/load, radio, or native menu claim.",
+  "class": "R16NativeControllerAudit",
+  "own_nonpure_slots": [399],
+  "startup_getters": [
+    "_r16_startup_work_queue",
+    "_r16_startup_logger",
+    "_r16_startup_fault_wrapper"
+  ],
+  "extra_kc_imports": {
+    "__ZN17IO80211ControllerD2Ev": {
+      "component": "com.apple.iokit.IO80211Family",
+      "address": "0xffffff800221d080"
+    },
+    "__ZN8OSObjectdlEPvm": {
+      "component": "com.apple.kernel",
+      "address": "0xffffff8000a49e00"
+    }
+  },
+  "raw_table_entries": 466,
+  "pure_override_count": 12
+}

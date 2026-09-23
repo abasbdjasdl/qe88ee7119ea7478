@@ -50,6 +50,20 @@ python3 tests/network_native_sequoia_audit_test.py
 
 On Windows, add `--zig /absolute/path/to/zig.exe`. On macOS the builder uses
 `xcrun clang++`. CI places the output under `build/native-contract/sequoia`.
+
+The first concrete IO80211Controller callback shape is checked separately by
+`audit_native_controller.py`. After generating the overlay above, run:
+
+```sh
+python tools/native_abi/audit_native_controller.py ../itlwm-reference ../MacKernelSDK \
+  build/native-sequoia-contract
+```
+
+On Windows, pass `--zig` as above. If the exact recovery Boot KC and matching
+`components.json` are available, pass `--kc /path/to/BootKernelExtensions.kc`
+to also confirm the controller destructor and OSObject delete imports against
+their owning KC components. This emits only Mach-O objects and an audit report;
+the controller's constructor is deleted. See `native-controller-evidence.md`.
 Old object/success files are invalidated before compilation; failures stop the
 builder. Metadata binds the manifest, builder, source, generated headers and
 object hashes. Negative checks swap two pure callbacks, alter a class owner,

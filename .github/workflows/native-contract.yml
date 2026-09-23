@@ -61,6 +61,7 @@ jobs:
           python3 tools/build_native_sequoia.py build-itlwm MacKernelSDK --out build/native-contract/sequoia
           python3 tests/network_native_sequoia_audit_test.py build/native-contract/sequoia
           python3 tools/native_abi/audit_startup_prototype.py build-itlwm MacKernelSDK build/native-contract/sequoia --out build/native-contract/startup
+          python3 tools/native_abi/audit_native_controller.py build-itlwm MacKernelSDK build/native-contract/sequoia --out build/native-contract/controller
           python3 tools/native_abi/audit_infra_frontend.py build-itlwm MacKernelSDK build/native-contract/sequoia --out build/native-contract/infra
           python3 tools/native_abi/native_cpu_packet_bridge_test.py --out build/native-contract/cpu-packet-bridge
           python3 tools/native_abi/audit_native_packet_port.py --out build/native-contract/packet-port
