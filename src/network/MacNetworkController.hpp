@@ -15,6 +15,7 @@
 #include "NativeForegroundScan.hpp"
 struct ieee80211com;
 class IOEthernetInterface;
+class IONetworkInterface;
 namespace rtl8852be { namespace network {
 namespace nativewclresults {struct Frame;}
 // Pointer/key-free observation of the most recent successfully applied link
@@ -73,13 +74,42 @@ public:
     virtual bool stop()=0;
     virtual ~MacNetworkBootService()=default;
 };
+// The hardware session sees one durable owner, without depending on whether
+// that owner publishes an Ethernet or an IO80211 interface. Callbacks execute
+// on the owner's existing gate; this does not create a second PCI claimant.
+struct MacNetworkStateHost {
+    void *controller_{};
+    IOService *registry_{};
+    IOWorkLoop *loop_{};
+    IOCommandGate *gate_{};
+    IOTimerEventSource *timer_{};
+    IOPCIDevice *pci_{};
+    IOMemoryMap *bar_{};
+    IOService *(*interface_)(void *){};
+    bool (*linkStatus_)(void *,UInt32){};
+    void (*startup_)(void *,IOService *,unsigned,bool){};
+    bool setLinkStatus(UInt32 status)const{
+        return linkStatus_&&linkStatus_(controller_,status);
+    }
+    IOService *interface()const{
+        return interface_?interface_(controller_):nullptr;
+    }
+    void recordStartup(IOService *provider,unsigned stage,bool failed=false)const{
+        if(startup_)startup_(controller_,provider,stage,failed);
+    }
+};
 } }
+struct MacNetworkState;
 class R16NetworkController : public IOEthernetController {
     OSDeclareDefaultStructors(R16NetworkController)
-    struct State; State *state_{};
+    rtl8852be::network::MacNetworkStateHost stateHost_{};
+    MacNetworkState *state_{};
     IOWorkLoop *loop_{};IOCommandGate *gate_{};IOTimerEventSource *timer_{};
     IOPCIDevice *pci_{};IOMemoryMap *bar_{};IOEthernetInterface *interface_{};
     bool providerOpened_{},providerRetained_{},superStarted_{},retainedFault_{};
+    static bool stateHostLinkStatus(void *,UInt32);
+    static IOService *stateHostInterface(void *);
+    static void stateHostStartup(void *,IOService *,unsigned,bool);
     IOLock *controlLock_{};
     bool controlStopping_{true};
     IOReturn runControlAction(IOCommandGate::Action,void* = nullptr);

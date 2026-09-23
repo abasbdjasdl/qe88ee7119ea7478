@@ -30,9 +30,9 @@ using namespace rtl8852be::network;
 // Pinned net80211 output.c helper: consumes mbuf; caller supplies node reference.
 int ieee80211_mgmt_output(struct _ifnet*,struct ieee80211_node*,mbuf_t,int);
 OSDefineMetaClassAndStructors(R16NetworkController,IOEthernetController)
-struct R16NetworkController::State final : MacNetworkBootSink {
+struct MacNetworkState final : MacNetworkBootSink {
     struct ProbeOps {
-        using Node=ieee80211_node;State &s;
+        using Node=ieee80211_node;MacNetworkState &s;
         Node *createNode(uint8_t number,const uint8_t *rates,size_t count){
             if(!s.ic.ic_node_alloc||!s.ic.ic_node_free||count>IEEE80211_RATE_MAXSIZE)return nullptr;
             auto *node=s.ic.ic_node_alloc(&s.ic);if(!node)return nullptr;
@@ -72,7 +72,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
                 reinterpret_cast<Node*>(mbuf_pkthdr_rcvif(head))==node;
         }
     };
-    R16NetworkController &owner; MacNetworkBootService *boot{};
+    MacNetworkStateHost &owner; MacNetworkBootService *boot{};
     MacBootIdentity identity{}; ieee80211com ic{}; Net80211Runtime protocol;
     MacPciRuntimeIo runtimeIo; MacPciRingIo ringIo;
     R16PciInterrupts::Runtime runtime; R16PciInterrupts *interrupt{};
@@ -81,7 +81,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     NativeQueueService *queues{}; MacCommandTransport *transport{};
     NativeFirmwareCommands *commands{}; MacFirmwareEventBinding *events{};
     Net80211PciQueue *completion[13]{}; PciRxAssembly rxAssembly,rpAssembly;MacNetworkPhyWait phyWait;
-    station::Controller<State> station;
+    station::Controller<MacNetworkState> station;
     station::Traffic traffic{station::Traffic::none};station::Token auth{};
     int (*savedState)(ieee80211com*,enum ieee80211_state,int){};
     void (*savedEvent)(ieee80211com*,int,void*){};
@@ -162,13 +162,13 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     station::ActionRequest activeAction{};MacProtocolPeer activePeer{};uint64_t lastWatchdog{};
     struct ActionCompletion {station::Token token;station::Action action;bool success;};
     ActionCompletion completed[16]{};unsigned completedCount{};
-    State(R16NetworkController &o,MacNetworkBootService *b):owner(o),boot(b),
+    MacNetworkState(MacNetworkStateHost &o,MacNetworkBootService *b):owner(o),boot(b),
         runtimeIo(o.pci_,o.bar_),ringIo(o.pci_,o.bar_),runtime(runtimeIo),station(*this){
         for(unsigned i=0;i<6;++i)txPointers[i]=&tx[i];
         // Observation allocation failure must not alter existing connectivity.
         scanObservations=new nativescan::Observer;
     }
-    ~State(){delete wclResults;delete scanObservations;delete events;delete boot;delete commands;delete transport;delete queues;}
+    ~MacNetworkState(){delete wclResults;delete scanObservations;delete events;delete boot;delete commands;delete transport;delete queues;}
     uint64_t now(){return runtimeIo.nowUs();}
     bool inGate(){return owner.loop_->inGate();}
     void abortWclDraft(){
@@ -192,7 +192,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         pendingSelection.clear();
         ic.ic_if.if_flags&=~IFF_RUNNING;
         owner.setLinkStatus(kIONetworkLinkValid);
-        publishStatus();owner.setProperty("R16Failure",reason);IOLog("RTL8852BE network: %s\n",reason);
+        publishStatus();owner.registry_->setProperty("R16Failure",reason);IOLog("RTL8852BE network: %s\n",reason);
         // No reclamation from a receive/ACK callback. stop() later proves idle.
         if(interrupt)interrupt->stop();else if(runtimeAttempted)runtime.stop();
     }
@@ -219,7 +219,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         return true;
     }
     static bool stationAck(void *p,const FirmwareEvent &event,uint64_t epoch,uint64_t){
-        auto &s=*static_cast<State*>(p);
+        auto &s=*static_cast<MacNetworkState*>(p);
         return !s.stopping&&!s.faulted&&s.station.firmwareEvent(event,epoch,s.now());
     }
     bool reserveH2cSequence(uint8_t &sequence){
@@ -299,8 +299,8 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     }
     void recoveryRequired(station::Token,station::Error){fail("station operation failed; physical firmware reset required");}
     bool firmwareRestartVerified(uint64_t epoch){return prepared&&identity.epoch==epoch&&commands&&commands->epoch()==epoch;}
-    static State *from(ieee80211com *ic){return static_cast<State*>(ic->ic_if.if_softc);}
-    static void output(_ifnet *ifp){auto *s=static_cast<State*>(ifp->if_softc);if(s)s->pumpTx();}
+    static MacNetworkState *from(ieee80211com *ic){return static_cast<MacNetworkState*>(ic->ic_if.if_softc);}
+    static void output(_ifnet *ifp){auto *s=static_cast<MacNetworkState*>(ifp->if_softc);if(s)s->pumpTx();}
     static int ioctl(_ifnet *ifp,u_long command,caddr_t data){return ieee80211_ioctl(ifp,command,data);}
     static channel::Channel channelOf(ieee80211com *ic,const ieee80211_channel *c){
         const auto n=ieee80211_chan2ieee(ic,c);
@@ -450,9 +450,9 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         }
         outputPumping=false;
     }
-    static int notification(void *p,const FirmwareEvent &event){return static_cast<State*>(p)->boot->notification(event);}
+    static int notification(void *p,const FirmwareEvent &event){return static_cast<MacNetworkState*>(p)->boot->notification(event);}
     static bool receiveData(void *p,const uint8_t *data,size_t length){
-        auto &s=*static_cast<State*>(p);if(s.faulted||s.stopping)return false;
+        auto &s=*static_cast<MacNetworkState*>(p);if(s.faulted||s.stopping)return false;
         AssembledRx frame;const auto status=s.rxAssembly.feed(data,length,frame);
         if(status!=AssemblyStatus::complete)return true;
         ++s.rxComplete;
@@ -463,9 +463,9 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             if(frame.packet.info.hw_dec&&frame.packet.info.sw_dec)++s.rxSoftwareFallback;
             if(trace.deauth)s.lastDeauthReason=trace.deauthReason;
             if(trace.eapol){++s.rxEapol;
-                if(!s.attached||!s.owner.interface_||!s.enabled||s.actionInFlight)++s.rxEapolGated;}
+                if(!s.attached||!s.owner.interface()||!s.enabled||s.actionInFlight)++s.rxEapolGated;}
         }
-        if(frame.packet.info.pkt_type==0){++s.rxWireless;if(!s.attached||!s.owner.interface_||!s.enabled||s.actionInFlight)++s.rxGated;}
+        if(frame.packet.info.pkt_type==0){++s.rxWireless;if(!s.attached||!s.owner.interface()||!s.enabled||s.actionInFlight)++s.rxGated;}
         if(frame.packet.info.pkt_type==1)++s.rxPhy;
         if(frame.packet.info.pkt_type==10){
             FirmwareEvent event;if(!decodeC2h(frame.packet.payload,frame.packet.length,event))return true;
@@ -474,7 +474,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if(frame.packet.info.pkt_type==1){
             stationio::PhySample report{};const bool validReport=stationio::phySample(frame.packet,report);
             s.boot->phyReport(frame.packet);
-            if(validReport&&s.attached&&s.owner.interface_&&s.enabled&&!s.actionInFlight){
+            if(validReport&&s.attached&&s.owner.interface()&&s.enabled&&!s.actionInFlight){
                 uint8_t channel=0;int rssi=0;
                 if(s.boot->rxInfo(channel,rssi)&&(!report.channelKnown||report.channel==channel)){
                     const auto *pending=s.phyWait.take(frame.packet.info.ppdu_cnt,frame.packet.info.data_rate,s.now());
@@ -483,7 +483,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
             }
             return !s.faulted;
         }
-        if(frame.packet.info.pkt_type==0&&s.attached&&s.owner.interface_&&s.enabled&&!s.actionInFlight){
+        if(frame.packet.info.pkt_type==0&&s.attached&&s.owner.interface()&&s.enabled&&!s.actionInFlight){
             uint8_t channel=0;int rssi=0;
             if(s.boot->rxInfo(channel,rssi)){
                 s.deliver(frame.data,frame.bytes,channel,rssi);
@@ -492,13 +492,13 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         return !s.faulted;
     }
     static bool receiveReports(void *p,const uint8_t *data,size_t length){
-        auto &s=*static_cast<State*>(p);return receiveRpq(s.rpAssembly,data,length,s.completion)==0;
+        auto &s=*static_cast<MacNetworkState*>(p);return receiveRpq(s.rpAssembly,data,length,s.completion)==0;
     }
     static R16PciInterrupts::ServiceResult interruptService(void *p,const InterruptStatus &causes){
-        auto &s=*static_cast<State*>(p);auto result=serviceNativeQueues(s.queues,causes);
+        auto &s=*static_cast<MacNetworkState*>(p);auto result=serviceNativeQueues(s.queues,causes);
         if(result!=R16PciInterrupts::ServiceResult::fault)s.pumpTx();return result;
     }
-    static void interruptFault(void *p,const InterruptStatus&){static_cast<State*>(p)->fail("PCI interrupt or DMA service fault");}
+    static void interruptFault(void *p,const InterruptStatus&){static_cast<MacNetworkState*>(p)->fail("PCI interrupt or DMA service fault");}
     bool attachProtocol(){
         if(protocol.bind(owner.loop_,owner.gate_)!=kIOReturnSuccess)return false;bound=true;
         if(!station::unicast(identity.interface.address)||!identity.epoch||!identity.channelCount||identity.channelCount>64)return false;
@@ -542,14 +542,14 @@ struct R16NetworkController::State final : MacNetworkBootSink {
     bool loadCredentials(){
         // Existing WPA2-CCMP startup remains the default; optional settings never
         // widen the negotiated protocol/cipher set or silently fall back.
-        auto *ssid=OSDynamicCast(OSData,owner.getProperty("R16SSID"));
+        auto *ssid=OSDynamicCast(OSData,owner.registry_->getProperty("R16SSID"));
         if(!ssid)return true;
         if(!ssid->getLength()||ssid->getLength()>32)return false;
         selection::Join selected;selected.ssidLength=ssid->getLength();
         memcpy(selected.ssid,ssid->getBytesNoCopy(),selected.ssidLength);
-        auto *psk=OSDynamicCast(OSData,owner.getProperty("R16PSK"));
+        auto *psk=OSDynamicCast(OSData,owner.registry_->getProperty("R16PSK"));
         selected.security=psk?selection::Security::wpa2Psk:selection::Security::open;
-        auto *modeObject=owner.getProperty("R16Security");
+        auto *modeObject=owner.registry_->getProperty("R16Security");
         auto *mode=OSDynamicCast(OSString,modeObject);
         if(modeObject&&!mode)return false;
         if(mode){
@@ -561,7 +561,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         if((selected.security==selection::Security::open&&psk)||
            (selected.security!=selection::Security::open&&(!psk||psk->getLength()!=32)))return false;
         auto parseCipher=[&](const char *key,selection::Cipher &out){
-            auto *object=owner.getProperty(key);if(!object)return true;
+            auto *object=owner.registry_->getProperty(key);if(!object)return true;
             auto *text=OSDynamicCast(OSString,object);if(!text)return false;
             if(text->isEqualTo("ccmp")){out=selection::Cipher::ccmp;return true;}
             if(text->isEqualTo("tkip")){out=selection::Cipher::tkip;return true;}
@@ -1040,7 +1040,7 @@ struct R16NetworkController::State final : MacNetworkBootSink {
         owner.pci_->setProperty("R16LiveTraffic",uint64_t(unsigned(traffic)),64);
         owner.pci_->setProperty("R16LiveAction",uint64_t(unsigned(activeAction.action)),64);
         owner.pci_->setProperty("R16LiveActionPending",uint64_t(actionInFlight),64);
-        owner.pci_->setProperty("R16LiveBsdNamed",uint64_t(owner.interface_&&owner.interface_->getProperty("BSD Name")),64);
+        owner.pci_->setProperty("R16LiveBsdNamed",uint64_t(owner.interface()&&owner.interface()->getProperty("BSD Name")),64);
     }
     void poll(){
         if(stopping||faulted)return;
@@ -1149,6 +1149,16 @@ void R16NetworkController::recordStartup(IOService *provider,unsigned stage,bool
     }
     IOLog("RTL8852BE startup stage=%u failed=%u\n",stage,unsigned(failed));
 }
+bool R16NetworkController::stateHostLinkStatus(void *controller,UInt32 status){
+    return static_cast<R16NetworkController*>(controller)->setLinkStatus(status);
+}
+IOService *R16NetworkController::stateHostInterface(void *controller){
+    return static_cast<R16NetworkController*>(controller)->interface_;
+}
+void R16NetworkController::stateHostStartup(void *controller,IOService *provider,
+                                            unsigned stage,bool failed){
+    static_cast<R16NetworkController*>(controller)->recordStartup(provider,stage,failed);
+}
 bool R16NetworkController::start(IOService *provider){
     recordStartup(provider,1);
     if(!IOEthernetController::start(provider)){recordStartup(provider,1,true);return false;}superStarted_=true;
@@ -1172,7 +1182,11 @@ bool R16NetworkController::start(IOService *provider){
         recordStartup(provider,7);
         auto *boot=createBootService();if(!boot){setProperty("R16Failure","concrete boot service missing");goto failed;}
         recordStartup(provider,8);
-        state_=new State(*this,boot);if(!state_){delete boot;goto failed;}
+        stateHost_.controller_=this;stateHost_.registry_=this;
+        stateHost_.loop_=loop_;stateHost_.gate_=gate_;stateHost_.timer_=timer_;
+        stateHost_.pci_=pci_;stateHost_.bar_=bar_;stateHost_.interface_=stateHostInterface;
+        stateHost_.linkStatus_=stateHostLinkStatus;stateHost_.startup_=stateHostStartup;
+        state_=new MacNetworkState(stateHost_,boot);if(!state_){delete boot;goto failed;}
         recordStartup(provider,9);
         if(!boot->allocate(*pci_,*bar_,*loop_))goto failed;
         for(unsigned i=0;i<6;++i){recordStartup(provider,10+i);if(!state_->tx[i].allocate(pci_,loop_))goto failed;}
