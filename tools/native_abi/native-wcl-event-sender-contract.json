@@ -1,0 +1,16 @@
+{
+  "kernel_sha256": "d8b50fc25bbe4c9f6923a9344ae34e760e1c98b06b23513e4a73e494019865e1",
+  "scope": "Compile-only PostOffice direct-call ABI and payload-bound probe; no live sender, queue drain, Glue lifecycle, link/load or native menu",
+  "symbols": {
+    "__ZN17IO80211PostOffice8sendMailEP23IO80211SkywalkInterfacejPvmb": "0xffffff80022ac922"
+  },
+  "path": {
+    "__ZN17IO80211Controller11postMessageEP23IO80211SkywalkInterfacejPvmb": "0xffffff8002225d6c",
+    "__ZN17IO80211PostOffice14outForDeliveryEv": "0xffffff80022aca6a",
+    "__ZN21IO80211InfraInterface11postMessageEjPvmb": "0xffffff80022cf72a",
+    "__ZN11IO80211Glue15routeEventToWclEjPvm": "0xffffff8002125ece",
+    "__ZN11IO80211Glue22addEventToPendingQueueEjPvm": "0xffffff8002125db0",
+    "__ZN14WCLScanManager22ScanResultEventHandlerER20bulletinBoardMessage": "0xffffff800213175e",
+    "__ZN14WCLScanManager20scanDoneEventHandlerER20bulletinBoardMessage": "0xffffff80021317fe"
+  }
+}
