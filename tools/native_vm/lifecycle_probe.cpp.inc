@@ -15,6 +15,15 @@ class R16VMHarness final : public IOService {
     IOSkywalkTxSubmissionQueue *txSubmission_{};
     IOSkywalkTxCompletionQueue *txCompletion_{};
     IOSkywalkRxCompletionQueue *rxCompletion_{};
+    struct alignas(8) RegistrationProbe {
+        unsigned long long before{0x71616e6765723136ULL};
+        IOSkywalkEthernetInterface::RegistrationInfo info{};
+        unsigned long long after{0x6166746572313631ULL};
+    } registration_;
+    static unsigned descriptorWord(const void *buffer,unsigned offset){
+        const auto *p=static_cast<const unsigned char*>(buffer)+offset;
+        return unsigned(p[0])|(unsigned(p[1])<<8)|(unsigned(p[2])<<16)|(unsigned(p[3])<<24);
+    }
     // Factory tests do not enable queues or bind a radio session. Refuse all
     // traffic without consuming packets or writing unowned completion slots.
     // Invocation is unexpected and is diagnostic evidence, not a successful TX.
@@ -65,7 +74,7 @@ public:
             return false;
 #ifdef R16_VM_START_PROBE
 #ifdef R16_VM_INFRA_PROBE
-        if(enabled<1||enabled>8)return false;
+        if(enabled<1||enabled>9)return false;
 #else
         if(enabled<1||enabled>4)return false;
 #endif
@@ -143,7 +152,7 @@ public:
                             IOLog("R16VM RX pool result=%u\n",unsigned(rxPool_!=nullptr));
                         }
                         setProperty("R16VMPoolsCreated",txPool_&&rxPool_);
-                        if(txPool_&&rxPool_&&enabled==8){
+                        if(txPool_&&rxPool_&&enabled>=8){
                             IOLog("R16VM TX submission factory begin\n");
                             txSubmission_=IOSkywalkTxSubmissionQueue::withPool(txPool_,16,0,this,closedTx,this,0);
                             IOLog("R16VM TX submission result=%u\n",unsigned(txSubmission_!=nullptr));
@@ -159,6 +168,20 @@ public:
                             }
                             setProperty("R16VMQueuesCreated",txSubmission_&&txCompletion_&&rxCompletion_);
                             IOLog("R16VM queue factory experiment finished; queues disabled, no packet transfer\n");
+                            if(txSubmission_&&txCompletion_&&rxCompletion_&&enabled==9){
+                                IOLog("R16VM registration description init begin\n");
+                                const bool infoReady=station->initRegistrationInfo(&registration_.info,1,sizeof(registration_.info));
+                                const bool bounds=registration_.before==0x71616e6765723136ULL&&registration_.after==0x6166746572313631ULL;
+                                const unsigned version=descriptorWord(&registration_.info,0);
+                                const unsigned size=descriptorWord(&registration_.info,4);
+                                IOLog("R16VM registration description result=%u bounds=%u version=%u size=%u family=%u subfamily=%u mtu=%u\n",
+                                    unsigned(infoReady),unsigned(bounds),version,size,
+                                    descriptorWord(&registration_.info,8),descriptorWord(&registration_.info,12),
+                                    descriptorWord(&registration_.info,0x48));
+                                setProperty("R16VMRegistrationDescriptionReady",infoReady&&bounds&&version==1&&size==0x130);
+                                // No registration with an unset hardware address or
+                                // unbound traffic callbacks. Preserve native defaults.
+                            }
                         }
                     }
                     // Keep even partially initialized station and all providers

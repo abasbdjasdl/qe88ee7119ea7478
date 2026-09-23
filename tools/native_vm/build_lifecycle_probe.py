@@ -149,14 +149,14 @@ extern "C" IO80211FaultReporter *r16_startup_fault_wrapper(const StartupLedger *
     report['infra_probe']=args.infra_probe
     if args.infra_probe:
         helper_spec=json.loads((ROOT/'tools/native_abi/registration-symbols.json').read_text())
-        required_names={'poolWithName','txSimpleWithPool','rxSimpleWithPool','txCompletionWithPool'}
+        required_names={'poolWithName','txSimpleWithPool','rxSimpleWithPool','txCompletionWithPool','initRegistrationInfo'}
         recorded={h['name'] for h in helper_spec['helpers']}
         if not required_names<=recorded:
             raise RuntimeError(('Missing factory contract records',sorted(required_names-recorded)))
         required={h['symbol'] for h in helper_spec['helpers'] if h['name'] in required_names}
         imports=set(audit.object_undefined(objects[0]))
-        if len(required)!=4:
-            raise RuntimeError('Native factory contract records must identify four distinct symbols')
+        if len(required)!=len(required_names):
+            raise RuntimeError('Native helper contract records must identify distinct symbols')
         if not required<=imports:
             raise RuntimeError(('Missing exact native factory references',sorted(required-imports)))
         report['native_factory_imports']=sorted(required)

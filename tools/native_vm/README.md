@@ -283,3 +283,19 @@ factory prevents later calls. No queue is enabled, registered or released.
 Closed diagnostic callbacks consume/produce zero packets and log unexpected
 invocation. They are deliberately not a functional radio data path and must
 be replaced by the existing packet/session bridge before network testing.
+
+Stage 8 ran with `cb720ae`, run `35841133340`, artifact `10741750113`.
+All three real queue factories returned non-null after both pools and the
+role-1 interface started. `queue-creation.log/json` preserve the binary/log
+hashes and bounded result. Queues were not enabled or registered and no
+packet callback or transfer was verified. The previous run `35840940557`
+failed because its committed contract lacked the locally audited TX completion
+entry; that build input was added, without weakening symbol checks.
+
+Stage 9 calls the real `initRegistrationInfo` only after all queues exist.
+The 0x130-byte descriptor is aligned owner storage, bounded by two canaries.
+It logs the returned Boolean, canary integrity, version/size and native
+family/subfamily/MTU defaults. No private interface offsets are written and
+no default capability values are replaced with Broadcom-specific constants.
+It does not call registerInfraEthernetInterface: self-MAC initialization and
+functional callback binding remain prerequisites of usable registration.
